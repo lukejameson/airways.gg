@@ -10,6 +10,7 @@ COPY package*.json ./
 COPY packages/database/package*.json ./packages/database/
 COPY apps/aurigny-scraper/package*.json ./apps/aurigny-scraper/
 
+# Install dependencies - puppeteer-real-browser will download its patched Chrome
 RUN npm install
 
 COPY packages/database/ ./packages/database/
@@ -21,21 +22,17 @@ RUN npm run build
 WORKDIR /app/apps/aurigny-scraper
 RUN npm run build
 
-# Runtime stage — needs Chromium for puppeteer-real-browser
+# Runtime stage
 FROM node:20-slim
 
-# Install Chromium, Xvfb and dependencies with realistic fonts for fingerprint evasion
+# Install Xvfb and browser dependencies (but NOT system Chromium)
 RUN apt-get update && apt-get install -y \
-    chromium \
     xvfb \
     gosu \
     fonts-liberation \
     fonts-noto-color-emoji \
-    fonts-noto-cjk \
     fonts-dejavu-core \
     fonts-freefont-ttf \
-    fonts-arphic-ukai \
-    fonts-arphic-uming \
     libxss1 \
     libnss3 \
     libatk1.0-0 \
@@ -52,13 +49,17 @@ RUN apt-get update && apt-get install -y \
     libpango-1.0-0 \
     libcairo2 \
     dbus \
+    libx11-xcb1 \
+    libxcb-dri3-0 \
+    libdrm2 \
+    libxkbcommon0 \
+    libglu1-mesa \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
-    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
-    DISPLAY=:99
+    DISPLAY=:99 \
+    HOME=/home/scraper
 
 WORKDIR /app
 
@@ -67,12 +68,16 @@ COPY --from=builder /app/apps/aurigny-scraper/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/database ./packages/database
 
+# Copy puppeteer's downloaded Chrome from builder's cache
+COPY --from=builder /root/.cache/puppeteer /root/.cache/puppeteer
+
 # Create user with a home directory so Chromium can write profile/cache files.
-# Add to video group so Xvfb can create a virtual display, chmod /tmp so
-# Xvfb can write its X lock files.
 RUN groupadd -r scraper && useradd -r -g scraper -m -d /home/scraper scraper \
     && usermod -aG video scraper \
-    && chmod 1777 /tmp
+    && chmod 1777 /tmp \
+    && mkdir -p /home/scraper/.cache \
+    && cp -r /root/.cache/puppeteer /home/scraper/.cache/ \
+    && chown -R scraper:scraper /home/scraper/.cache
 
 COPY apps/aurigny-scraper/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

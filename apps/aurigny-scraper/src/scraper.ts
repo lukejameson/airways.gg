@@ -248,8 +248,7 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
 
       // In Docker, chrome-launcher won't find /usr/bin/chromium automatically —
       // pass it explicitly via customConfig so it doesn't fall back to a missing binary.
-      const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-      console.log('[Aurigny] Launching browser...', { chromePath, display: process.env.DISPLAY });
+      console.log('[Aurigny] Launching browser...');
       
       const { browser: b, page } = await connect({
         headless: false,
@@ -259,12 +258,32 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
-          '--disable-infobars',
-          '--disable-blink-features=AutomationControlled',
           '--window-size=1920,1080',
+          '--use-gl=swiftshader',
+          '--use-angle=swiftshader',
         ],
-        customConfig: chromePath ? { chromePath } : {},
       });
+      
+      // Spoof WebGL and GPU properties
+      await page.evaluateOnNewDocument(`
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter) {
+          if (parameter === 37445) return 'Intel Inc.';
+          if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+          return getParameter.call(this, parameter);
+        };
+        if (typeof WebGL2RenderingContext !== 'undefined') {
+          const getParameter2 = WebGL2RenderingContext.prototype.getParameter;
+          WebGL2RenderingContext.prototype.getParameter = function(parameter) {
+            if (parameter === 37445) return 'Intel Inc.';
+            if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+            return getParameter2.call(this, parameter);
+          };
+        }
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+      `);
       
       console.log('[Aurigny] Browser launched successfully');
       browser = b;
@@ -316,21 +335,22 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
         const currentUrl: string = page.url();
         console.log(`[Aurigny] responses: ${responseCount}, url: ${currentUrl.substring(0, 70)}, dep: ${departuresData !== null}`);
 
-        // Debug: log page title and check for Cloudflare
-        if (responseCount < 30) {
-          const title = await page.title().catch(() => '');
-          const cfChallenge = await page.$('iframe[src*="challenges.cloudflare.com"], .cf-challenge, #challenge-form').catch(() => null);
-          const bodyText = await page.evaluate('document.body?.innerText?.substring(0, 200) || ""').catch(() => '');
-          console.log(`[Aurigny] title: "${title}", cfChallenge: ${!!cfChallenge}, body: "${String(bodyText).substring(0, 100)}..."`);
+        // Check if stuck on Cloudflare challenge
+        const title = await page.title().catch(() => '');
+        if (title.includes('Just a moment')) {
+          console.log('[Aurigny] Waiting for Cloudflare challenge to complete...');
+          // Give Turnstile more time - it can take 30-60s
+          await randomDelay(10000, 15000);
+          continue;
         }
 
         // Detect stalled state: responses stopped incrementing and still no data
         if (responseCount === lastResponseCount) {
-          if (Date.now() - staleSince > 15000 && !reloadAttempted) {
+          if (Date.now() - staleSince > 20000 && !reloadAttempted) {
             console.log('[Aurigny] Response count stalled — reloading page to trigger SPA...');
             reloadAttempted = true;
             page.reload({ waitUntil: 'load', timeout: 30000 }).catch(() => {});
-            staleSince = Date.now(); // reset stale timer after reload
+            staleSince = Date.now();
           }
         } else {
           lastResponseCount = responseCount;
