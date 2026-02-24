@@ -1,5 +1,12 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { config } from 'dotenv';
+import { resolve } from 'path';
+
+// Load the monorepo root .env before Vite/SvelteKit snapshot process.env into
+// $env/dynamic/private. Without this, PUBLIC_BUY_ME_A_COFFEE_URL and other vars
+// defined in the root .env are invisible to layout server loads in dev.
+config({ path: resolve(process.cwd(), '../../.env') });
 
 export default defineConfig({
   plugins: [sveltekit()],

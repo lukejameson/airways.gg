@@ -28,6 +28,7 @@ WORKDIR /app
 
 # Copy only the built SvelteKit output (adapter-node produces a self-contained build/)
 COPY --from=builder /app/apps/web/build ./build
+COPY --from=builder /app/apps/web/preload-env.js ./
 COPY --from=builder /app/apps/web/package*.json ./
 
 # SvelteKit adapter-node bundles everything; only need prod deps for any external runtime deps
@@ -35,4 +36,4 @@ RUN npm ci --omit=dev
 
 EXPOSE 3000
 ENV NODE_ENV=production
-CMD ["node", "build"]
+CMD ["node", "--import", "./preload-env.js", "build"]
