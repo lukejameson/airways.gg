@@ -48,8 +48,7 @@ WORKDIR /app
 
 COPY --from=builder /app/apps/aurigny-scraper/dist ./dist
 COPY --from=builder /app/apps/aurigny-scraper/package*.json ./
-
-RUN npm ci --omit=dev
+COPY --from=builder /app/node_modules ./node_modules
 
 # Create user with a home directory so Chromium can write profile/cache files
 RUN groupadd -r scraper && useradd -r -g scraper -m -d /home/scraper scraper

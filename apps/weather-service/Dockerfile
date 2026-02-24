@@ -26,8 +26,7 @@ WORKDIR /app
 
 COPY --from=builder /app/apps/weather-service/dist ./dist
 COPY --from=builder /app/apps/weather-service/package*.json ./
-
-RUN npm ci --omit=dev
+COPY --from=builder /app/node_modules ./node_modules
 
 ENV NODE_ENV=production
 CMD ["node", "dist/index.js"]

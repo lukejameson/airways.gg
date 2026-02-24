@@ -30,9 +30,7 @@ WORKDIR /app
 COPY --from=builder /app/apps/web/build ./build
 COPY --from=builder /app/apps/web/preload-env.js ./
 COPY --from=builder /app/apps/web/package*.json ./
-
-# SvelteKit adapter-node bundles everything; only need prod deps for any external runtime deps
-RUN npm ci --omit=dev
+COPY --from=builder /app/node_modules ./node_modules
 
 EXPOSE 3000
 ENV NODE_ENV=production

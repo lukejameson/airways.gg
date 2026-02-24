@@ -23,7 +23,6 @@ WORKDIR /app
 
 COPY --from=builder /app/apps/guernsey-scraper/dist ./dist
 COPY --from=builder /app/apps/guernsey-scraper/package*.json ./
-
-RUN npm ci --omit=dev
+COPY --from=builder /app/node_modules ./node_modules
 
 CMD ["node", "dist/index.js"]
