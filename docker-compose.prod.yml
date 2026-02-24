@@ -29,7 +29,7 @@ services:
       - 'traefik.http.routers.delaysgg-prod.tls.certresolver=letsencrypt'
       - 'traefik.http.services.delaysgg-prod.loadbalancer.server.port=3000'
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
       interval: 5s
       timeout: 5s
       retries: 30
