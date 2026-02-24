@@ -316,6 +316,14 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
         const currentUrl: string = page.url();
         console.log(`[Aurigny] responses: ${responseCount}, url: ${currentUrl.substring(0, 70)}, dep: ${departuresData !== null}`);
 
+        // Debug: log page title and check for Cloudflare
+        if (responseCount < 30) {
+          const title = await page.title().catch(() => '');
+          const cfChallenge = await page.$('iframe[src*="challenges.cloudflare.com"], .cf-challenge, #challenge-form').catch(() => null);
+          const bodyText = await page.evaluate('document.body?.innerText?.substring(0, 200) || ""').catch(() => '');
+          console.log(`[Aurigny] title: "${title}", cfChallenge: ${!!cfChallenge}, body: "${String(bodyText).substring(0, 100)}..."`);
+        }
+
         // Detect stalled state: responses stopped incrementing and still no data
         if (responseCount === lastResponseCount) {
           if (Date.now() - staleSince > 15000 && !reloadAttempted) {
