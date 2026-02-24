@@ -47,7 +47,8 @@ RUN apt-get update && apt-get install -y \
 
 ENV NODE_ENV=production \
     PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    DISPLAY=:99
 
 WORKDIR /app
 
@@ -56,8 +57,13 @@ COPY --from=builder /app/apps/aurigny-scraper/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/database ./packages/database
 
-# Create user with a home directory so Chromium can write profile/cache files
-RUN groupadd -r scraper && useradd -r -g scraper -m -d /home/scraper scraper
+# Create user with a home directory so Chromium can write profile/cache files.
+# Add to video group so Xvfb can create a virtual display, chmod /tmp so
+# Xvfb can write its X lock files.
+RUN groupadd -r scraper && useradd -r -g scraper -m -d /home/scraper scraper \
+    && usermod -aG video scraper \
+    && chmod 1777 /tmp
+
 USER scraper
 
 CMD ["node", "dist/index.js"]
