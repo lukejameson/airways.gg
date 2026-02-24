@@ -28,6 +28,12 @@ services:
       - 'traefik.http.routers.delaysgg-prod.tls=true'
       - 'traefik.http.routers.delaysgg-prod.tls.certresolver=letsencrypt'
       - 'traefik.http.services.delaysgg-prod.loadbalancer.server.port=3000'
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
     depends_on:
       - ml-service
     networks:
@@ -43,6 +49,9 @@ services:
       - SCRAPER_INTERVAL_MS=${SCRAPER_INTERVAL_MS:-300000}
       - SCRAPER_MAX_RETRIES=${SCRAPER_MAX_RETRIES:-3}
       - NODE_ENV=production
+    depends_on:
+      app:
+        condition: service_healthy
     networks:
       - web
     restart: always
@@ -61,6 +70,9 @@ services:
       - BACKFILL_END_DATE=${BACKFILL_END_DATE}
       - GUERNSEY_AIRPORT_URL=${GUERNSEY_AIRPORT_URL:-https://www.airport.gg}
       - NODE_ENV=production
+    depends_on:
+      app:
+        condition: service_healthy
     networks:
       - web
     restart: on-failure
@@ -76,6 +88,9 @@ services:
       - FR24_API_TOKEN=${FR24_API_TOKEN}
       - POSITION_INTERVAL_MS=${POSITION_INTERVAL_MS:-300000}
       - NODE_ENV=production
+    depends_on:
+      app:
+        condition: service_healthy
     networks:
       - web
     restart: always
@@ -88,6 +103,9 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - OPENMETEO_API_URL=${OPENMETEO_API_URL:-https://api.open-meteo.com/v1/forecast}
       - NODE_ENV=production
+    depends_on:
+      app:
+        condition: service_healthy
     networks:
       - web
     restart: always
