@@ -1,0 +1,37 @@
+{
+  "name": "@delays/database",
+  "version": "1.0.0",
+  "description": "Database schema and connection for delays.gg",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "default": "./dist/schema.js"
+    }
+  },
+  "scripts": {
+    "db:generate": "dotenv -e ../../.env drizzle-kit generate",
+    "db:migrate": "dotenv -e ../../.env drizzle-kit migrate",
+    "db:push": "dotenv -e ../../.env drizzle-kit push",
+    "db:studio": "dotenv -e ../../.env drizzle-kit studio",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "drizzle-orm": "^0.45.1",
+    "pg": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.11.0",
+    "dotenv-cli": "^8.0.0",
+    "drizzle-kit": "^0.31.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.0"
+  }
+}

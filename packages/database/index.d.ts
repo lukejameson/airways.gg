@@ -1,0 +1,8 @@
+import 'dotenv/config';
+import { Pool } from 'pg';
+import * as schema from './schema';
+export declare const db: import("drizzle-orm/node-postgres").NodePgDatabase<typeof schema> & {
+    $client: Pool;
+};
+export * from './schema';
+//# sourceMappingURL=index.d.ts.map

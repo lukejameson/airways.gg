@@ -1,0 +1,40 @@
+{
+  "name": "delays.gg",
+  "version": "1.0.0",
+  "description": "Flight delay prediction platform for Guernsey Airport",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently --names \"web,aurigny,weather,position\" --prefix-colors \"cyan,yellow,green,magenta\" \"npm run dev:web\" \"npm run dev:aurigny\" \"npm run dev:weather\" \"npm run dev:position\"",
+    "dev:web": "npm run dev --workspace=@delays/web",
+    "dev:aurigny": "npm run dev --workspace=@delays/aurigny-scraper",
+    "dev:weather": "npm run dev --workspace=@delays/weather-service",
+    "dev:position": "npm run dev --workspace=@delays/position-service",
+    "dev:guernsey": "npm run dev --workspace=@delays/guernsey-scraper",
+    "build": "npm run build --workspace=@delays/web",
+    "db:generate": "npm run db:generate --workspace=@delays/database",
+    "db:migrate": "npm run db:migrate --workspace=@delays/database",
+    "db:push": "npm run db:push --workspace=@delays/database",
+    "db:studio": "npm run db:studio --workspace=@delays/database",
+    "scraper:aurigny": "npm run dev --workspace=@delays/aurigny-scraper",
+    "scraper:guernsey": "npm run dev --workspace=@delays/guernsey-scraper",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:build": "docker-compose build"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.1.1",
+    "@types/node": "^20.0.0",
+    "concurrently": "^9.2.1",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "overrides": {
+    "vite": "^6.0.0"
+  }
+}

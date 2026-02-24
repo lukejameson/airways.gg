@@ -1,0 +1,89 @@
+import type { PageServerLoad } from './$types';
+import { db, flights, flightStatusHistory, flightNotes, delayPredictions, weatherData, aircraftPositions } from '$lib/server/db';
+import { eq, desc, and, lte, gte, inArray, isNotNull, asc } from 'drizzle-orm';
+import { error } from '@sveltejs/kit';
+
+export const load: PageServerLoad = async ({ params }) => {
+  const id = parseInt(params.id, 10);
+  if (isNaN(id)) throw error(404, 'Flight not found');
+
+  try {
+    const [flight] = await db.select().from(flights).where(eq(flights.id, id)).limit(1);
+    if (!flight) throw error(404, 'Flight not found');
+
+    const flightTime = flight.scheduledDeparture;
+    const windowStart = new Date(flightTime.getTime() - 90 * 60000);
+    const windowEnd   = new Date(flightTime.getTime() + 90 * 60000);
+    const airports    = [...new Set([flight.departureAirport, flight.arrivalAirport])];
+
+    // Aircraft rotation: all flights for this registration within the last 24 hours
+    // (same data source as Aurigny's "Where's my plane?" modal)
+    const rotationStart = new Date(flight.scheduledDeparture.getTime() - 24 * 60 * 60 * 1000);
+    const rotationFlights = flight.aircraftRegistration
+      ? await db.select({
+          id: flights.id,
+          flightNumber: flights.flightNumber,
+          departureAirport: flights.departureAirport,
+          arrivalAirport: flights.arrivalAirport,
+          scheduledDeparture: flights.scheduledDeparture,
+          scheduledArrival: flights.scheduledArrival,
+          actualDeparture: flights.actualDeparture,
+          actualArrival: flights.actualArrival,
+          status: flights.status,
+        })
+        .from(flights)
+        .where(and(
+          eq(flights.aircraftRegistration, flight.aircraftRegistration),
+          gte(flights.scheduledDeparture, rotationStart),
+          isNotNull(flights.aircraftRegistration),
+        ))
+        .orderBy(asc(flights.scheduledDeparture))
+      : [];
+
+    const [statusHistory, notes, predictions, weatherRows, positionRows] = await Promise.all([
+      db.select().from(flightStatusHistory)
+        .where(eq(flightStatusHistory.flightId, id))
+        .orderBy(desc(flightStatusHistory.statusTimestamp)),
+      db.select().from(flightNotes)
+        .where(eq(flightNotes.flightId, id))
+        .orderBy(desc(flightNotes.timestamp)),
+      db.select().from(delayPredictions)
+        .where(eq(delayPredictions.flightId, id))
+        .orderBy(desc(delayPredictions.createdAt))
+        .limit(1),
+      // Weather for both dep+arr airports near departure time
+      db.select().from(weatherData)
+        .where(and(
+          inArray(weatherData.airportCode, airports),
+          gte(weatherData.timestamp, windowStart),
+          lte(weatherData.timestamp, windowEnd),
+        ))
+        .orderBy(desc(weatherData.timestamp)),
+      // Latest position for this flight
+      db.select().from(aircraftPositions)
+        .where(eq(aircraftPositions.flightId, id))
+        .orderBy(desc(aircraftPositions.positionTimestamp))
+        .limit(1),
+    ]);
+
+    // Most recent row per airport within the window
+    const weatherMap: Record<string, typeof weatherData.$inferSelect> = {};
+    for (const row of weatherRows) {
+      if (!weatherMap[row.airportCode]) weatherMap[row.airportCode] = row;
+    }
+
+    return {
+      flight,
+      statusHistory,
+      notes,
+      prediction: predictions[0] ?? null,
+      weatherMap,
+      position: positionRows[0] ?? null,
+      rotationFlights,
+    };
+  } catch (err: any) {
+    if (err?.status === 404) throw err;
+    console.error('Error loading flight:', err);
+    throw error(500, 'Failed to load flight details');
+  }
+};

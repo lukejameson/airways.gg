@@ -1,0 +1,74 @@
+services:
+  app:
+    build:
+      # Use monorepo root as context so workspace packages are available
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - ML_SERVICE_URL=http://ml-service:8000
+      - SESSION_SECRET=${SESSION_SECRET}
+      - NODE_ENV=production
+    depends_on:
+      - ml-service
+    networks:
+      - delays-network
+    restart: unless-stopped
+
+  aurigny-scraper:
+    build:
+      context: .
+      dockerfile: apps/aurigny-scraper/Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - SCRAPER_INTERVAL_MS=${SCRAPER_INTERVAL_MS:-300000}
+      - SCRAPER_MAX_RETRIES=${SCRAPER_MAX_RETRIES:-3}
+      - NODE_ENV=production
+    networks:
+      - delays-network
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 800m
+
+  guernsey-scraper:
+    build:
+      context: .
+      dockerfile: apps/guernsey-scraper/Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - BACKFILL_START_DATE=${BACKFILL_START_DATE:-2019-01-01}
+      - BACKFILL_END_DATE=${BACKFILL_END_DATE}
+      - GUERNSEY_AIRPORT_URL=${GUERNSEY_AIRPORT_URL:-https://www.airport.gg}
+      - NODE_ENV=production
+    networks:
+      - delays-network
+    restart: on-failure
+    profiles:
+      - backfill
+
+  ml-service:
+    build:
+      context: apps/ml-service
+      dockerfile: Dockerfile
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - MODEL_PATH=/app/models
+    volumes:
+      - ml-models:/app/models
+    networks:
+      - delays-network
+    restart: unless-stopped
+
+networks:
+  delays-network:
+    driver: bridge
+
+volumes:
+  ml-models:
