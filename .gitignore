@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+alpha_testing/
+orignal_scraper/
 
 # Build outputs
 .svelte-kit/
