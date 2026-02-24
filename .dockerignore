@@ -1,0 +1,11 @@
+.git
+.gitignore
+**/node_modules
+**/.svelte-kit
+**/dist
+**/*.env
+.env
+.env.*
+orignal_scraper
+alpha_testing
+*.md
