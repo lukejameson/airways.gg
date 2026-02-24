@@ -138,6 +138,16 @@
 
 <svelte:head>
   <title>delays.gg — Live Flight Board</title>
+  <meta name="description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
+  <link rel="canonical" href={data.siteUrl} />
+
+  <meta property="og:title" content="delays.gg — Live Flight Board" />
+  <meta property="og:description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
+  <meta property="og:url" content={data.siteUrl} />
+  <meta property="og:type" content="website" />
+
+  <meta name="twitter:title" content="delays.gg — Live Flight Board" />
+  <meta name="twitter:description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
 </svelte:head>
 
 <div class="mx-auto max-w-4xl px-4 py-8">

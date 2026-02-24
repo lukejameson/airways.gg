@@ -1,0 +1,28 @@
+# Test environment override
+# Usage: docker compose -f docker-compose.yml -f docker-compose.test.yml --env-file .env.test up -d
+
+services:
+  app:
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=production
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.delaysgg-test.rule=Host(`${DOMAIN}`)'
+      - 'traefik.http.routers.delaysgg-test.entrypoints=websecure'
+      - 'traefik.http.routers.delaysgg-test.tls=true'
+      - 'traefik.http.routers.delaysgg-test.tls.certresolver=letsencrypt'
+      - 'traefik.http.services.delaysgg-test.loadbalancer.server.port=3000'
+
+  aurigny-scraper:
+    environment:
+      - NODE_ENV=production
+
+  position-service:
+    environment:
+      - NODE_ENV=production
+
+  weather-service:
+    environment:
+      - NODE_ENV=production

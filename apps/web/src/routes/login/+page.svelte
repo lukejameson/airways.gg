@@ -17,6 +17,7 @@
 
 <svelte:head>
   <title>Login — delays.gg</title>
+  <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
 <div class="container flex min-h-[calc(100vh-8rem)] items-center justify-center py-12">

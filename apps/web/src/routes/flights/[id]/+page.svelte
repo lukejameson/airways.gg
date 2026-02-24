@@ -13,6 +13,18 @@
   const depWeather = $derived(weatherMap?.[flight.departureAirport] ?? null);
   const arrWeather = $derived(weatherMap?.[flight.arrivalAirport] ?? null);
 
+  // SEO
+  const seoTitle = $derived(`${flight.flightNumber} · ${flight.departureAirport} → ${flight.arrivalAirport} — delays.gg`);
+  const seoDate = $derived(
+    flight.scheduledDeparture
+      ? new Date(flight.scheduledDeparture).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+      : ''
+  );
+  const seoDescription = $derived(
+    `${flight.flightNumber} from ${flight.departureAirport} to ${flight.arrivalAirport}${seoDate ? ` on ${seoDate}` : ''}${flight.status ? ` · ${flight.status}` : ''}${flight.delayMinutes && flight.delayMinutes > 0 ? ` · Delayed ${flight.delayMinutes} min` : ''}. Track live flight status and delay predictions on delays.gg.`
+  );
+  const seoCanonical = $derived(`${data.siteUrl}/flights/${flight.id}`);
+
   const hasPosition = $derived(!!position && position.lat != null && position.lon != null);
 
   let FlightMapComponent: any = $state(null);
@@ -243,7 +255,17 @@
 </script>
 
 <svelte:head>
-  <title>{flight.flightNumber} — delays.gg</title>
+  <title>{seoTitle}</title>
+  <meta name="description" content={seoDescription} />
+  <link rel="canonical" href={seoCanonical} />
+
+  <meta property="og:title" content={seoTitle} />
+  <meta property="og:description" content={seoDescription} />
+  <meta property="og:url" content={seoCanonical} />
+  <meta property="og:type" content="website" />
+
+  <meta name="twitter:title" content={seoTitle} />
+  <meta name="twitter:description" content={seoDescription} />
 </svelte:head>
 
 <div class="container py-6 max-w-3xl">

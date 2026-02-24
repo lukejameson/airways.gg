@@ -1,0 +1,28 @@
+# Development environment override
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml --env-file .env.dev up -d
+
+services:
+  app:
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.delaysgg-dev.rule=Host(`${DOMAIN}`)'
+      - 'traefik.http.routers.delaysgg-dev.entrypoints=websecure'
+      - 'traefik.http.routers.delaysgg-dev.tls=true'
+      - 'traefik.http.routers.delaysgg-dev.tls.certresolver=letsencrypt'
+      - 'traefik.http.services.delaysgg-dev.loadbalancer.server.port=3000'
+
+  aurigny-scraper:
+    environment:
+      - NODE_ENV=production
+
+  position-service:
+    environment:
+      - NODE_ENV=production
+
+  weather-service:
+    environment:
+      - NODE_ENV=production

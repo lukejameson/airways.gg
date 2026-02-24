@@ -1,0 +1,31 @@
+# Production environment override
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod up -d
+
+services:
+  app:
+    ports:
+      - "3002:3000"
+    environment:
+      - NODE_ENV=production
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.delaysgg-prod.rule=Host(`${DOMAIN}`)'
+      - 'traefik.http.routers.delaysgg-prod.entrypoints=websecure'
+      - 'traefik.http.routers.delaysgg-prod.tls=true'
+      - 'traefik.http.routers.delaysgg-prod.tls.certresolver=letsencrypt'
+      - 'traefik.http.services.delaysgg-prod.loadbalancer.server.port=3000'
+
+  aurigny-scraper:
+    environment:
+      - NODE_ENV=production
+    restart: always
+
+  position-service:
+    environment:
+      - NODE_ENV=production
+    restart: always
+
+  weather-service:
+    environment:
+      - NODE_ENV=production
+    restart: always

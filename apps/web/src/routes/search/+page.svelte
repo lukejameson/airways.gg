@@ -29,7 +29,20 @@
 </script>
 
 <svelte:head>
-  <title>Search Flights — delays.gg</title>
+  <title>{hasSearch ? `"${data.query || data.date}" — Search · delays.gg` : 'Search Flights — delays.gg'}</title>
+  <meta name="description" content="Search Guernsey Airport flights by flight number, airline, or airport code. Find live status and delay predictions for any Aurigny or connecting flight." />
+  <link rel="canonical" href="{data.siteUrl}/search" />
+  <!-- Don't index search result pages — only the bare /search UI -->
+  {#if hasSearch}
+    <meta name="robots" content="noindex, follow" />
+  {/if}
+
+  <meta property="og:title" content="Search Flights — delays.gg" />
+  <meta property="og:description" content="Search Guernsey Airport flights by flight number, airline, or airport code." />
+  <meta property="og:url" content="{data.siteUrl}/search" />
+
+  <meta name="twitter:title" content="Search Flights — delays.gg" />
+  <meta name="twitter:description" content="Search Guernsey Airport flights by flight number, airline, or airport code." />
 </svelte:head>
 
 <div class="container py-6 max-w-3xl">

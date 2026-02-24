@@ -21,9 +21,15 @@
     "db:studio": "npm run db:studio --workspace=@delays/database",
     "scraper:aurigny": "npm run dev --workspace=@delays/aurigny-scraper",
     "scraper:guernsey": "npm run dev --workspace=@delays/guernsey-scraper",
-    "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down",
-    "docker:build": "docker-compose build"
+    "docker:dev:up": "docker compose -f docker-compose.yml -f docker-compose.dev.yml --env-file .env.dev up -d",
+    "docker:dev:down": "docker compose -f docker-compose.yml -f docker-compose.dev.yml --env-file .env.dev down",
+    "docker:dev:build": "docker compose -f docker-compose.yml -f docker-compose.dev.yml --env-file .env.dev build",
+    "docker:test:up": "docker compose -f docker-compose.yml -f docker-compose.test.yml --env-file .env.test up -d",
+    "docker:test:down": "docker compose -f docker-compose.yml -f docker-compose.test.yml --env-file .env.test down",
+    "docker:test:build": "docker compose -f docker-compose.yml -f docker-compose.test.yml --env-file .env.test build",
+    "docker:prod:up": "docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod up -d",
+    "docker:prod:down": "docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod down",
+    "docker:prod:build": "docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod build"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.1.1",
