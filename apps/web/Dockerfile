@@ -34,9 +34,12 @@ WORKDIR /app
 COPY --from=builder /app/apps/web/build ./build
 COPY --from=builder /app/apps/web/preload-env.js ./
 COPY --from=builder /app/apps/web/package*.json ./
+COPY --from=builder /app/apps/web/docker-entrypoint.sh ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/database ./packages/database
 
+RUN chmod +x /app/docker-entrypoint.sh
+
 EXPOSE 3000
 ENV NODE_ENV=production
-CMD ["node", "--import", "./preload-env.js", "build"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
