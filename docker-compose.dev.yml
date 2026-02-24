@@ -1,12 +1,26 @@
-# Development environment override
-# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml --env-file .env.dev up -d
+# Development environment
+# Usage: docker compose -f docker-compose.dev.yml --env-file .env.dev up -d
 
 services:
   app:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
     ports:
       - "3000:3000"
     environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
       - NODE_ENV=production
+      - ADDRESS_HEADER=CF-Connecting-IP
+      - BODY_SIZE_LIMIT=10M
+      - ML_SERVICE_URL=http://ml-service:8000
+      - SESSION_SECRET=${SESSION_SECRET}
+      - DOMAIN=${DOMAIN:?DOMAIN is required}
+      - ORIGIN=https://${DOMAIN:?DOMAIN is required}
+      - PUBLIC_BUY_ME_A_COFFEE_URL=${PUBLIC_BUY_ME_A_COFFEE_URL}
+      - PUBLIC_UMAMI_WEBSITE_ID=${PUBLIC_UMAMI_WEBSITE_ID}
+      - PUBLIC_UMAMI_URL=${PUBLIC_UMAMI_URL}
     labels:
       - 'traefik.enable=true'
       - 'traefik.http.routers.delaysgg-dev.rule=Host(`${DOMAIN}`)'
@@ -14,15 +28,88 @@ services:
       - 'traefik.http.routers.delaysgg-dev.tls=true'
       - 'traefik.http.routers.delaysgg-dev.tls.certresolver=letsencrypt'
       - 'traefik.http.services.delaysgg-dev.loadbalancer.server.port=3000'
+    depends_on:
+      - ml-service
+    networks:
+      - web
+    restart: unless-stopped
 
   aurigny-scraper:
+    build:
+      context: .
+      dockerfile: apps/aurigny-scraper/Dockerfile
     environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - SCRAPER_INTERVAL_MS=${SCRAPER_INTERVAL_MS:-300000}
+      - SCRAPER_MAX_RETRIES=${SCRAPER_MAX_RETRIES:-3}
       - NODE_ENV=production
+    networks:
+      - web
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 800m
+
+  guernsey-scraper:
+    build:
+      context: .
+      dockerfile: apps/guernsey-scraper/Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - BACKFILL_START_DATE=${BACKFILL_START_DATE:-2019-01-01}
+      - BACKFILL_END_DATE=${BACKFILL_END_DATE}
+      - GUERNSEY_AIRPORT_URL=${GUERNSEY_AIRPORT_URL:-https://www.airport.gg}
+      - NODE_ENV=production
+    networks:
+      - web
+    restart: on-failure
+    profiles:
+      - backfill
 
   position-service:
+    build:
+      context: .
+      dockerfile: apps/position-service/Dockerfile
     environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - FR24_API_TOKEN=${FR24_API_TOKEN}
+      - POSITION_INTERVAL_MS=${POSITION_INTERVAL_MS:-300000}
       - NODE_ENV=production
+    networks:
+      - web
+    restart: unless-stopped
 
   weather-service:
+    build:
+      context: .
+      dockerfile: apps/weather-service/Dockerfile
     environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - OPENMETEO_API_URL=${OPENMETEO_API_URL:-https://api.open-meteo.com/v1/forecast}
       - NODE_ENV=production
+    networks:
+      - web
+    restart: unless-stopped
+
+  ml-service:
+    build:
+      context: apps/ml-service
+      dockerfile: Dockerfile
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - MODEL_PATH=/app/models
+    volumes:
+      - ml-models-dev:/app/models
+    networks:
+      - web
+    restart: unless-stopped
+
+networks:
+  web:
+    external: true
+
+volumes:
+  ml-models-dev:
