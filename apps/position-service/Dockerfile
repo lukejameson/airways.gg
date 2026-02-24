@@ -29,6 +29,7 @@ WORKDIR /app
 COPY --from=builder /app/apps/position-service/dist ./dist
 COPY --from=builder /app/apps/position-service/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/database ./packages/database
 
 ENV NODE_ENV=production
 CMD ["node", "dist/index.js"]

@@ -20,6 +20,7 @@ RUN npm run build
 WORKDIR /app/apps/guernsey-scraper
 RUN npm run build
 
+# Production stage
 FROM node:20-alpine
 
 WORKDIR /app
@@ -27,5 +28,7 @@ WORKDIR /app
 COPY --from=builder /app/apps/guernsey-scraper/dist ./dist
 COPY --from=builder /app/apps/guernsey-scraper/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/database ./packages/database
 
+ENV NODE_ENV=production
 CMD ["node", "dist/index.js"]

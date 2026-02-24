@@ -44,7 +44,8 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+ENV NODE_ENV=production \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
@@ -52,6 +53,7 @@ WORKDIR /app
 COPY --from=builder /app/apps/aurigny-scraper/dist ./dist
 COPY --from=builder /app/apps/aurigny-scraper/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/database ./packages/database
 
 # Create user with a home directory so Chromium can write profile/cache files
 RUN groupadd -r scraper && useradd -r -g scraper -m -d /home/scraper scraper
