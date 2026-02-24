@@ -74,12 +74,15 @@ COPY --from=builder /root/.cache/puppeteer /root/.cache/puppeteer
 # Create user with a home directory so Chromium can write profile/cache files.
 RUN groupadd -r scraper && useradd -r -g scraper -m -d /home/scraper scraper \
     && usermod -aG video scraper \
-    && chmod 1777 /tmp \
-    && mkdir -p /home/scraper/.cache \
-    && cp -r /root/.cache/puppeteer /home/scraper/.cache/ \
-    && chown -R scraper:scraper /home/scraper/.cache
+    && chmod 1777 /tmp
 
 COPY apps/aurigny-scraper/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Copy puppeteer's downloaded Chrome from builder's cache to a shared location
+RUN mkdir -p /opt/chrome \
+    && cp -r /root/.cache/puppeteer/chrome /opt/chrome/ \
+    && chown -R scraper:scraper /opt/chrome \
+    && rm -rf /root/.cache
 
 ENTRYPOINT ["docker-entrypoint.sh"]
