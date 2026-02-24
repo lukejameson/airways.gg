@@ -24,11 +24,18 @@ RUN npm run build
 # Runtime stage — needs Chromium for puppeteer-real-browser
 FROM node:20-slim
 
-# Install Chromium, Xvfb and dependencies
+# Install Chromium, Xvfb and dependencies with realistic fonts for fingerprint evasion
 RUN apt-get update && apt-get install -y \
     chromium \
     xvfb \
+    gosu \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    fonts-noto-cjk \
+    fonts-dejavu-core \
     fonts-freefont-ttf \
+    fonts-arphic-ukai \
+    fonts-arphic-uming \
     libxss1 \
     libnss3 \
     libatk1.0-0 \
@@ -42,6 +49,9 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     libgbm1 \
     libasound2 \
+    libpango-1.0-0 \
+    libcairo2 \
+    dbus \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
@@ -64,6 +74,7 @@ RUN groupadd -r scraper && useradd -r -g scraper -m -d /home/scraper scraper \
     && usermod -aG video scraper \
     && chmod 1777 /tmp
 
-USER scraper
+COPY apps/aurigny-scraper/docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-CMD ["node", "dist/index.js"]
+ENTRYPOINT ["docker-entrypoint.sh"]

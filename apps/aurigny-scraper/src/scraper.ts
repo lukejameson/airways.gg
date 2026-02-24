@@ -249,13 +249,24 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
       // In Docker, chrome-launcher won't find /usr/bin/chromium automatically —
       // pass it explicitly via customConfig so it doesn't fall back to a missing binary.
       const chromePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
+      console.log('[Aurigny] Launching browser...', { chromePath, display: process.env.DISPLAY });
+      
       const { browser: b, page } = await connect({
         headless: false,
         turnstile: true,
-        disableXvfb: false,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+        disableXvfb: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-infobars',
+          '--disable-blink-features=AutomationControlled',
+          '--window-size=1920,1080',
+        ],
         customConfig: chromePath ? { chromePath } : {},
       });
+      
+      console.log('[Aurigny] Browser launched successfully');
       browser = b;
 
       let departuresData: string | null = null;
