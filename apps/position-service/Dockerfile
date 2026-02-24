@@ -15,7 +15,9 @@ RUN npm install
 COPY packages/database/ ./packages/database/
 COPY apps/position-service/ ./apps/position-service/
 
-# Build
+WORKDIR /app/packages/database
+RUN npm run build
+
 WORKDIR /app/apps/position-service
 RUN npm run build
 

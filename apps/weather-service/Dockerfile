@@ -15,7 +15,9 @@ RUN npm install
 COPY packages/database/ ./packages/database/
 COPY apps/weather-service/ ./apps/weather-service/
 
-# Build
+WORKDIR /app/packages/database
+RUN npm run build
+
 WORKDIR /app/apps/weather-service
 RUN npm run build
 

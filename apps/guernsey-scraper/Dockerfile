@@ -14,6 +14,9 @@ RUN npm install
 COPY packages/database/ ./packages/database/
 COPY apps/guernsey-scraper/ ./apps/guernsey-scraper/
 
+WORKDIR /app/packages/database
+RUN npm run build
+
 WORKDIR /app/apps/guernsey-scraper
 RUN npm run build
 

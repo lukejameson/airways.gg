@@ -17,7 +17,11 @@ RUN npm install
 COPY packages/database/ ./packages/database/
 COPY apps/web/ ./apps/web/
 
-# Build
+# Build the shared database package first so its dist/ exists for Vite
+WORKDIR /app/packages/database
+RUN npm run build
+
+# Build the web app
 WORKDIR /app/apps/web
 RUN npm run build
 

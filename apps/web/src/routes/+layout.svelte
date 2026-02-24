@@ -4,10 +4,10 @@
 
   let { data, children } = $props();
 
-  const umamiWebsiteId = data.umamiWebsiteId;
-  const umamiUrl = data.umamiUrl;
-  const siteUrl = data.siteUrl;
-  const buyMeACoffeeUrl = data.buyMeACoffeeUrl;
+  const umamiWebsiteId = $derived(data.umamiWebsiteId);
+  const umamiUrl = $derived(data.umamiUrl);
+  const siteUrl = $derived(data.siteUrl);
+  const buyMeACoffeeUrl = $derived(data.buyMeACoffeeUrl);
 
   // Use $state with a local variable so the toggle mutation works,
   // but initialise from the server data prop so it stays in sync on navigation.

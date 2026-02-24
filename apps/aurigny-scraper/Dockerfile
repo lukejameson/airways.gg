@@ -15,6 +15,9 @@ RUN npm install
 COPY packages/database/ ./packages/database/
 COPY apps/aurigny-scraper/ ./apps/aurigny-scraper/
 
+WORKDIR /app/packages/database
+RUN npm run build
+
 WORKDIR /app/apps/aurigny-scraper
 RUN npm run build
 
