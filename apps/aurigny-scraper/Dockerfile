@@ -24,9 +24,10 @@ RUN npm run build
 # Runtime stage — needs Chromium for puppeteer-real-browser
 FROM node:20-slim
 
-# Install Chromium and dependencies
+# Install Chromium, Xvfb and dependencies
 RUN apt-get update && apt-get install -y \
     chromium \
+    xvfb \
     fonts-freefont-ttf \
     libxss1 \
     libnss3 \
