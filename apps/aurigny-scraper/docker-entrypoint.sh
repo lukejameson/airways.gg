@@ -23,10 +23,23 @@ CHROME_BIN=$(find /opt/chrome -name chrome -type f -path "*/chrome-linux64/*" 2>
 if [ -n "$CHROME_BIN" ]; then
     export CHROME_PATH="$CHROME_BIN"
     echo "Found Chrome at: $CHROME_PATH"
+    # Test if Chrome binary is executable
+    if [ -x "$CHROME_BIN" ]; then
+        echo "Chrome binary is executable"
+    else
+        echo "ERROR: Chrome binary is NOT executable"
+        ls -la "$CHROME_BIN"
+    fi
 else
     echo "Error: Chrome binary not found in /opt/chrome"
+    echo "Contents of /opt/chrome:"
+    ls -laR /opt/chrome 2>/dev/null || echo "Directory not found"
     exit 1
 fi
+
+# Check required Chrome libraries
+echo "Checking Chrome dependencies..."
+ldd "$CHROME_BIN" 2>&1 | grep -i "not found" || echo "All dependencies found"
 
 # Run the scraper as non-root user
 exec gosu scraper node dist/index.js

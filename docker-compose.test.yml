@@ -43,6 +43,10 @@ services:
       - SCRAPER_INTERVAL_MS=${SCRAPER_INTERVAL_MS:-300000}
       - SCRAPER_MAX_RETRIES=${SCRAPER_MAX_RETRIES:-3}
       - NODE_ENV=production
+      - PROXY_ENABLED=${PROXY_ENABLED:-true}
+      - PROXY_USERNAME=${PROXY_USERNAME:-}
+      - PROXY_PASSWORD=${PROXY_PASSWORD:-}
+      - PROXY_HOSTS=${PROXY_HOSTS:-}
     networks:
       - web
     restart: unless-stopped

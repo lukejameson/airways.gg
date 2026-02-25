@@ -3,6 +3,46 @@ import { XMLParser } from 'fast-xml-parser';
 import { db, flights as flightsTable, flightDelays, flightTimes, flightNotes, scraperLogs } from '@delays/database';
 import { eq } from 'drizzle-orm';
 
+interface ProxyConfig {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+}
+
+function getProxyList(): ProxyConfig[] {
+  const enabled = process.env.PROXY_ENABLED === 'true';
+  if (!enabled) {
+    return [];
+  }
+
+  const username = process.env.PROXY_USERNAME;
+  const password = process.env.PROXY_PASSWORD;
+  const hostsStr = process.env.PROXY_HOSTS;
+
+  if (!username || !password || !hostsStr) {
+    console.warn('[Aurigny] Proxy enabled but credentials/hosts not configured');
+    return [];
+  }
+
+  const hosts = hostsStr.split(',').map(h => h.trim()).filter(Boolean);
+  
+  return hosts.map(host => {
+    const [ip, portStr] = host.split(':');
+    return {
+      host: ip,
+      port: parseInt(portStr || '8080'),
+      username,
+      password,
+    };
+  });
+}
+
+function getRandomProxy(proxies: ProxyConfig[]): ProxyConfig | null {
+  if (proxies.length === 0) return null;
+  return proxies[Math.floor(Math.random() * proxies.length)];
+}
+
 interface ParsedDelay {
   code?: string;
   code2?: string;
@@ -246,44 +286,71 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
       console.log(`[Aurigny] Attempt ${attempt}/${maxRetries}`);
       await randomDelay(3000, 8000);
 
-      // In Docker, chrome-launcher won't find /usr/bin/chromium automatically —
-      // pass it explicitly via customConfig so it doesn't fall back to a missing binary.
+      const proxies = getProxyList();
+      const selectedProxy = getRandomProxy(proxies);
+      
+      if (selectedProxy) {
+        console.log(`[Aurigny] Using proxy: ${selectedProxy.host}:${selectedProxy.port}`);
+      } else {
+        console.log('[Aurigny] No proxy configured - connecting directly');
+      }
+
       console.log('[Aurigny] Launching browser...');
       
-      const { browser: b, page } = await connect({
+      const isDocker = process.env.CHROME_PATH !== undefined;
+      const chromePath = process.env.CHROME_PATH;
+      const connectOptions: Record<string, unknown> = {
         headless: false,
         turnstile: true,
-        disableXvfb: true,
+        // In Docker we manage Xvfb ourselves via entrypoint; locally let the lib handle it
+        disableXvfb: isDocker,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--window-size=1920,1080',
-          '--use-gl=swiftshader',
-          '--use-angle=swiftshader',
+          // SwiftShader for GPU-less Docker environments
+          ...(isDocker ? ['--use-gl=swiftshader', '--use-angle=swiftshader'] : []),
         ],
-      });
-      
-      // Spoof WebGL and GPU properties
-      await page.evaluateOnNewDocument(`
-        const getParameter = WebGLRenderingContext.prototype.getParameter;
-        WebGLRenderingContext.prototype.getParameter = function(parameter) {
-          if (parameter === 37445) return 'Intel Inc.';
-          if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-          return getParameter.call(this, parameter);
+      };
+
+      if (chromePath) {
+        connectOptions.customConfig = { chromePath };
+      }
+
+      if (selectedProxy) {
+        connectOptions.proxy = {
+          host: selectedProxy.host,
+          port: selectedProxy.port,
+          username: selectedProxy.username,
+          password: selectedProxy.password,
         };
-        if (typeof WebGL2RenderingContext !== 'undefined') {
-          const getParameter2 = WebGL2RenderingContext.prototype.getParameter;
-          WebGL2RenderingContext.prototype.getParameter = function(parameter) {
+      }
+
+      const { browser: b, page } = await connect(connectOptions);
+      
+      // Spoof WebGL and GPU properties only in Docker (no real GPU)
+      if (isDocker) {
+        await page.evaluateOnNewDocument(`
+          const getParameter = WebGLRenderingContext.prototype.getParameter;
+          WebGLRenderingContext.prototype.getParameter = function(parameter) {
             if (parameter === 37445) return 'Intel Inc.';
             if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-            return getParameter2.call(this, parameter);
+            return getParameter.call(this, parameter);
           };
-        }
-        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-      `);
+          if (typeof WebGL2RenderingContext !== 'undefined') {
+            const getParameter2 = WebGL2RenderingContext.prototype.getParameter;
+            WebGL2RenderingContext.prototype.getParameter = function(parameter) {
+              if (parameter === 37445) return 'Intel Inc.';
+              if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+              return getParameter2.call(this, parameter);
+            };
+          }
+          Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+          Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+          Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+        `);
+      }
       
       console.log('[Aurigny] Browser launched successfully');
       browser = b;
