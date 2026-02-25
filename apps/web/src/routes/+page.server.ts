@@ -43,10 +43,9 @@ export const load: PageServerLoad = async () => {
       todaysFlights.flatMap(f => [f.departureAirport, f.arrivalAirport])
     )];
 
-    // For each airport get the single most recent weather row at or before now.
-    // Use a lateral-style approach: one query filtered to the relevant airports,
-    // then pick the latest per airport in JS (avoids complex SQL for this scale).
-    let weatherMap: Record<string, typeof weatherData.$inferSelect> = {};
+    // For each airport, get weather closest to each flight's scheduled time
+    // We'll fetch weather data for the full day and let the FlightCard pick the closest
+    let weatherMap: Record<string, typeof weatherData.$inferSelect[]> = {};
     if (airportCodes.length > 0) {
       const rows = await db
         .select()
@@ -54,15 +53,16 @@ export const load: PageServerLoad = async () => {
         .where(
           and(
             inArray(weatherData.airportCode, airportCodes),
-            lte(weatherData.timestamp, now),
-            gte(weatherData.timestamp, new Date(now.getTime() - 2 * 60 * 60 * 1000)), // within last 2h
+            gte(weatherData.timestamp, today),
+            lte(weatherData.timestamp, tomorrow),
           ),
         )
-        .orderBy(desc(weatherData.timestamp));
+        .orderBy(weatherData.timestamp);
 
-      // Keep only the most recent row per airport
+      // Group by airport code
       for (const row of rows) {
-        if (!weatherMap[row.airportCode]) weatherMap[row.airportCode] = row;
+        if (!weatherMap[row.airportCode]) weatherMap[row.airportCode] = [];
+        weatherMap[row.airportCode].push(row);
       }
     }
 

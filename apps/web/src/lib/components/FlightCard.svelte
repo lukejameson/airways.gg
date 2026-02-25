@@ -19,6 +19,18 @@
     return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   }
 
+  // Find weather closest to a given timestamp
+  function findClosestWeather(airportCode: string, targetTime: Date) {
+    const weatherArray = weatherMap[airportCode];
+    if (!weatherArray || weatherArray.length === 0) return null;
+    
+    return weatherArray.reduce((closest: any, current: any) => {
+      const closestDiff = Math.abs(new Date(closest.timestamp).getTime() - targetTime.getTime());
+      const currentDiff = Math.abs(new Date(current.timestamp).getTime() - targetTime.getTime());
+      return currentDiff < closestDiff ? current : closest;
+    });
+  }
+
   function weatherIcon(code: number | null): string {
     if (code == null) return '';
     if (code === 0) return '☀️';
@@ -67,13 +79,13 @@
     return 'gray';
   });
 
-  // Weather for dep and arr airports
-  const depWeather = $derived(weatherMap[flight.departureAirport]);
-  const arrWeather = $derived(weatherMap[flight.arrivalAirport]);
+  // Weather for dep and arr airports - find closest to scheduled times
+  const depWeather = $derived(findClosestWeather(flight.departureAirport, flight.scheduledDeparture));
+  const arrWeather = $derived(findClosestWeather(flight.arrivalAirport, flight.scheduledArrival));
   const hasWeather = $derived(!!depWeather || !!arrWeather);
 </script>
 
-<a href="/flights/{flight.id}{returnTab ? `?tab=${returnTab}` : ''}" class="group block {isCompleted ? 'opacity-60 hover:opacity-80' : ''}">
+<a href="/flights/{flight.id}{returnTab ? `?tab=${returnTab}` : ''}" class="group block {isCompleted ? 'opacity-60 hover:opacity-80' : ''}" style="-webkit-tap-highlight-color: transparent;">
   <div class="rounded-lg border border-border bg-card transition-colors hover:border-primary/40 hover:bg-accent/30">
 
     <!-- Main row - responsive layout -->

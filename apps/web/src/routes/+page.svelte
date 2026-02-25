@@ -164,8 +164,7 @@
   <header class="mb-4 sm:mb-6">
     <div class="flex items-center justify-between gap-2">
       <div class="min-w-0">
-        <h1 class="text-xl sm:text-2xl font-bold tracking-tight">delays.gg</h1>
-        <p class="text-sm text-muted-foreground mt-0.5 sm:mt-1">
+        <p class="text-sm text-muted-foreground">
           Guernsey (GCI)
           {#if data.weather}
             <span class="mx-1 opacity-40">·</span>

@@ -301,17 +301,54 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
       const isDocker = process.env.CHROME_PATH !== undefined;
       const chromePath = process.env.CHROME_PATH;
       const connectOptions: Record<string, unknown> = {
-        headless: false,
+        headless: true,
         turnstile: true,
-        disableXvfb: false,
+        disableXvfb: true,
         args: [
           '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-web-security',
+          '--disable-features=IsolateOrigins,site-per-process',
           '--window-size=1920,1080',
           '--lang=en-GB',
           '--accept-lang=en-GB,en;q=0.9',
+          '--memory-pressure-off',
+          '--max_old_space_size=512',
           ...(isDocker ? [
             '--no-sandbox',
             '--disable-setuid-sandbox',
+            '--single-process',
+            '--disable-background-networking',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-breakpad',
+            '--disable-client-side-phishing-detection',
+            '--disable-component-update',
+            '--disable-default-apps',
+            '--disable-dev-shm-usage',
+            '--disable-domain-reliability',
+            '--disable-extensions',
+            '--disable-features=AudioServiceOutOfProcess',
+            '--disable-hang-monitor',
+            '--disable-ipc-flooding-protection',
+            '--disable-notifications',
+            '--disable-offer-store-unmasked-wallet-cards',
+            '--disable-popup-blocking',
+            '--disable-print-preview',
+            '--disable-prompt-on-repost',
+            '--disable-renderer-backgrounding',
+            '--disable-speech-api',
+            '--disable-sync',
+            '--disk-cache-size=33554432',
+            '--hide-scrollbars',
+            '--ignore-gpu-blacklist',
+            '--metrics-recording-only',
+            '--mute-audio',
+            '--no-default-browser-check',
+            '--no-first-run',
+            '--no-pings',
+            '--password-store=basic',
+            '--use-mock-keychain',
           ] : []),
         ],
       };
@@ -454,18 +491,30 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
 
       console.log('[Aurigny] Closing browser...');
       await Promise.race([
+        page.close(),
+        new Promise(resolve => setTimeout(resolve, 2000)),
+      ]).catch(() => {});
+      await Promise.race([
         browser.close(),
-        new Promise(resolve => setTimeout(resolve, 5000)),
+        new Promise(resolve => setTimeout(resolve, 3000)),
       ]);
       console.log('[Aurigny] Browser closed');
+      
+      // Force garbage collection if available
+      if (global.gc) {
+        global.gc();
+      }
+      
       return { success: true, count: upsertedCount };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[Aurigny] Attempt ${attempt} failed: ${message}`);
-      if (browser) await Promise.race([
-        browser.close(),
-        new Promise(resolve => setTimeout(resolve, 5000)),
-      ]).catch(() => {});
+      if (browser) {
+        await Promise.race([
+          browser.close(),
+          new Promise(resolve => setTimeout(resolve, 3000)),
+        ]).catch(() => {});
+      }
 
       if (attempt < maxRetries) {
         const backoff = Math.pow(2, attempt) * 5000 + Math.random() * 5000;
