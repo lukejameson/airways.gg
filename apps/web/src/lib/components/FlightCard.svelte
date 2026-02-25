@@ -73,73 +73,70 @@
   const hasWeather = $derived(!!depWeather || !!arrWeather);
 </script>
 
-<a href="/flights/{flight.id}{returnTab ? `?tab=${returnTab}` : ''}" class="group block {isCompleted ? 'opacity-50' : ''}">
+<a href="/flights/{flight.id}{returnTab ? `?tab=${returnTab}` : ''}" class="group block {isCompleted ? 'opacity-60 hover:opacity-80' : ''}">
   <div class="rounded-lg border border-border bg-card transition-colors hover:border-primary/40 hover:bg-accent/30">
 
     <!-- Main row - responsive layout -->
-    <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 py-3">
+    <div class="flex items-center gap-3 sm:gap-4 px-4 py-3">
 
-      <!-- Time & Flight info on mobile, Time on desktop -->
-      <div class="flex items-center gap-3 sm:gap-4">
-        <!-- Time -->
-        <div class="w-16 sm:w-16 shrink-0 text-center">
-          {#if showEstimate}
-            <p class="text-xs tabular-nums text-muted-foreground line-through leading-none">{fmt(scheduledTime)}</p>
-            <p class="text-lg font-bold tabular-nums leading-none text-amber-600 mt-1">{fmt(actualTime)}</p>
-            <p class="text-[10px] text-amber-500 leading-none mt-0.5">est.</p>
-          {:else if actualTime && delayMinutes > 0}
-            <p class="text-xs tabular-nums text-muted-foreground line-through leading-none">{fmt(scheduledTime)}</p>
-            <p class="text-lg font-bold tabular-nums leading-none text-red-500 mt-1">{fmt(actualTime)}</p>
-          {:else}
-            <p class="text-lg font-bold tabular-nums leading-none text-foreground">{fmt(scheduledTime)}</p>
-          {/if}
-        </div>
-
-        <!-- Divider - desktop only -->
-        <div class="hidden sm:block h-10 w-px shrink-0 bg-border"></div>
-
-        <!-- Flight + route -->
-        <div class="min-w-0 flex-1">
-          <div class="flex items-baseline gap-2">
-            <span class="text-base font-semibold leading-none">{flight.flightNumber}</span>
-            {#if flight.aircraftType}
-              <span class="text-xs text-muted-foreground">{flight.aircraftType}</span>
-            {/if}
-          </div>          <p class="mt-0.5 text-sm text-muted-foreground truncate">
-            {isDeparture ? 'to' : 'from'}
-            <span class="font-medium text-foreground">{airportName(otherAirport)}</span>
-            <span class="text-muted-foreground/60">({otherAirport})</span>
-          </p>
-        </div>
+      <!-- Time -->
+      <div class="w-16 shrink-0 text-center">
+        {#if showEstimate}
+          <p class="text-xs tabular-nums text-muted-foreground line-through leading-none">{fmt(scheduledTime)}</p>
+          <p class="text-lg font-bold tabular-nums leading-none text-amber-600 mt-1">{fmt(actualTime)}</p>
+          <p class="text-[10px] text-amber-500 leading-none mt-0.5">est.</p>
+        {:else if actualTime && delayMinutes > 0}
+          <p class="text-xs tabular-nums text-muted-foreground line-through leading-none">{fmt(scheduledTime)}</p>
+          <p class="text-lg font-bold tabular-nums leading-none text-red-500 mt-1">{fmt(actualTime)}</p>
+        {:else}
+          <p class="text-lg font-bold tabular-nums leading-none text-foreground">{fmt(scheduledTime)}</p>
+        {/if}
       </div>
 
-      <!-- Status & Delay - pushed to right on desktop -->
-      <div class="flex items-center justify-between sm:justify-end gap-3 sm:ml-auto">
-        <!-- Delay minutes -->
+      <!-- Divider - desktop only -->
+      <div class="hidden sm:block h-10 w-px shrink-0 bg-border"></div>
+
+      <!-- Flight + route -->
+      <div class="min-w-0 flex-1">
+        <div class="flex items-baseline gap-2">
+          <span class="text-base font-semibold leading-none">{flight.flightNumber}</span>
+          {#if flight.aircraftType}
+            <span class="text-xs text-muted-foreground">{flight.aircraftType}</span>
+          {/if}
+        </div>
+        <p class="mt-0.5 text-sm text-muted-foreground truncate">
+          {isDeparture ? 'to' : 'from'}
+          <span class="font-medium text-foreground">{airportName(otherAirport)}</span>
+          <span class="text-muted-foreground/60 hidden sm:inline">({otherAirport})</span>
+        </p>
+      </div>
+
+      <!-- Status & Delay - fixed width on mobile to prevent jumping -->
+      <div class="flex items-center gap-2 shrink-0 ml-auto">
         {#if delayMinutes > 0}
-          <span class="shrink-0 text-sm sm:text-xs font-bold text-red-600 dark:text-red-400">+{delayMinutes}m</span>
+          <span class="text-xs font-bold text-red-600 dark:text-red-400">+{delayMinutes}m</span>
         {/if}
 
-        <!-- Status badge - larger on mobile for better touch -->
+        <!-- Status badge -->
         <div class="shrink-0">
           {#if tone === 'yellow'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-3 sm:px-2.5 py-1.5 sm:py-1 text-sm sm:text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
               <span class="h-2 w-2 rounded-full bg-amber-500"></span>{flight.status || 'Scheduled'}
             </span>
           {:else if tone === 'red'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-3 sm:px-2.5 py-1.5 sm:py-1 text-sm sm:text-xs font-semibold bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300 border border-red-300 dark:border-red-700">
+            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300 border border-red-300 dark:border-red-700">
               <span class="h-2 w-2 rounded-full bg-red-500"></span>{flight.status || 'Scheduled'}
             </span>
           {:else if tone === 'blue'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-3 sm:px-2.5 py-1.5 sm:py-1 text-sm sm:text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 border border-blue-300 dark:border-blue-700">
+            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 border border-blue-300 dark:border-blue-700">
               <span class="h-2 w-2 rounded-full bg-blue-500"></span>{flight.status || 'Scheduled'}
             </span>
           {:else if tone === 'green'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-3 sm:px-2.5 py-1.5 sm:py-1 text-sm sm:text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300 border border-green-300 dark:border-green-700">
+            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300 border border-green-300 dark:border-green-700">
               <span class="h-2 w-2 rounded-full bg-green-500"></span>{flight.status || 'Scheduled'}
             </span>
           {:else}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-3 sm:px-2.5 py-1.5 sm:py-1 text-sm sm:text-xs font-semibold bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-300 dark:border-gray-600">
+            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-300 dark:border-gray-600">
               <span class="h-2 w-2 rounded-full bg-gray-400"></span>{flight.status || 'Scheduled'}
             </span>
           {/if}
@@ -147,26 +144,26 @@
       </div>
     </div>
 
-    <!-- Weather strip — only when we have data for either airport -->
+    <!-- Weather strip — desktop only, hidden on mobile -->
     {#if hasWeather}
-      <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 border-t border-border/60 px-4 py-2 sm:py-1.5">
+      <div class="hidden sm:flex sm:items-center gap-2 sm:gap-4 border-t border-border/60 px-4 py-1.5">
         {#if depWeather}
           <span class="text-xs text-muted-foreground flex items-center gap-1">
             <span class="font-medium">{airportName(flight.departureAirport)}</span>
             <span class="opacity-50">({flight.departureAirport})</span>
             <span>{weatherIcon(depWeather.weatherCode)}</span>
-            <span class="hidden sm:inline">{fmtWeather(depWeather)}</span>
+            <span>{fmtWeather(depWeather)}</span>
           </span>
         {/if}
         {#if depWeather && arrWeather}
-          <span class="hidden sm:inline text-muted-foreground/40 text-xs">→</span>
+          <span class="text-muted-foreground/40 text-xs">→</span>
         {/if}
         {#if arrWeather}
           <span class="text-xs text-muted-foreground flex items-center gap-1">
             <span class="font-medium">{airportName(flight.arrivalAirport)}</span>
             <span class="opacity-50">({flight.arrivalAirport})</span>
             <span>{weatherIcon(arrWeather.weatherCode)}</span>
-            <span class="hidden sm:inline">{fmtWeather(arrWeather)}</span>
+            <span>{fmtWeather(arrWeather)}</span>
           </span>
         {/if}
       </div>

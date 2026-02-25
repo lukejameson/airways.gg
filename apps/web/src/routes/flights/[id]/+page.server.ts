@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { db, flights, flightStatusHistory, flightNotes, delayPredictions, weatherData, aircraftPositions } from '$lib/server/db';
+import { db, flights, flightStatusHistory, flightNotes, delayPredictions, weatherData, aircraftPositions, flightTimes } from '$lib/server/db';
 import { eq, desc, and, lte, gte, inArray, isNotNull, asc } from 'drizzle-orm';
 import { error } from '@sveltejs/kit';
 
@@ -40,7 +40,7 @@ export const load: PageServerLoad = async ({ params }) => {
         .orderBy(asc(flights.scheduledDeparture))
       : [];
 
-    const [statusHistory, notes, predictions, weatherRows, positionRows] = await Promise.all([
+    const [statusHistory, notes, predictions, weatherRows, positionRows, times] = await Promise.all([
       db.select().from(flightStatusHistory)
         .where(eq(flightStatusHistory.flightId, id))
         .orderBy(desc(flightStatusHistory.statusTimestamp)),
@@ -64,6 +64,9 @@ export const load: PageServerLoad = async ({ params }) => {
         .where(eq(aircraftPositions.flightId, id))
         .orderBy(desc(aircraftPositions.positionTimestamp))
         .limit(1),
+      // Estimated/actual times from API
+      db.select().from(flightTimes)
+        .where(eq(flightTimes.flightId, id)),
     ]);
 
     // Most recent row per airport within the window
@@ -80,6 +83,7 @@ export const load: PageServerLoad = async ({ params }) => {
       weatherMap,
       position: positionRows[0] ?? null,
       rotationFlights,
+      times,
     };
   } catch (err: any) {
     if (err?.status === 404) throw err;

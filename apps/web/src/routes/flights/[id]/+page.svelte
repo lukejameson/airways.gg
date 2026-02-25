@@ -9,7 +9,7 @@
   // Get return tab from URL query param
   const returnTab = $derived($page.url.searchParams.get('tab') ?? '');
 
-  const { flight, statusHistory, prediction, weatherMap, position, rotationFlights } = $derived(data);
+  const { flight, statusHistory, prediction, weatherMap, position, rotationFlights, times } = $derived(data);
   const depWeather = $derived(weatherMap?.[flight.departureAirport] ?? null);
   const arrWeather = $derived(weatherMap?.[flight.arrivalAirport] ?? null);
 
@@ -142,6 +142,12 @@
   const isDeparture = $derived(flight.departureAirport === 'GCI');
   const scheduledTime = $derived(isDeparture ? flight.scheduledDeparture : flight.scheduledArrival);
   const actualTime = $derived(isDeparture ? flight.actualDeparture : flight.actualArrival);
+  const estimatedTime = $derived(() => {
+    const timeType = isDeparture ? 'EstimatedBlockOff' : 'EstimatedBlockOn';
+    return times?.find((t: { timeType: string }) => t.timeType === timeType)?.timeValue ?? null;
+  });
+  const displayTime = $derived(actualTime ?? estimatedTime());
+  const isEstimate = $derived(!actualTime && !!estimatedTime());
   const otherAirport = $derived(isDeparture ? flight.arrivalAirport : flight.departureAirport);
   const delayMinutes = $derived(flight.delayMinutes ?? 0);
 
@@ -168,6 +174,15 @@
       day: '2-digit',
       month: 'long',
       year: 'numeric',
+    });
+  }
+
+  function shortDate(date: string | Date | null | undefined): string {
+    if (!date) return '';
+    return new Date(date).toLocaleDateString('en-GB', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
     });
   }
 
@@ -268,80 +283,80 @@
   <meta name="twitter:description" content={seoDescription} />
 </svelte:head>
 
-<div class="container py-6 max-w-3xl">
-  <!-- Back link -->
-  <a 
-    href="/{returnTab ? `?tab=${returnTab}` : ''}"
-    class="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-6 transition-colors"
-  >
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>
-    </svg>
-    ← Back
-  </a>
+<div class="container py-4 sm:py-6 max-w-3xl">
+  <!-- Top row: Back + Share -->
+  <div class="flex items-center justify-between mb-4">
+    <a 
+      href="/{returnTab ? `?tab=${returnTab}` : ''}"
+      class="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+    >
+      ← Back
+    </a>
+    
+    <button
+      onclick={shareFlight}
+      class="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors rounded-md px-2 py-1"
+      aria-label="Share this flight"
+    >
+      {#if shareSuccess}
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-green-500">
+          <path d="M20 6 9 17l-5-5"/>
+        </svg>
+        <span class="text-green-600 text-xs">Copied!</span>
+      {:else}
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16,6 12,2 8,6"/><line x1="12" x2="12" y1="2" y2="15"/>
+        </svg>
+        Share
+      {/if}
+    </button>
+  </div>
 
-  <!-- Header -->
-  <div class="mb-8">
-    <div class="flex items-start justify-between gap-4 flex-wrap">
-      <div>
-        <div class="flex items-center gap-3 mb-1">
-          <h1 class="text-4xl font-bold tracking-tight">{flight.flightNumber}</h1>
-          <span class="rounded-full border px-3 py-1 text-sm font-medium text-muted-foreground">
-            {flight.airlineCode}
-          </span>
-        </div>
-        <p class="text-muted-foreground text-lg">
-          {isDeparture ? 'Departure to' : 'Arrival from'}
-          <span class="font-semibold text-foreground">{airportName(otherAirport)}</span>
-          <span class="text-muted-foreground/50 text-base">({otherAirport})</span>
-        </p>
-        <p class="text-sm text-muted-foreground mt-1">{formatDate(flight.flightDate)}</p>
+  <!-- Flight Info Header -->
+  <div class="mb-6">
+    <div class="flex items-baseline gap-2 mb-1">
+      <h1 class="text-3xl sm:text-4xl font-bold tracking-tight">{flight.flightNumber}</h1>
+      <span class="rounded-full border px-2 py-0.5 text-xs sm:text-sm font-medium text-muted-foreground">
+        {flight.airlineCode}
+      </span>
+    </div>
+    
+    <p class="text-base sm:text-lg text-muted-foreground">
+      {isDeparture ? 'to' : 'from'}
+      <span class="font-semibold text-foreground">{airportName(otherAirport)}</span>
+      <span class="hidden sm:inline text-muted-foreground/50">({otherAirport})</span>
+    </p>
+    
+    <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+      <span class="text-muted-foreground">{shortDate(flight.flightDate)}</span>
+      <span class="opacity-30 hidden sm:inline">·</span>
+      <div class="flex items-center gap-1.5">
+        <span class="h-2 w-2 rounded-full {getStatusDotColor(flight.status)}"></span>
+        <span class="font-medium {getStatusColor(flight.status)}">
+          {flight.status || 'Scheduled'}
+        </span>
       </div>
-
-      <div class="flex flex-col items-end gap-2">
-        <div class="flex items-center gap-2">
-          <span class="h-3 w-3 rounded-full {getStatusDotColor(flight.status)}"></span>
-          <span class="font-semibold {getStatusColor(flight.status)}">
-            {flight.status || 'Scheduled'}
-          </span>
-        </div>
-        {#if delayMinutes > 0}
-          <div class="rounded-full bg-red-100 px-3 py-1 text-sm font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">
-            +{delayMinutes} min delay
-          </div>
-        {:else if delayMinutes < 0}
-          <div class="rounded-full bg-green-100 px-3 py-1 text-sm font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300">
-            {Math.abs(delayMinutes)} min early
-          </div>
-        {:else if flight.status?.toLowerCase().includes('delayed')}
-          <div class="rounded-full bg-yellow-100 px-3 py-1 text-sm font-semibold text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300">
-            Delay time TBC
-          </div>
-        {:else}
-          <div class="rounded-full bg-green-100 px-3 py-1 text-sm font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300">
-            On Time
-          </div>
-        {/if}
-        
-        <!-- Share Button -->
-        <button
-          onclick={shareFlight}
-          class="mt-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
-          aria-label="Share this flight"
-        >
-          {#if shareSuccess}
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-green-500">
-              <path d="M20 6 9 17l-5-5"/>
-            </svg>
-            <span class="text-green-600">Copied!</span>
-          {:else}
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16,6 12,2 8,6"/><line x1="12" x2="12" y1="2" y2="15"/>
-            </svg>
-            Share
-          {/if}
-        </button>
-      </div>
+      {#if delayMinutes > 0}
+        <span class="opacity-30 hidden sm:inline">·</span>
+        <span class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">
+          +{delayMinutes}m
+        </span>
+      {:else if delayMinutes < 0}
+        <span class="opacity-30 hidden sm:inline">·</span>
+        <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300">
+          {Math.abs(delayMinutes)}m early
+        </span>
+      {:else if flight.status?.toLowerCase().includes('delayed')}
+        <span class="opacity-30 hidden sm:inline">·</span>
+        <span class="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300">
+          Delay TBC
+        </span>
+      {:else}
+        <span class="opacity-30 hidden sm:inline">·</span>
+        <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300">
+          On Time
+        </span>
+      {/if}
     </div>
   </div>
 
@@ -357,13 +372,12 @@
     </div>
 
     <div class="rounded-lg border bg-card p-4">
-      {#if actualTime}
-        {@const isEstimate = flight.status?.toLowerCase() === 'delayed'}
+      {#if displayTime}
         <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
           {isEstimate ? 'Estimated' : 'Actual'} {isDeparture ? 'Departure' : 'Arrival'}
         </p>
         <p class="text-3xl font-bold tabular-nums {isEstimate ? 'text-yellow-500' : delayMinutes > 0 ? 'text-red-500' : delayMinutes < 0 ? 'text-green-500' : ''}">
-          {formatTime(actualTime)}
+          {formatTime(displayTime)}
         </p>
         {#if isEstimate}
           <p class="text-xs text-yellow-600 dark:text-yellow-400 mt-1">Estimated — subject to change</p>

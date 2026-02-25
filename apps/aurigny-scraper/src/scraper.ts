@@ -193,8 +193,8 @@ function parseFlightXml(xmlData: string): ScrapedFlight[] {
         departureAirport: String(f.DepartureAirportCode || ''),
         arrivalAirport: String(f.ArrivalAirportCode || ''),
         scheduledDeparture, scheduledArrival,
-        actualDeparture: timeMap.get('ActualBlockOff') ?? timeMap.get('EstimatedBlockOff'),
-        actualArrival: timeMap.get('ActualBlockOn') ?? timeMap.get('EstimatedBlockOn'),
+        actualDeparture: timeMap.get('ActualBlockOff'),
+        actualArrival: timeMap.get('ActualBlockOn'),
         status: String(f.Status || ''),
         canceled: f.Canceled === 'true' || f.Canceled === true,
         aircraftRegistration: f.AircraftRegistration ? String(f.AircraftRegistration) : undefined,
@@ -239,7 +239,8 @@ async function upsertFlights(scrapedFlights: ScrapedFlight[]): Promise<number> {
         .onConflictDoUpdate({
           target: flightsTable.uniqueId,
           set: {
-            actualDeparture: flight.actualDeparture, actualArrival: flight.actualArrival,
+            actualDeparture: flight.actualDeparture ?? null,
+            actualArrival: flight.actualArrival ?? null,
             status: flight.status, canceled: flight.canceled, delayMinutes, updatedAt: new Date(),
           },
         })
