@@ -29,6 +29,9 @@ FROM node:20-slim
 RUN apt-get update && apt-get install -y \
     xvfb \
     gosu \
+    tzdata \
+    locales \
+    procps \
     fonts-liberation \
     fonts-noto-color-emoji \
     fonts-dejavu-core \
@@ -55,11 +58,16 @@ RUN apt-get update && apt-get install -y \
     libxkbcommon0 \
     libglu1-mesa \
     --no-install-recommends \
+    && ln -snf /usr/share/zoneinfo/Europe/London /etc/localtime \
+    && echo "Europe/London" > /etc/timezone \
+    && locale-gen en_GB.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
-    DISPLAY=:99 \
-    HOME=/home/scraper
+    HOME=/home/scraper \
+    TZ=Europe/London \
+    LANG=en_GB.UTF-8 \
+    LANGUAGE=en_GB:en
 
 WORKDIR /app
 

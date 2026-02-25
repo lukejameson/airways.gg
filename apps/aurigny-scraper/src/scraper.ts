@@ -302,11 +302,12 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
       const connectOptions: Record<string, unknown> = {
         headless: false,
         turnstile: true,
-        // In Docker we manage Xvfb ourselves via entrypoint; locally let the lib handle it
-        disableXvfb: isDocker,
+        disableXvfb: false,
         args: [
           '--disable-dev-shm-usage',
           '--window-size=1920,1080',
+          '--lang=en-GB',
+          '--accept-lang=en-GB,en;q=0.9',
           ...(isDocker ? [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -450,12 +451,20 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
         .set({ status: 'success', recordsScraped: upsertedCount, completedAt: new Date(), retryCount: attempt - 1 })
         .where(eq(scraperLogs.id, logId));
 
-      await browser.close();
+      console.log('[Aurigny] Closing browser...');
+      await Promise.race([
+        browser.close(),
+        new Promise(resolve => setTimeout(resolve, 5000)),
+      ]);
+      console.log('[Aurigny] Browser closed');
       return { success: true, count: upsertedCount };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[Aurigny] Attempt ${attempt} failed: ${message}`);
-      if (browser) await browser.close().catch(() => {});
+      if (browser) await Promise.race([
+        browser.close(),
+        new Promise(resolve => setTimeout(resolve, 5000)),
+      ]).catch(() => {});
 
       if (attempt < maxRetries) {
         const backoff = Math.pow(2, attempt) * 5000 + Math.random() * 5000;

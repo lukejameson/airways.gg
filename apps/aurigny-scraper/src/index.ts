@@ -77,6 +77,8 @@ async function main() {
     await runScrape('Initial scrape');
   }
 
+  console.log(`[Aurigny] Scrape complete. Next run in ~${INTERVAL_MS / 1000}s.`);
+
   setInterval(async () => {
     const jitter = Math.floor(Math.random() * 120000);
     console.log(`[Aurigny] Next scrape in ${Math.round(jitter / 1000)}s (jitter)...`);
