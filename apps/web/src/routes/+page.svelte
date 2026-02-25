@@ -13,8 +13,10 @@
   );
   let showCompleted = $state($page.url.searchParams.get('completed') === '1');
   let searchQuery = $state('');
-  let lastUpdated = $state(new Date());
   let isLoading = $state(true);
+
+  // Derive lastUpdated from server data - shows when scraper last ran
+  const lastUpdated = $derived(data.lastUpdated);
 
   // Sync state from URL only when the URL path/search actually changes (back/forward nav)
   let lastSeenUrl = $state($page.url.href);
@@ -139,7 +141,6 @@
 
     const interval = setInterval(async () => {
       await invalidateAll();
-      lastUpdated = new Date();
     }, 5 * 60 * 1000);
     return () => clearInterval(interval);
   });

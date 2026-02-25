@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { db, flights, delayPredictions, weatherData } from '$lib/server/db';
+import { db, flights, delayPredictions, weatherData, scraperLogs } from '$lib/server/db';
 import { and, gte, lte, inArray, or, eq, desc, sql } from 'drizzle-orm';
 
 export const load: PageServerLoad = async () => {
@@ -66,10 +66,19 @@ export const load: PageServerLoad = async () => {
       }
     }
 
+    // Get last successful scrape time
+    const [lastScrape] = await db
+      .select({ completedAt: scraperLogs.completedAt })
+      .from(scraperLogs)
+      .where(eq(scraperLogs.status, 'success'))
+      .orderBy(desc(scraperLogs.completedAt))
+      .limit(1);
+
     return {
       flights: flightsWithPredictions,
       weather: weatherMap['GCI'] ?? null,   // current GCI weather for the header
       weatherMap,                            // all airports for per-flight display
+      lastUpdated: lastScrape?.completedAt ?? now,
     };
   } catch (err) {
     console.error('Error loading flights:', err);
