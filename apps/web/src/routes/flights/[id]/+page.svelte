@@ -2,7 +2,7 @@
   import type { PageData } from './$types';
   import { browser } from '$app/environment';
   import { page } from '$app/stores';
-  import { AIRPORTS, airportName } from '$lib/airports';
+  import { airportName, getAirportCoords, getAirportsForNearestSearch } from '$lib/airports';
 
   let { data }: { data: PageData } = $props();
   
@@ -66,10 +66,11 @@
 
   /** Find the nearest airport IATA code from a lat/lon using the known AIRPORTS table. */
   function nearestAirport(lat: number, lon: number): string | null {
+    const airports = getAirportsForNearestSearch();
     let best: string | null = null;
     let bestDist = Infinity;
-    for (const [iata, info] of Object.entries(AIRPORTS)) {
-      const d = calculateDistance(lat, lon, info.coords[0], info.coords[1]);
+    for (const { iata, lat: aLat, lon: aLon } of airports) {
+      const d = calculateDistance(lat, lon, aLat, aLon);
       if (d < bestDist) { bestDist = d; best = iata; }
     }
     // Only trust if within 30 km of a known airport
@@ -184,10 +185,10 @@
   }
 
   const depCoords = $derived(
-    (position?.originIata ? AIRPORTS[position.originIata] : AIRPORTS[flight.departureAirport])?.coords
+    position?.originIata ? getAirportCoords(position.originIata) : getAirportCoords(flight.departureAirport)
   );
   const arrCoords = $derived(
-    (position?.destIata ? AIRPORTS[position.destIata] : AIRPORTS[flight.arrivalAirport])?.coords
+    position?.destIata ? getAirportCoords(position.destIata) : getAirportCoords(flight.arrivalAirport)
   );
 
   function compassDir(deg: number | null): string {

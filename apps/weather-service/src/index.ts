@@ -22,14 +22,21 @@ if (envPath) {
 }
 
 import { fetchAllWeather } from './fetcher';
+import { ensureAirportsSynced, startAirportSyncScheduler } from './airports';
 
-const INTERVAL_MS = parseInt(process.env.WEATHER_INTERVAL_MS || '3600000'); // default 1 hour
+const INTERVAL_MS = parseInt(process.env.WEATHER_INTERVAL_MS || '900000'); // default 15 minutes (METAR updates hourly)
 
 async function main() {
   console.log('[Weather] Weather service starting...');
   console.log(`[Weather] Interval: ${INTERVAL_MS / 60000} minutes`);
 
-  // Run immediately on startup
+  try {
+    await ensureAirportsSynced();
+    startAirportSyncScheduler();
+  } catch (err) {
+    console.error('[Weather] Failed to sync airports:', err);
+  }
+
   await fetchAllWeather();
 
   setInterval(async () => {

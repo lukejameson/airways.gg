@@ -1,8 +1,12 @@
 <script lang="ts">
   import '../app.css';
   import { ThemeToggle } from '$lib/components';
+  import { initAirports } from '$lib/airports';
+  import type { AirportInfo } from '$lib/airports';
 
   let { data, children } = $props();
+
+  initAirports(data.airports as Record<string, AirportInfo>);
 
   const umamiWebsiteId = $derived(data.umamiWebsiteId);
   const umamiUrl = $derived(data.umamiUrl);

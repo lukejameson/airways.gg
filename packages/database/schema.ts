@@ -179,6 +179,22 @@ export const weatherData = pgTable('weather_data', {
   uniqueIndex('weather_data_unique_idx').on(table.airportCode, table.timestamp),
 ]);
 
+export const airports = pgTable('airports', {
+  id: serial('id').primaryKey(),
+  iataCode: varchar('iata_code', { length: 10 }).notNull().unique(),
+  icaoCode: varchar('icao_code', { length: 10 }),
+  name: varchar('name', { length: 255 }).notNull(),
+  city: varchar('city', { length: 100 }),
+  country: varchar('country', { length: 100 }),
+  latitude: real('latitude'),
+  longitude: real('longitude'),
+  elevationFt: integer('elevation_ft'),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => [
+  index('airports_iata_idx').on(table.iataCode),
+  index('airports_icao_idx').on(table.icaoCode),
+]);
+
 export const delayPredictions = pgTable('delay_predictions', {
   id: serial('id').primaryKey(),
   flightId: integer('flight_id').notNull().references(() => flights.id, { onDelete: 'cascade' }),

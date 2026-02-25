@@ -16,6 +16,7 @@ export {
   scraperLogs,
   mlModelMetrics,
   aircraftPositions,
+  airports,
   users,
   sessions,
   departures,

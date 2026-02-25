@@ -184,9 +184,11 @@
       <div class="flex items-center gap-1.5 shrink-0 text-right">
         <span class="h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
         <span class="text-sm text-muted-foreground">Live</span>
-        <span class="text-xs text-muted-foreground/70 ml-1 tabular-nums">
-          {lastUpdated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-        </span>
+        {#if lastUpdated}
+          <span class="text-xs text-muted-foreground/70 ml-1 tabular-nums">
+            {lastUpdated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        {/if}
       </div>
     </div>
   </header>

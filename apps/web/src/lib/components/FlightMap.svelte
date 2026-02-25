@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { AIRPORTS, airportName } from '$lib/airports';
+  import { airportName, getAirportCoords } from '$lib/airports';
 
   interface Props {
     lat: number;
@@ -40,8 +40,8 @@
       maxZoom: 18,
     }).addTo(mapInstance);
 
-    const depCoords = AIRPORTS[depAirport]?.coords;
-    const arrCoords = AIRPORTS[arrAirport]?.coords;
+    const depCoords = getAirportCoords(depAirport);
+    const arrCoords = getAirportCoords(arrAirport);
     const aircraftCoords: [number, number] = [lat, lon];
 
     if (depCoords && arrCoords) {

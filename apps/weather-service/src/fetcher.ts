@@ -1,21 +1,428 @@
-import { db, weatherData } from '@delays/database';
+import { db, weatherData, flights } from '@delays/database';
+import { sql } from 'drizzle-orm';
+import { getIcaoMapping } from './airports';
 
-// Airports to track: GCI plus key Aurigny destinations
-// Coords from OpenMeteo-compatible lat/lon
-const AIRPORTS: { code: string; lat: number; lon: number }[] = [
-  { code: 'GCI', lat: 49.4348, lon: -2.5986 }, // Guernsey
-  { code: 'JER', lat: 49.2079, lon: -2.1955 }, // Jersey
-  { code: 'LGW', lat: 51.1481, lon: -0.1903 }, // London Gatwick
-  { code: 'LCY', lat: 51.5048, lon:  0.0495 }, // London City
-  { code: 'MAN', lat: 53.3537, lon: -2.2750 }, // Manchester
-  { code: 'BRS', lat: 51.3827, lon: -2.7191 }, // Bristol
-  { code: 'BHX', lat: 52.4539, lon: -1.7480 }, // Birmingham
-  { code: 'SOU', lat: 50.9503, lon: -1.3568 }, // Southampton
-  { code: 'ACI', lat: 49.7061, lon: -2.2147 }, // Alderney
-  { code: 'CDG', lat: 49.0097, lon:  2.5478 }, // Paris CDG
-];
+const AVIATION_WEATHER_BASE = 'https://aviationweather.gov/api/data';
+const BATCH_SIZE = 50;
 
-const OPENMETEO_BASE = process.env.OPENMETEO_API_URL || 'https://api.open-meteo.com/v1/forecast';
+interface WeatherRow {
+  airportCode: string;
+  timestamp: Date;
+  temperature: number | null;
+  windSpeed: number | null;
+  windDirection: number | null;
+  visibility: number | null;
+  cloudCover: number;
+  pressure: number | null;
+  weatherCode: number;
+}
+
+interface ParsedConditions {
+  temp?: number;
+  dewp?: number;
+  wdir?: number;
+  wspd?: number;
+  visib?: number;
+  pressure?: number;
+  cover?: Array<{ layer: string; base: number }>;
+}
+
+function parseWeatherString(text: string): ParsedConditions {
+  const result: ParsedConditions = {};
+  const parts = text.split(' ');
+  
+  for (const part of parts) {
+    // Temperature (e.g., 15/07 or M02/M04 for negative)
+    const tempMatch = part.match(/^(M?\d{2})\/(M?\d{2})$/);
+    if (tempMatch) {
+      result.temp = parseInt(tempMatch[1].replace('M', '-'));
+      result.dewp = parseInt(tempMatch[2].replace('M', '-'));
+      continue;
+    }
+    
+    // Wind (e.g., 24006KT, VRB04KT, or 24006G12KT with gusts)
+    const windMatch = part.match(/^(\d{3}|VRB)(\d{2,3})(?:G\d{2,3})?KT$/);
+    if (windMatch) {
+      result.wdir = windMatch[1] === 'VRB' ? 0 : parseInt(windMatch[1]);
+      result.wspd = parseInt(windMatch[2]);
+      continue;
+    }
+    
+    // Pressure (e.g., Q1016)
+    const pressureMatch = part.match(/^Q(\d{4})$/);
+    if (pressureMatch) {
+      result.pressure = parseInt(pressureMatch[1]);
+      continue;
+    }
+    
+    // Visibility (e.g., 9999, 5000, or 1/2SM, 3SM for statute miles)
+    if (/^\d{4}$/.test(part) && !part.startsWith('Q')) {
+      const vis = parseInt(part);
+      if (vis >= 1000 && vis <= 9999) {
+        result.visib = vis >= 9999 ? 10 : vis / 1000;
+      }
+      continue;
+    }
+    
+    // CAVOK (Ceiling And Visibility OK)
+    if (part === 'CAVOK') {
+      result.visib = 10;
+    }
+    
+    // Cloud layers (e.g., FEW020, SCT030, BKN050, OVC100, NSC)
+    const cloudMatch = part.match(/^(FEW|SCT|BKN|OVC)(\d{3})$/);
+    if (cloudMatch) {
+      if (!result.cover) result.cover = [];
+      result.cover.push({
+        layer: cloudMatch[1],
+        base: parseInt(cloudMatch[2]) * 100,
+      });
+    } else if (part === 'NSC') {
+      // No significant clouds
+      result.cover = [];
+    }
+  }
+  
+  return result;
+}
+
+function getCloudCoverPercent(data: ParsedConditions): number {
+  if (!data.cover || data.cover.length === 0) {
+    return data.visib === 10 ? 0 : 0;
+  }
+  
+  const layerCoverage: Record<string, number> = {
+    'FEW': 25,
+    'SCT': 50,
+    'BKN': 75,
+    'OVC': 100,
+  };
+  
+  let maxCover = 0;
+  for (const layer of data.cover) {
+    maxCover = Math.max(maxCover, layerCoverage[layer.layer] || 0);
+  }
+  
+  return maxCover;
+}
+
+function getWeatherCode(cloudCover: number): number {
+  if (cloudCover === 0) return 0;
+  if (cloudCover <= 25) return 1;
+  if (cloudCover <= 50) return 2;
+  return 3;
+}
+
+// Batch insert weather data efficiently
+async function batchInsertWeather(rows: WeatherRow[]): Promise<number> {
+  if (rows.length === 0) return 0;
+  
+  // Deduplicate rows by airport_code + timestamp
+  // Keep the last occurrence (most recent data wins)
+  const uniqueRows = new Map<string, WeatherRow>();
+  for (const row of rows) {
+    const key = `${row.airportCode}|${row.timestamp.toISOString()}`;
+    uniqueRows.set(key, row);
+  }
+  
+  const deduplicatedRows = Array.from(uniqueRows.values());
+  
+  if (deduplicatedRows.length !== rows.length) {
+    console.log(`[Weather] Deduplicated ${rows.length} rows to ${deduplicatedRows.length} unique rows`);
+  }
+  
+  // Use a single insert with multiple values
+  const values = deduplicatedRows.map(r => ({
+    airportCode: r.airportCode,
+    timestamp: r.timestamp,
+    temperature: r.temperature,
+    windSpeed: r.windSpeed,
+    windDirection: r.windDirection,
+    visibility: r.visibility,
+    cloudCover: r.cloudCover,
+    pressure: r.pressure,
+    weatherCode: r.weatherCode,
+  }));
+  
+  // Insert in batches
+  let inserted = 0;
+  for (let i = 0; i < values.length; i += BATCH_SIZE) {
+    const batch = values.slice(i, i + BATCH_SIZE);
+    await db.insert(weatherData).values(batch).onConflictDoUpdate({
+      target: [weatherData.airportCode, weatherData.timestamp],
+      set: {
+        temperature: sql`EXCLUDED.temperature`,
+        windSpeed: sql`EXCLUDED.wind_speed`,
+        windDirection: sql`EXCLUDED.wind_direction`,
+        visibility: sql`EXCLUDED.visibility`,
+        cloudCover: sql`EXCLUDED.cloud_cover`,
+        pressure: sql`EXCLUDED.pressure`,
+        weatherCode: sql`EXCLUDED.weather_code`,
+      },
+    });
+    inserted += batch.length;
+  }
+  
+  return inserted;
+}
+
+async function fetchAllMetars(airports: { code: string; icao: string }[]): Promise<Map<string, ParsedConditions>> {
+  const icaos = airports.map(a => a.icao).join(',');
+  const url = `${AVIATION_WEATHER_BASE}/metar?ids=${icaos}&hours=1`;
+  
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`AviationWeather METAR ${res.status}`);
+  
+  const text = await res.text();
+  const results = new Map<string, ParsedConditions>();
+  
+  const lines = text.trim().split('\n').filter(l => l.trim());
+  for (const line of lines) {
+    // Extract ICAO code (first word after optional METAR)
+    const match = line.match(/^(?:METAR\s+)?(\w{4})\s+/);
+    if (!match) continue;
+    
+    const icao = match[1];
+    const data = parseWeatherString(line);
+    if (data.temp != null) {
+      results.set(icao, data);
+    }
+  }
+  
+  return results;
+}
+
+async function fetchAllTafs(airports: { code: string; icao: string }[]): Promise<Map<string, WeatherRow[]>> {
+  const icaos = airports.map(a => a.icao).join(',');
+  const url = `${AVIATION_WEATHER_BASE}/taf?ids=${icaos}&hours=12`;
+  // Create lookup map for faster access
+  const airportByIcao = new Map(airports.map(a => [a.icao, a]));
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`AviationWeather TAF ${res.status}`);
+
+  const text = await res.text();
+  const results = new Map<string, WeatherRow[]>();
+  const now = new Date();
+  let currentYear = now.getUTCFullYear();
+  const currentMonth = now.getUTCMonth();
+  const currentDay = now.getUTCDate();
+
+  // TAFs are returned one per line, but may have continuation lines (indented)
+  // Split into individual TAFs by finding lines that start with "TAF "
+  const lines = text.split('\n');
+  const tafs: string[] = [];
+  let currentTaf = '';
+
+  for (const line of lines) {
+    if (line.startsWith('TAF ')) {
+      // Save previous TAF if exists
+      if (currentTaf) {
+        tafs.push(currentTaf.trim());
+      }
+      currentTaf = line;
+    } else if (line.trim().startsWith('TAF ') && !currentTaf) {
+      // Handle case where TAF starts after whitespace
+      if (currentTaf) {
+        tafs.push(currentTaf.trim());
+      }
+      currentTaf = line.trim();
+    } else if (currentTaf) {
+      // Continuation line - append to current TAF
+      currentTaf += ' ' + line.trim();
+    }
+  }
+  // Don't forget the last TAF
+  if (currentTaf) {
+    tafs.push(currentTaf.trim());
+  }
+
+  console.log(`[Weather] Parsed ${tafs.length} TAFs from response`);
+
+  for (const tafText of tafs) {
+    // Extract ICAO from the TAF header
+    const headerMatch = tafText.match(/^TAF\s+(\w{4})/);
+    if (!headerMatch) continue;
+
+    const icao = headerMatch[1];
+    const airport = airportByIcao.get(icao);
+    if (!airport) {
+      console.log(`[Weather] Unknown ICAO in TAF: ${icao}`);
+      continue;
+    }
+    
+    const forecasts: WeatherRow[] = [];
+
+    // Parse the main forecast period from the TAF
+    // Main forecast period: DDHH/DDHH
+    const periodMatch = tafText.match(/(\d{2})(\d{2})\/(\d{2})(\d{2})\s+(.+?)(?:\s+(?:BECMG|TEMPO|FM|PROB)\s|$)/);
+    if (!periodMatch) continue;
+
+    const startDay = parseInt(periodMatch[1]);
+    const startHour = parseInt(periodMatch[2]);
+    const endDay = parseInt(periodMatch[3]);
+    const endHour = parseInt(periodMatch[4]);
+    let conditionsText = periodMatch[5];
+
+    // Handle month rollover
+    let startMonth = currentMonth;
+    let endMonth = currentMonth;
+
+    if (startDay < currentDay && currentDay > 25) {
+      startMonth = (currentMonth + 1) % 12;
+      if (startMonth === 0) currentYear++;
+    }
+    if (endDay < startDay) {
+      endMonth = (startMonth + 1) % 12;
+    }
+
+    const startDate = new Date(Date.UTC(currentYear, startMonth, startDay, startHour));
+    const endDate = new Date(Date.UTC(currentYear, endMonth, endDay, endHour));
+
+    // Check for BECMG (becoming) - gradual change during period
+    const becmgMatch = tafText.match(/BECMG\s+(\d{2})(\d{2})\/(\d{2})(\d{2})\s+(.+)/);
+    if (becmgMatch) {
+      // Use the becoming conditions for the latter part of the period
+      conditionsText = becmgMatch[5];
+    }
+
+    const data = parseWeatherString(conditionsText);
+    const cloudCover = getCloudCoverPercent(data);
+
+    // Generate hourly forecasts
+    const hour = new Date(startDate);
+    while (hour < endDate) {
+      forecasts.push({
+        airportCode: airport.code,
+        timestamp: new Date(hour),
+        temperature: data.temp ?? 15,
+        windSpeed: data.wspd ?? 5,
+        windDirection: data.wdir ?? 0,
+        visibility: data.visib ?? 10,
+        cloudCover,
+        pressure: data.pressure ?? null,
+        weatherCode: getWeatherCode(cloudCover),
+      });
+      hour.setHours(hour.getHours() + 1);
+    }
+    
+    if (forecasts.length > 0) {
+      results.set(airport.code, forecasts);
+    }
+  }
+  
+  return results;
+}
+
+async function getAirportsFromFlights(): Promise<{ code: string; icao: string }[]> {
+  // Get today's date range
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  // Query unique airports from today's flights
+  const todaysFlights = await db
+    .select({
+      departureAirport: flights.departureAirport,
+      arrivalAirport: flights.arrivalAirport,
+    })
+    .from(flights)
+    .where(
+      sql`${flights.scheduledDeparture} >= ${today} AND ${flights.scheduledDeparture} < ${tomorrow}`
+    );
+
+  // Collect unique airport codes
+  const airportCodes = new Set<string>();
+  for (const flight of todaysFlights) {
+    airportCodes.add(flight.departureAirport);
+    airportCodes.add(flight.arrivalAirport);
+  }
+
+  const icaoMapping = await getIcaoMapping(Array.from(airportCodes));
+  
+  const airports: { code: string; icao: string }[] = [];
+  for (const code of airportCodes) {
+    const icao = icaoMapping.get(code);
+    if (icao) {
+      airports.push({ code, icao });
+    } else {
+      console.log(`[Weather] No ICAO mapping for airport: ${code}`);
+    }
+  }
+
+  return airports;
+}
+
+export async function fetchAllWeather(): Promise<void> {
+  // Get airports dynamically from today's flights
+  const airports = await getAirportsFromFlights();
+  
+  if (airports.length === 0) {
+    console.log('[Weather] No airports found in today\'s flights');
+    return;
+  }
+
+  console.log(`[Weather] Fetching aviation weather for ${airports.length} airports: ${airports.map(a => a.code).join(', ')}`);
+  
+  try {
+    // Fetch all METARs in one request
+    console.log('[Weather] Fetching METARs...');
+    const metars = await fetchAllMetars(airports);
+    console.log(`[Weather] Received ${metars.size} METARs`);
+    
+    // Convert METARs to weather rows
+    const metarRows: WeatherRow[] = [];
+    const now = new Date();
+    
+    for (const airport of airports) {
+      const data = metars.get(airport.icao);
+      if (!data || data.temp == null) {
+        console.log(`[Weather] No METAR for ${airport.code}`);
+        continue;
+      }
+      
+      const cloudCover = getCloudCoverPercent(data);
+      metarRows.push({
+        airportCode: airport.code,
+        timestamp: now,
+        temperature: data.temp,
+        windSpeed: data.wspd ?? null,
+        windDirection: data.wdir ?? null,
+        visibility: data.visib ?? null,
+        cloudCover,
+        pressure: data.pressure ?? null,
+        weatherCode: getWeatherCode(cloudCover),
+      });
+      
+      console.log(`[Weather] ${airport.code}: ${cloudCover}% cloud, ${data.temp}°C`);
+    }
+    
+    // Batch insert METARs
+    const metarCount = await batchInsertWeather(metarRows);
+    console.log(`[Weather] Inserted ${metarCount} METAR records`);
+    
+    // Fetch all TAFs in one request
+    console.log('[Weather] Fetching TAFs...');
+    const tafs = await fetchAllTafs(airports);
+    console.log(`[Weather] Received TAFs for ${tafs.size} airports`);
+    
+    // Flatten all TAF forecasts
+    const tafRows: WeatherRow[] = [];
+    for (const [, forecasts] of tafs) {
+      tafRows.push(...forecasts);
+    }
+    
+    // Batch insert TAFs
+    const tafCount = await batchInsertWeather(tafRows);
+    console.log(`[Weather] Inserted ${tafCount} TAF forecast hours`);
+    
+    console.log(`[Weather] Done. Total: ${metarCount} METAR + ${tafCount} TAF records`);
+  } catch (err) {
+    console.error('[Weather] Fatal error:', err);
+    throw err;
+  }
+}
 
 // WMO weather code → human-readable description
 export function describeWeatherCode(code: number): string {
@@ -31,94 +438,4 @@ export function describeWeatherCode(code: number): string {
   if (code <= 86) return 'Snow showers';
   if (code <= 99) return 'Thunderstorm';
   return 'Unknown';
-}
-
-interface OpenMeteoResponse {
-  hourly: {
-    time: string[];
-    temperature_2m: number[];
-    wind_speed_10m: number[];
-    wind_direction_10m: number[];
-    precipitation: number[];
-    visibility: number[];
-    cloud_cover: number[];
-    surface_pressure: number[];
-    weather_code: number[];
-  };
-}
-
-async function fetchWeatherForAirport(airport: { code: string; lat: number; lon: number }): Promise<number> {
-  const params = new URLSearchParams({
-    latitude: airport.lat.toString(),
-    longitude: airport.lon.toString(),
-    hourly: 'temperature_2m,wind_speed_10m,wind_direction_10m,precipitation,visibility,cloud_cover,surface_pressure,weather_code',
-    wind_speed_unit: 'mph',
-    forecast_days: '2', // today + tomorrow
-    timezone: 'UTC',
-  });
-
-  const url = `${OPENMETEO_BASE}?${params}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`OpenMeteo ${res.status} for ${airport.code}`);
-
-  const data = (await res.json()) as OpenMeteoResponse;
-  const { hourly } = data;
-
-  // Upsert each hourly reading
-  let upserted = 0;
-  for (let i = 0; i < hourly.time.length; i++) {
-    const timestamp = new Date(hourly.time[i] + ':00Z'); // ISO with explicit UTC
-    await db
-      .insert(weatherData)
-      .values({
-        airportCode: airport.code,
-        timestamp,
-        temperature: hourly.temperature_2m[i] ?? null,
-        windSpeed: hourly.wind_speed_10m[i] ?? null,
-        windDirection: hourly.wind_direction_10m[i] != null ? Math.round(hourly.wind_direction_10m[i]) : null,
-        precipitation: hourly.precipitation[i] ?? null,
-        visibility: hourly.visibility[i] != null ? hourly.visibility[i] / 1000 : null, // m → km
-        cloudCover: hourly.cloud_cover[i] != null ? Math.round(hourly.cloud_cover[i]) : null,
-        pressure: hourly.surface_pressure[i] ?? null,
-        weatherCode: hourly.weather_code[i] != null ? Math.round(hourly.weather_code[i]) : null,
-      })
-      .onConflictDoUpdate({
-        target: [weatherData.airportCode, weatherData.timestamp],
-        set: {
-          temperature: hourly.temperature_2m[i] ?? null,
-          windSpeed: hourly.wind_speed_10m[i] ?? null,
-          windDirection: hourly.wind_direction_10m[i] != null ? Math.round(hourly.wind_direction_10m[i]) : null,
-          precipitation: hourly.precipitation[i] ?? null,
-          visibility: hourly.visibility[i] != null ? hourly.visibility[i] / 1000 : null,
-          cloudCover: hourly.cloud_cover[i] != null ? Math.round(hourly.cloud_cover[i]) : null,
-          pressure: hourly.surface_pressure[i] ?? null,
-          weatherCode: hourly.weather_code[i] != null ? Math.round(hourly.weather_code[i]) : null,
-        },
-      });
-    upserted++;
-  }
-  return upserted;
-}
-
-export async function fetchAllWeather(): Promise<void> {
-  console.log(`[Weather] Fetching weather for ${AIRPORTS.length} airports...`);
-  let total = 0;
-  const errors: string[] = [];
-
-  for (const airport of AIRPORTS) {
-    try {
-      const n = await fetchWeatherForAirport(airport);
-      console.log(`[Weather] ${airport.code}: ${n} hourly records upserted`);
-      total += n;
-      // Small pause between requests to be polite
-      await new Promise(r => setTimeout(r, 300));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[Weather] Failed to fetch ${airport.code}: ${msg}`);
-      errors.push(`${airport.code}: ${msg}`);
-    }
-  }
-
-  console.log(`[Weather] Done. ${total} total records, ${errors.length} errors.`);
-  if (errors.length) console.error('[Weather] Errors:', errors.join('; '));
 }

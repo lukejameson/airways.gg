@@ -44,9 +44,12 @@ export const load: PageServerLoad = async () => {
     )];
 
     // For each airport, get weather closest to each flight's scheduled time
-    // We'll fetch weather data for the full day and let the FlightCard pick the closest
+    // We'll fetch weather data for the full day + tomorrow (forecasts) and let the FlightCard pick the closest
     let weatherMap: Record<string, typeof weatherData.$inferSelect[]> = {};
     if (airportCodes.length > 0) {
+      const dayAfter = new Date(tomorrow);
+      dayAfter.setDate(dayAfter.getDate() + 1);
+      
       const rows = await db
         .select()
         .from(weatherData)
@@ -54,7 +57,7 @@ export const load: PageServerLoad = async () => {
           and(
             inArray(weatherData.airportCode, airportCodes),
             gte(weatherData.timestamp, today),
-            lte(weatherData.timestamp, tomorrow),
+            lte(weatherData.timestamp, dayAfter),
           ),
         )
         .orderBy(weatherData.timestamp);
@@ -64,6 +67,16 @@ export const load: PageServerLoad = async () => {
         if (!weatherMap[row.airportCode]) weatherMap[row.airportCode] = [];
         weatherMap[row.airportCode].push(row);
       }
+    }
+
+    // Current GCI weather for the header - find the record closest to now
+    let currentGciWeather: typeof weatherData.$inferSelect | null = null;
+    if (weatherMap['GCI'] && weatherMap['GCI'].length > 0) {
+      currentGciWeather = weatherMap['GCI'].reduce((closest, current) => {
+        const closestDiff = Math.abs(new Date(closest.timestamp).getTime() - now.getTime());
+        const currentDiff = Math.abs(new Date(current.timestamp).getTime() - now.getTime());
+        return currentDiff < closestDiff ? current : closest;
+      });
     }
 
     // Get last successful scrape time
@@ -76,8 +89,8 @@ export const load: PageServerLoad = async () => {
 
     return {
       flights: flightsWithPredictions,
-      weather: weatherMap['GCI'] ?? null,   // current GCI weather for the header
-      weatherMap,                            // all airports for per-flight display
+      weather: currentGciWeather,              // current GCI weather for the header
+      weatherMap,                              // all airports for per-flight display
       lastUpdated: lastScrape?.completedAt ?? now,
     };
   } catch (err) {
