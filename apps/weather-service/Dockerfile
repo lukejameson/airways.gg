@@ -27,7 +27,6 @@ FROM node:20-alpine
 WORKDIR /app
 
 COPY --from=builder /app/apps/weather-service/dist ./dist
-COPY --from=builder /app/apps/weather-service/src/airport-mappings.json ./dist/
 COPY --from=builder /app/apps/weather-service/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/database ./packages/database
