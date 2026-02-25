@@ -25,7 +25,7 @@ if (envPath) {
 
 import { scrapeOnce, scrapeMultipleDates, guernseyDateStr } from './scraper';
 import { db, scraperLogs, flights, flightTimes } from '@delays/database';
-import { eq, and, not, inArray, asc, count } from 'drizzle-orm';
+import { eq, and, not, inArray, asc, desc, count } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -399,6 +399,26 @@ let wakeTimeoutRef: ReturnType<typeof setTimeout> | null = null;
 /** The UTC timestamp we're currently scheduled to wake at (for prefetch comparison). */
 let scheduledWakeAtMs: number | null = null;
 
+/**
+ * Returns how many milliseconds ago the last successful aurigny_live scrape
+ * completed, or Infinity if no record exists. Used on startup to avoid
+ * firing a redundant scrape when the container restarts mid-interval.
+ */
+async function msSinceLastScrape(): Promise<number> {
+  try {
+    const [last] = await db
+      .select({ completedAt: scraperLogs.completedAt })
+      .from(scraperLogs)
+      .where(eq(scraperLogs.service, 'aurigny_live'))
+      .orderBy(desc(scraperLogs.completedAt))
+      .limit(1);
+    if (!last?.completedAt) return Infinity;
+    return Date.now() - new Date(last.completedAt).getTime();
+  } catch {
+    return Infinity;
+  }
+}
+
 async function runScrape(label: string): Promise<void> {
   const result = await scrapeOnce();
   if (!result.success) {
@@ -532,9 +552,30 @@ async function main() {
     console.log(`[Aurigny] Startup during sleep window (Guernsey hour: ${currentHour}) — going straight to sleep state`);
     await scheduleNextScrape();
   } else {
-    // Normal startup during operating hours — scrape immediately then enter loop
-    console.log(`[Aurigny] Startup during operating hours (Guernsey hour: ${currentHour}) — running initial scrape`);
-    await runScrape('Initial scrape');
+    // Check how long ago the last successful scrape ran so we don't fire
+    // a redundant browser launch if the container just restarted mid-interval.
+    const elapsed = await msSinceLastScrape();
+    const { ms: nextMs } = await computeNextInterval();
+
+    if (elapsed === Infinity) {
+      console.log('[Aurigny] No previous scrape found — running immediately');
+      await runScrape('Initial scrape');
+    } else if (elapsed < nextMs) {
+      const waitMs = nextMs - elapsed;
+      console.log(
+        `[Aurigny] Last scrape was ${Math.round(elapsed / 1000)}s ago — ` +
+        `within current interval (${Math.round(nextMs / 1000)}s). ` +
+        `Resuming in ~${Math.round(waitMs / 1000)}s`,
+      );
+      await new Promise(r => setTimeout(r, waitMs));
+      await runScrape('Resume scrape');
+    } else {
+      console.log(
+        `[Aurigny] Last scrape was ${Math.round(elapsed / 1000)}s ago — running immediately`,
+      );
+      await runScrape('Initial scrape');
+    }
+
     await scheduleNextScrape();
   }
 }
