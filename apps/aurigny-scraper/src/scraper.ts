@@ -305,12 +305,12 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
         // In Docker we manage Xvfb ourselves via entrypoint; locally let the lib handle it
         disableXvfb: isDocker,
         args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--window-size=1920,1080',
-          // SwiftShader for GPU-less Docker environments
-          ...(isDocker ? ['--use-gl=swiftshader', '--use-angle=swiftshader'] : []),
+          ...(isDocker ? [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+          ] : []),
         ],
       };
 
@@ -328,29 +328,6 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
       }
 
       const { browser: b, page } = await connect(connectOptions);
-      
-      // Spoof WebGL and GPU properties only in Docker (no real GPU)
-      if (isDocker) {
-        await page.evaluateOnNewDocument(`
-          const getParameter = WebGLRenderingContext.prototype.getParameter;
-          WebGLRenderingContext.prototype.getParameter = function(parameter) {
-            if (parameter === 37445) return 'Intel Inc.';
-            if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-            return getParameter.call(this, parameter);
-          };
-          if (typeof WebGL2RenderingContext !== 'undefined') {
-            const getParameter2 = WebGL2RenderingContext.prototype.getParameter;
-            WebGL2RenderingContext.prototype.getParameter = function(parameter) {
-              if (parameter === 37445) return 'Intel Inc.';
-              if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-              return getParameter2.call(this, parameter);
-            };
-          }
-          Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-          Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-          Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-        `);
-      }
       
       console.log('[Aurigny] Browser launched successfully');
       browser = b;
