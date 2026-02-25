@@ -254,10 +254,10 @@
 
   function getStatusColor(status: string | null | undefined): string {
     const s = status?.toLowerCase() || '';
-    if (s.includes('on time')) return 'text-green-600 dark:text-green-400';
-    if (s.includes('delayed')) return 'text-yellow-600 dark:text-yellow-400';
-    if (s.includes('cancelled')) return 'text-red-600 dark:text-red-400';
-    if (s.includes('landed') || s.includes('airborne')) return 'text-blue-600 dark:text-blue-400';
+    if (s.includes('on time')) return 'text-green-600';
+    if (s.includes('delayed')) return 'text-yellow-600';
+    if (s.includes('cancelled')) return 'text-red-600';
+    if (s.includes('landed') || s.includes('airborne')) return 'text-blue-600';
     return 'text-muted-foreground';
   }
 
@@ -275,9 +275,9 @@
   );
 
   function getPredictionColor(pct: number): string {
-    if (pct >= 70) return 'text-red-600 dark:text-red-400';
-    if (pct >= 40) return 'text-yellow-600 dark:text-yellow-400';
-    return 'text-green-600 dark:text-green-400';
+    if (pct >= 70) return 'text-red-600';
+    if (pct >= 40) return 'text-yellow-600';
+    return 'text-green-600';
   }
 
   function getPredictionBarColor(pct: number): string {
@@ -404,22 +404,22 @@
       </div>
       {#if delayMinutes > 0}
         <span class="opacity-30 hidden sm:inline">·</span>
-        <span class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">
+        <span class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">
           +{delayMinutes}m
         </span>
       {:else if delayMinutes < 0}
         <span class="opacity-30 hidden sm:inline">·</span>
-        <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300">
+        <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
           {Math.abs(delayMinutes)}m early
         </span>
       {:else if flight.status?.toLowerCase().includes('delayed')}
         <span class="opacity-30 hidden sm:inline">·</span>
-        <span class="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300">
+        <span class="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-700">
           Delay TBC
         </span>
       {:else}
         <span class="opacity-30 hidden sm:inline">·</span>
-        <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300">
+        <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
           On Time
         </span>
       {/if}
@@ -446,7 +446,7 @@
           {formatTime(displayTime)}
         </p>
         {#if isEstimate}
-          <p class="text-xs text-yellow-600 dark:text-yellow-400 mt-1">Estimated — subject to change</p>
+          <p class="text-xs text-yellow-600 mt-1">Estimated — subject to change</p>
         {:else}
           <p class="text-sm text-muted-foreground mt-1">
             {airportName(isDeparture ? flight.departureAirport : flight.arrivalAirport)}
@@ -699,13 +699,13 @@
                     </td>
                     <td class="px-4 py-2.5 text-right">
                       {#if tone === 'blue'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">{rf.status}</span>
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700">{rf.status}</span>
                       {:else if tone === 'green'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">{rf.status}</span>
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700">{rf.status}</span>
                       {:else if tone === 'yellow'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">{rf.status}</span>
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">{rf.status}</span>
                       {:else if tone === 'red'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">{rf.status}</span>
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">{rf.status}</span>
                       {:else}
                         <span class="text-muted-foreground text-xs">{rf.status ?? 'Scheduled'}</span>
                       {/if}

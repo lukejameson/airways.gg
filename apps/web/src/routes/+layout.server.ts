@@ -21,7 +21,6 @@ export const load: LayoutServerLoad = async ({ locals }) => {
   );
 
   return {
-    theme: locals.theme || 'light',
     siteUrl: `https://${domain}`,
     buyMeACoffeeUrl: env.PUBLIC_BUY_ME_A_COFFEE_URL || null,
     umamiWebsiteId: env.PUBLIC_UMAMI_WEBSITE_ID || null,

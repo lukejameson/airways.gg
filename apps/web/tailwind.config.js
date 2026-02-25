@@ -1,6 +1,5 @@
 export default {
   content: ['./src/**/*.{html,js,svelte,ts}'],
-  darkMode: ['class', '[data-theme="dark"]'],
   safelist: [
     // Status badge backgrounds
     'bg-emerald-500/10', 'bg-emerald-500/20',
@@ -8,10 +7,10 @@ export default {
     'bg-red-500/10', 'bg-red-500/20',
     'bg-blue-500/10', 'bg-blue-500/20',
     // Status badge text
-    'text-emerald-600', 'text-emerald-400',
-    'text-amber-600', 'text-amber-400',
-    'text-red-600', 'text-red-400',
-    'text-blue-600', 'text-blue-400',
+    'text-emerald-600',
+    'text-amber-600',
+    'text-red-600',
+    'text-blue-600',
     // Status badge borders
     'border-emerald-500/20', 'border-emerald-500/30',
     'border-amber-500/20', 'border-amber-500/30',

@@ -1,6 +1,5 @@
 <script lang="ts">
   import '../app.css';
-  import { ThemeToggle } from '$lib/components';
   import { initAirports } from '$lib/airports';
   import type { AirportInfo } from '$lib/airports';
 
@@ -13,32 +12,12 @@
   const siteUrl = $derived(data.siteUrl);
   const buyMeACoffeeUrl = $derived(data.buyMeACoffeeUrl);
 
-  // Use $state with a local variable so the toggle mutation works,
-  // but initialise from the server data prop so it stays in sync on navigation.
-  let theme = $state(data.theme ?? 'light');
-  $effect(() => { theme = data.theme ?? 'light'; });
-
-  // Matches the background CSS custom property for each theme:
-  // light: hsl(210 40% 98%) / dark: hsl(222 47% 8%)
-  const THEME_COLORS = { light: '#f0f5fb', dark: '#0b1020' } as const;
-  let themeColor = $derived(THEME_COLORS[theme as keyof typeof THEME_COLORS] ?? THEME_COLORS.light);
-
-  async function toggleTheme() {
-    theme = theme === 'light' ? 'dark' : 'light';
-    document.documentElement.setAttribute('data-theme', theme);
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-
-    // Persist the preference as a cookie so the server reads it on next request
-    await fetch('/api/theme', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ theme }),
-    });
-  }
+  // Theme color for mobile browser UI
+  const themeColor = '#f0f5fb';
 </script>
 
 <svelte:head>
-  <meta name="theme-color" content={themeColor} />
+  <meta name="theme-color" content="#f0f5fb" />
 
   <!-- Default SEO — individual pages override title/description/og:* via their own <svelte:head> -->
   <meta name="robots" content="index, follow" />
@@ -95,7 +74,6 @@
             Support Us
           </a>
         {/if}
-        <ThemeToggle {theme} onToggle={toggleTheme} />
       </div>
     </div>
   </header>

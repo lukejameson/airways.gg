@@ -1,17 +1,6 @@
 import type { Handle } from '@sveltejs/kit';
-import { sequence } from '@sveltejs/kit/hooks';
 
-const handleTheme: Handle = async ({ event, resolve }) => {
-  const theme = event.cookies.get('theme') || 'light';
-  event.locals.theme = theme;
-  
-  const response = await resolve(event, {
-    transformPageChunk: ({ html }) => {
-      return html.replace('%theme%', theme);
-    },
-  });
-  
+export const handle: Handle = async ({ event, resolve }) => {
+  const response = await resolve(event);
   return response;
 };
-
-export const handle = sequence(handleTheme);

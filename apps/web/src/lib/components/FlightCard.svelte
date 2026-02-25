@@ -126,29 +126,29 @@
       <!-- Status & Delay - fixed width on mobile to prevent jumping -->
       <div class="flex items-center gap-2 shrink-0 ml-auto">
         {#if delayMinutes > 0}
-          <span class="text-xs font-bold text-red-600 dark:text-red-400">+{delayMinutes}m</span>
+          <span class="text-xs font-bold text-red-600">+{delayMinutes}m</span>
         {/if}
 
         <!-- Status badge -->
         <div class="shrink-0">
           {#if tone === 'yellow'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
               <span class="h-2 w-2 rounded-full bg-amber-500"></span>{flight.status || 'Scheduled'}
             </span>
           {:else if tone === 'red'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300 border border-red-300 dark:border-red-700">
+            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-red-100 text-red-800 border border-red-300">
               <span class="h-2 w-2 rounded-full bg-red-500"></span>{flight.status || 'Scheduled'}
             </span>
           {:else if tone === 'blue'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 border border-blue-300 dark:border-blue-700">
+            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">
               <span class="h-2 w-2 rounded-full bg-blue-500"></span>{flight.status || 'Scheduled'}
             </span>
           {:else if tone === 'green'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300 border border-green-300 dark:border-green-700">
+            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
               <span class="h-2 w-2 rounded-full bg-green-500"></span>{flight.status || 'Scheduled'}
             </span>
           {:else}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-300 dark:border-gray-600">
+            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
               <span class="h-2 w-2 rounded-full bg-gray-400"></span>{flight.status || 'Scheduled'}
             </span>
           {/if}

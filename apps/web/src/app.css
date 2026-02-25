@@ -54,43 +54,6 @@
     --gradient-sunset: linear-gradient(135deg, #f97316 0%, #ec4899 50%, #8b5cf6 100%);
     --gradient-aurora: linear-gradient(135deg, #10b981 0%, #06b6d4 50%, #3b82f6 100%);
   }
-
-  .dark {
-    --background: 222 47% 8%;
-    --foreground: 210 40% 98%;
-    
-    --card: 222 47% 10%;
-    --card-foreground: 210 40% 98%;
-    
-    --popover: 222 47% 10%;
-    --popover-foreground: 210 40% 98%;
-    
-    --primary: 210 100% 55%;
-    --primary-foreground: 222 47% 8%;
-    
-    --secondary: 217 30% 18%;
-    --secondary-foreground: 210 40% 98%;
-    
-    --muted: 217 30% 18%;
-    --muted-foreground: 215 20% 60%;
-    
-    --accent: 190 70% 85%;
-    --accent-foreground: 222 47% 15%;
-    
-    --success: 160 84% 45%;
-    --success-foreground: 222 47% 8%;
-    
-    --destructive: 0 62% 45%;
-    --destructive-foreground: 210 40% 98%;
-    
-    --border: 217 30% 20%;
-    --input: 217 30% 20%;
-    --ring: 210 100% 55%;
-    
-    --glass-bg: rgba(15, 23, 42, 0.7);
-    --glass-border: rgba(255, 255, 255, 0.1);
-    --glass-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-  }
 }
 
 @layer base {
@@ -303,21 +266,7 @@
     @apply badge bg-blue-500/10 text-blue-600 border border-blue-500/20;
   }
   
-  .dark .badge-live {
-    @apply bg-emerald-500/20 text-emerald-400 border-emerald-500/30;
-  }
-  
-  .dark .badge-delayed {
-    @apply bg-amber-500/20 text-amber-400 border-amber-500/30;
-  }
-  
-  .dark .badge-cancelled {
-    @apply bg-red-500/20 text-red-400 border-red-500/30;
-  }
-  
-  .dark .badge-completed {
-    @apply bg-blue-500/20 text-blue-400 border-blue-500/30;
-  }
+
 }
 
 @layer utilities {
