@@ -195,7 +195,7 @@ function parseFlightXml(xmlData: string): ScrapedFlight[] {
         scheduledDeparture, scheduledArrival,
         actualDeparture: timeMap.get('ActualBlockOff'),
         actualArrival: timeMap.get('ActualBlockOn'),
-        status: String(f.Status || ''),
+        status: String(f.Status || '').toLowerCase() === 'voyagereported' ? 'Completed' : String(f.Status || ''),
         canceled: f.Canceled === 'true' || f.Canceled === true,
         aircraftRegistration: f.AircraftRegistration ? String(f.AircraftRegistration) : undefined,
         aircraftType: f.Aircraft?.Type ? String(f.Aircraft.Type) : undefined,
