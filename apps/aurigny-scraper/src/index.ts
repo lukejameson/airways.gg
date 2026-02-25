@@ -10,7 +10,7 @@ function findEnvFile(startDir: string): string | null {
     const candidate = resolve(dir, '.env');
     if (existsSync(candidate)) return candidate;
     const parent = dirname(dir);
-    if (parent === dir) break; // reached filesystem root
+    if (parent === dir) break;
     dir = parent;
   }
   return null;
@@ -23,68 +23,520 @@ if (envPath) {
   console.warn('[Aurigny] Warning: .env file not found, relying on environment variables');
 }
 
-import { scrapeOnce } from './scraper';
-import { db, scraperLogs } from '@delays/database';
-import { eq, desc } from 'drizzle-orm';
+import { scrapeOnce, scrapeMultipleDates, guernseyDateStr } from './scraper';
+import { db, scraperLogs, flights, flightTimes } from '@delays/database';
+import { eq, and, not, inArray, asc, count } from 'drizzle-orm';
 
-const INTERVAL_MS = parseInt(process.env.SCRAPER_INTERVAL_MS || '300000');
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
 
-/** Returns how many ms ago the last successful scrape completed, or Infinity if never. */
-async function msSinceLastScrape(): Promise<number> {
+if (process.env.SCRAPER_INTERVAL_MS) {
+  console.warn('[Aurigny] SCRAPER_INTERVAL_MS is deprecated — use the tiered interval env vars instead (SCRAPER_INTERVAL_HIGH_MS, _MEDIUM_MS, _LOW_MS, _IDLE_MS)');
+}
+
+/** Hour (0–23, Guernsey local) at which the scraper hard-stops for the night */
+const CUTOFF_HOUR         = parseInt(process.env.SCRAPER_CUTOFF_HOUR          || '23', 10);
+/** Minutes before the first scheduled flight to wake up from sleep */
+const WAKE_OFFSET_MINS    = parseInt(process.env.SCRAPER_WAKE_OFFSET_MINS      || '30', 10);
+/** Interval when < 20 min to next flight event (ms) */
+const INTERVAL_HIGH_MS    = parseInt(process.env.SCRAPER_INTERVAL_HIGH_MS      || '120000',  10); // 2 min
+/** Interval when 20–60 min to next flight event (ms) */
+const INTERVAL_MEDIUM_MS  = parseInt(process.env.SCRAPER_INTERVAL_MEDIUM_MS    || '300000',  10); // 5 min
+/** Interval when 60–120 min to next flight event (ms) */
+const INTERVAL_LOW_MS     = parseInt(process.env.SCRAPER_INTERVAL_LOW_MS       || '600000',  10); // 10 min
+/** Interval when > 120 min to next flight event, or no active flights (ms) */
+const INTERVAL_IDLE_MS    = parseInt(process.env.SCRAPER_INTERVAL_IDLE_MS      || '900000',  10); // 15 min
+/** How often to run the background next-day schedule prefetch (ms) */
+const PREFETCH_INTERVAL_MS = parseInt(process.env.SCRAPER_PREFETCH_INTERVAL_MS || '28800000', 10); // 8 h
+
+// Terminal statuses — a flight in one of these states is finished for the day
+const TERMINAL_STATUSES = ['Completed', 'Landed', 'Cancelled'];
+
+// ---------------------------------------------------------------------------
+// Timezone utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Guernsey shares the Europe/London timezone:
+ *   UTC+0 (GMT) in winter, UTC+1 (BST) in summer.
+ * The server runs UTC so all wall-clock calculations must convert explicitly.
+ */
+const GY_TZ = 'Europe/London';
+
+/** Current hour (0–23) in Guernsey local time for a given UTC Date (defaults to now). */
+function guernseyHour(d: Date = new Date()): number {
+  return parseInt(
+    new Intl.DateTimeFormat('en-GB', { timeZone: GY_TZ, hour: 'numeric', hour12: false }).format(d),
+    10,
+  );
+}
+
+/**
+ * Returns tomorrow's date string (YYYY-MM-DD) in Guernsey local time.
+ *
+ * Implementation note: we add 1 day in UTC first, then convert to the Guernsey
+ * local date. This correctly handles the BST date boundary — e.g. if it is
+ * 23:30 UTC on a Tuesday in summer (00:30 BST Wednesday), today in Guernsey is
+ * already Wednesday and tomorrow is Thursday.
+ */
+function guernseyTomorrowStr(): string {
+  const tomorrow = new Date();
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: GY_TZ }).format(tomorrow);
+}
+
+/**
+ * Returns the next UTC Date at which Guernsey local time will be `hour:minute`.
+ * If that time today is already past, returns tomorrow's occurrence.
+ */
+function nextGuernseyTime(hour: number, minute: number): Date {
+  // Build a candidate date string in Guernsey local time
+  const todayGY = guernseyDateStr();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const candidateStr = `${todayGY}T${pad(hour)}:${pad(minute)}:00`;
+
+  // Parse it as a Guernsey-local time by using the Temporal-style workaround:
+  // We create a UTC date by measuring the offset at that moment.
+  // Approach: format "now" in GY tz, get current GY wall time, compute offset,
+  // then apply it to our target. This avoids any third-party dependency.
+  const now = new Date();
+  const nowGYStr = new Intl.DateTimeFormat('en-GB', {
+    timeZone: GY_TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).format(now);
+
+  // en-GB format: "DD/MM/YYYY, HH:MM:SS"
+  const [datePart, timePart] = nowGYStr.split(', ');
+  const [dd, mm, yyyy] = datePart.split('/');
+  const gyWallNow = new Date(`${yyyy}-${mm}-${dd}T${timePart}Z`); // treat as UTC for arithmetic
+  const offsetMs = now.getTime() - gyWallNow.getTime(); // UTC - GY_wall = negative offset in BST
+
+  // Build target in UTC from the GY-local candidate
+  const targetGYWall = new Date(`${candidateStr}Z`);
+  let targetUTC = new Date(targetGYWall.getTime() + offsetMs);
+
+  // If already past, add 24 hours
+  if (targetUTC <= now) {
+    targetUTC = new Date(targetUTC.getTime() + 24 * 60 * 60 * 1000);
+  }
+
+  return targetUTC;
+}
+
+// ---------------------------------------------------------------------------
+// DB helpers
+// ---------------------------------------------------------------------------
+
+/** Counts all flights scheduled for the given Guernsey date string. */
+async function countFlightsForDate(dateStr: string): Promise<number> {
   try {
-    const [last] = await db
-      .select({ completedAt: scraperLogs.completedAt })
-      .from(scraperLogs)
-      .where(eq(scraperLogs.service, 'aurigny_live'))
-      .orderBy(desc(scraperLogs.completedAt))
-      .limit(1);
-
-    if (!last?.completedAt) return Infinity;
-    return Date.now() - new Date(last.completedAt).getTime();
+    const [{ value }] = await db
+      .select({ value: count() })
+      .from(flights)
+      .where(eq(flights.flightDate, dateStr));
+    return value ?? 0;
   } catch {
-    return Infinity;
+    return 0;
   }
 }
 
-async function runScrape(label: string) {
+/**
+ * Returns all non-terminal, non-cancelled flights for today (Guernsey date).
+ * "Active" means the scraper still needs to watch them.
+ */
+async function getActiveFlightsToday() {
+  const today = guernseyDateStr();
+  return db
+    .select({
+      id: flights.id,
+      flightNumber: flights.flightNumber,
+      scheduledDeparture: flights.scheduledDeparture,
+      scheduledArrival: flights.scheduledArrival,
+      actualDeparture: flights.actualDeparture,
+      actualArrival: flights.actualArrival,
+      status: flights.status,
+    })
+    .from(flights)
+    .where(
+      and(
+        eq(flights.flightDate, today),
+        eq(flights.canceled, false),
+        not(inArray(flights.status, TERMINAL_STATUSES)),
+      ),
+    );
+}
+
+/**
+ * Looks up the estimated departure/arrival time for a flight from flight_times.
+ * Aurigny publishes EstimatedBlockOff (departure) and EstimatedBlockOn (arrival).
+ */
+async function getEstimatedTimes(flightId: number): Promise<{ estDep?: Date; estArr?: Date }> {
+  try {
+    const rows = await db
+      .select({ timeType: flightTimes.timeType, timeValue: flightTimes.timeValue })
+      .from(flightTimes)
+      .where(
+        and(
+          eq(flightTimes.flightId, flightId),
+          inArray(flightTimes.timeType, ['EstimatedBlockOff', 'EstimatedBlockOn']),
+        ),
+      );
+    const estDep = rows.find(r => r.timeType === 'EstimatedBlockOff')?.timeValue ?? undefined;
+    const estArr = rows.find(r => r.timeType === 'EstimatedBlockOn')?.timeValue ?? undefined;
+    return { estDep: estDep ? new Date(estDep) : undefined, estArr: estArr ? new Date(estArr) : undefined };
+  } catch {
+    return {};
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Scheduler event logger
+// ---------------------------------------------------------------------------
+
+/**
+ * Writes a sleep or wake event to scraper_logs for observability.
+ * Repurposes errorMessage as a general notes field for non-error entries.
+ */
+async function logSchedulerEvent(type: 'sleep' | 'wake' | 'prefetch', detail: string): Promise<void> {
+  try {
+    const label = type === 'sleep' ? 'SLEEP' : type === 'wake' ? 'WAKE' : 'PREFETCH';
+    await db.insert(scraperLogs).values({
+      service: 'aurigny_live',
+      status: 'success',
+      recordsScraped: 0,
+      errorMessage: `[${label}] ${detail}`,
+      startedAt: new Date(),
+      completedAt: new Date(),
+    });
+    console.log(`[Aurigny] [${label}] ${detail}`);
+  } catch (err) {
+    // Never let logging failures crash the scheduler
+    console.error('[Aurigny] Failed to write scheduler event to DB:', err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic interval calculation
+// ---------------------------------------------------------------------------
+
+/**
+ * Determines the appropriate polling interval for the next scrape cycle.
+ *
+ * Algorithm:
+ *  1. Fetch all active (non-terminal) flights for today.
+ *  2. For each flight, find the soonest upcoming event time:
+ *       - Not yet departed → use EstimatedBlockOff if available, else scheduledDeparture
+ *       - Departed but not arrived → use EstimatedBlockOn if available, else scheduledArrival
+ *       - Both done → skip (shouldn't be in active list, but guard anyway)
+ *  3. Find the minimum across all flights.
+ *  4. Map minutes-until-next-event to an interval tier.
+ *
+ * Jitter is proportional to the interval (~12%) to avoid clustering at
+ * short intervals while not adding excessive delay at longer ones.
+ */
+async function computeNextInterval(): Promise<{ ms: number; jitterMs: number; reason: string }> {
+  const activeFlights = await getActiveFlightsToday();
+
+  if (activeFlights.length === 0) {
+    return {
+      ms: INTERVAL_IDLE_MS,
+      jitterMs: Math.floor(Math.random() * 90_000), // 0–90s
+      reason: 'No active flights today — idle frequency',
+    };
+  }
+
+  const now = Date.now();
+  let soonestEventMs = Infinity;
+  let soonestFlight = '';
+
+  for (const f of activeFlights) {
+    const { estDep, estArr } = await getEstimatedTimes(f.id);
+    let nextEventMs: number | null = null;
+
+    if (!f.actualDeparture) {
+      // Flight hasn't left yet — next event is departure
+      const depTime = estDep ?? f.scheduledDeparture;
+      if (depTime) nextEventMs = new Date(depTime).getTime();
+    } else if (!f.actualArrival) {
+      // Airborne — next event is arrival
+      const arrTime = estArr ?? f.scheduledArrival;
+      if (arrTime) nextEventMs = new Date(arrTime).getTime();
+    }
+    // If both actual times are set the flight is complete but somehow not terminal —
+    // treat it as already done (won't affect soonest calculation)
+
+    if (nextEventMs !== null && nextEventMs < soonestEventMs) {
+      soonestEventMs = nextEventMs;
+      soonestFlight = f.flightNumber;
+    }
+  }
+
+  if (soonestEventMs === Infinity) {
+    return {
+      ms: INTERVAL_IDLE_MS,
+      jitterMs: Math.floor(Math.random() * 90_000),
+      reason: `${activeFlights.length} active flight(s) but no upcoming event times found — idle frequency`,
+    };
+  }
+
+  const minsUntil = (soonestEventMs - now) / 60_000;
+
+  if (minsUntil < 20) {
+    return {
+      ms: INTERVAL_HIGH_MS,
+      jitterMs: Math.floor(Math.random() * 15_000), // 0–15s
+      reason: `${minsUntil.toFixed(0)}m until ${soonestFlight} event — high frequency (2 min)`,
+    };
+  }
+  if (minsUntil < 60) {
+    return {
+      ms: INTERVAL_MEDIUM_MS,
+      jitterMs: Math.floor(Math.random() * 30_000), // 0–30s
+      reason: `${minsUntil.toFixed(0)}m until ${soonestFlight} event — medium frequency (5 min)`,
+    };
+  }
+  if (minsUntil < 120) {
+    return {
+      ms: INTERVAL_LOW_MS,
+      jitterMs: Math.floor(Math.random() * 60_000), // 0–60s
+      reason: `${minsUntil.toFixed(0)}m until ${soonestFlight} event — low frequency (10 min)`,
+    };
+  }
+  return {
+    ms: INTERVAL_IDLE_MS,
+    jitterMs: Math.floor(Math.random() * 90_000), // 0–90s
+    reason: `${minsUntil.toFixed(0)}m until ${soonestFlight} event — idle frequency (15 min)`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sleep / wake decision
+// ---------------------------------------------------------------------------
+
+/** Returns true and a reason string if the scraper should enter sleep mode. */
+async function shouldSleep(): Promise<{ sleep: boolean; reason: string }> {
+  const currentHour = guernseyHour();
+
+  // Hard cutoff — stop regardless of flight status
+  if (currentHour >= CUTOFF_HOUR) {
+    return {
+      sleep: true,
+      reason: `Hard cutoff — Guernsey local hour ${currentHour} >= ${CUTOFF_HOUR}`,
+    };
+  }
+
+  const today = guernseyDateStr();
+  const totalToday = await countFlightsForDate(today);
+
+  // Don't sleep if we have no data at all — something may be wrong, keep scraping
+  if (totalToday === 0) {
+    return { sleep: false, reason: '' };
+  }
+
+  const activeFlights = await getActiveFlightsToday();
+  if (activeFlights.length === 0) {
+    return {
+      sleep: true,
+      reason: `All ${totalToday} flights for ${today} are in terminal status`,
+    };
+  }
+
+  return { sleep: false, reason: '' };
+}
+
+// ---------------------------------------------------------------------------
+// Wake time calculation
+// ---------------------------------------------------------------------------
+
+/** Computes when the scraper should wake up after entering sleep. */
+async function computeWakeTime(): Promise<{ wakeAt: Date; reason: string }> {
+  const tomorrow = guernseyTomorrowStr();
+  const totalTomorrow = await countFlightsForDate(tomorrow);
+
+  if (totalTomorrow > 0) {
+    try {
+      const [firstFlight] = await db
+        .select({ scheduledDeparture: flights.scheduledDeparture })
+        .from(flights)
+        .where(eq(flights.flightDate, tomorrow))
+        .orderBy(asc(flights.scheduledDeparture))
+        .limit(1);
+
+      if (firstFlight?.scheduledDeparture) {
+        const firstDepMs = new Date(firstFlight.scheduledDeparture).getTime();
+        const wakeAt = new Date(firstDepMs - WAKE_OFFSET_MINS * 60_000);
+        if (wakeAt > new Date()) {
+          return {
+            wakeAt,
+            reason: `${WAKE_OFFSET_MINS}m before first flight on ${tomorrow} — waking at ${wakeAt.toISOString()}`,
+          };
+        }
+        // wakeAt is already past (edge case: we're computing this very close to first flight)
+        // Fall through to fallback
+      }
+    } catch (err) {
+      console.error('[Aurigny] Error querying first flight for wake time:', err);
+    }
+  }
+
+  // Fallback: 05:00 Guernsey local time tomorrow
+  const fallback = nextGuernseyTime(5, 0);
+  return {
+    wakeAt: fallback,
+    reason: `No tomorrow schedule found (${totalTomorrow} flights loaded for ${tomorrow}) — falling back to 05:00 Guernsey`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// State machine
+// ---------------------------------------------------------------------------
+
+/** Reference to the active wake timeout so the prefetch timer can reschedule it. */
+let wakeTimeoutRef: ReturnType<typeof setTimeout> | null = null;
+/** The UTC timestamp we're currently scheduled to wake at (for prefetch comparison). */
+let scheduledWakeAtMs: number | null = null;
+
+async function runScrape(label: string): Promise<void> {
   const result = await scrapeOnce();
   if (!result.success) {
     console.error(`[Aurigny] ${label} failed: ${result.error}`);
+  } else {
+    console.log(`[Aurigny] ${label} complete — ${result.count} flights upserted`);
   }
 }
 
-async function main() {
-  console.log('[Aurigny] Scraper service starting...');
-  console.log(`[Aurigny] Interval: ${INTERVAL_MS / 1000}s + up to 120s jitter`);
+/**
+ * Core recursive scheduling loop.
+ *
+ * After every scrape completes, this function:
+ *   1. Checks whether the scraper should sleep.
+ *   2. If sleeping: logs the event, triggers a piggyback prefetch of tomorrow's
+ *      schedule, computes the wake time, and sets a one-shot timeout.
+ *   3. If active: computes the dynamic interval, applies proportional jitter,
+ *      and schedules the next scrape.
+ */
+async function scheduleNextScrape(): Promise<void> {
+  const { sleep, reason } = await shouldSleep();
 
-  const elapsed = await msSinceLastScrape();
-  const remaining = INTERVAL_MS - elapsed;
+  if (sleep) {
+    await logSchedulerEvent('sleep', reason);
 
-  if (remaining > 0) {
-    console.log(
-      `[Aurigny] Last scrape was ${Math.round(elapsed / 1000)}s ago — ` +
-      `still within pause window. Skipping startup scrape, next in ~${Math.round(remaining / 1000)}s.`
-    );
-    // Wait out the remainder of the pause window, then fall into the normal loop
-    await new Promise(r => setTimeout(r, remaining));
-    await runScrape('Post-pause scrape');
-  } else {
-    console.log(
-      elapsed === Infinity
-        ? '[Aurigny] No previous scrape found — running immediately.'
-        : `[Aurigny] Last scrape was ${Math.round(elapsed / 1000)}s ago — running immediately.`
-    );
-    await runScrape('Initial scrape');
+    // Piggyback: fetch today + tomorrow in the same browser session before sleeping.
+    // This ensures wake-up calculations have fresh first-flight data.
+    const today = guernseyDateStr();
+    const tomorrow = guernseyTomorrowStr();
+    console.log(`[Aurigny] Running piggyback prefetch for ${today} + ${tomorrow} before sleeping...`);
+    const prefetchResult = await scrapeMultipleDates([today, tomorrow], 'aurigny_prefetch');
+    console.log(`[Aurigny] Piggyback prefetch: ${prefetchResult.success ? `${prefetchResult.count} flights upserted` : `failed — ${prefetchResult.error}`}`);
+
+    const { wakeAt, reason: wakeReason } = await computeWakeTime();
+    scheduledWakeAtMs = wakeAt.getTime();
+    const sleepMs = Math.max(0, wakeAt.getTime() - Date.now());
+
+    await logSchedulerEvent('sleep', `Sleeping for ${Math.round(sleepMs / 60_000)}m. ${wakeReason}`);
+
+    wakeTimeoutRef = setTimeout(async () => {
+      wakeTimeoutRef = null;
+      scheduledWakeAtMs = null;
+      await logSchedulerEvent('wake', `Waking up — ${wakeReason}`);
+      await runScrape('Post-sleep scrape');
+      await scheduleNextScrape();
+    }, sleepMs);
+
+    return;
   }
 
-  console.log(`[Aurigny] Scrape complete. Next run in ~${INTERVAL_MS / 1000}s.`);
+  // Active — compute dynamic interval
+  const { ms, jitterMs, reason: intervalReason } = await computeNextInterval();
+  const totalMs = ms + jitterMs;
 
-  setInterval(async () => {
-    const jitter = Math.floor(Math.random() * 120000);
-    console.log(`[Aurigny] Next scrape in ${Math.round(jitter / 1000)}s (jitter)...`);
-    await new Promise(r => setTimeout(r, jitter));
+  console.log(
+    `[Aurigny] Next scrape in ${Math.round(ms / 1000)}s + ${Math.round(jitterMs / 1000)}s jitter = ${Math.round(totalMs / 1000)}s. Reason: ${intervalReason}`,
+  );
+
+  setTimeout(async () => {
     await runScrape('Scheduled scrape');
-  }, INTERVAL_MS);
+    await scheduleNextScrape();
+  }, totalMs);
+}
+
+// ---------------------------------------------------------------------------
+// Background prefetch timer (every 8 hours, all day)
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs every PREFETCH_INTERVAL_MS (default 8h) to keep the next day's schedule
+ * fresh in the DB. If the scraper is currently sleeping, and the new first-flight
+ * time differs from the scheduled wake time by more than 5 minutes, the wake
+ * timeout is rescheduled accordingly.
+ */
+async function runBackgroundPrefetch(): Promise<void> {
+  const today = guernseyDateStr();
+  const tomorrow = guernseyTomorrowStr();
+  console.log(`[Aurigny] Background prefetch: fetching ${today} + ${tomorrow}...`);
+
+  const result = await scrapeMultipleDates([today, tomorrow], 'aurigny_prefetch');
+  const msg = result.success
+    ? `${result.count} flights upserted for ${today} + ${tomorrow}`
+    : `failed — ${result.error}`;
+  console.log(`[Aurigny] Background prefetch complete: ${msg}`);
+  await logSchedulerEvent('prefetch', msg);
+
+  // If the scraper is sleeping, check whether the newly loaded data changes the
+  // optimal wake time — reschedule if it differs by more than 5 minutes.
+  if (wakeTimeoutRef !== null && scheduledWakeAtMs !== null) {
+    const { wakeAt, reason } = await computeWakeTime();
+    const diffMs = Math.abs(wakeAt.getTime() - scheduledWakeAtMs);
+    if (diffMs > 5 * 60_000) {
+      console.log(`[Aurigny] Prefetch updated first-flight data — rescheduling wake from ${new Date(scheduledWakeAtMs).toISOString()} to ${wakeAt.toISOString()}`);
+      clearTimeout(wakeTimeoutRef);
+      scheduledWakeAtMs = wakeAt.getTime();
+      const sleepMs = Math.max(0, wakeAt.getTime() - Date.now());
+      wakeTimeoutRef = setTimeout(async () => {
+        wakeTimeoutRef = null;
+        scheduledWakeAtMs = null;
+        await logSchedulerEvent('wake', `Waking up (rescheduled by prefetch) — ${reason}`);
+        await runScrape('Post-sleep scrape');
+        await scheduleNextScrape();
+      }, sleepMs);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+async function main() {
+  console.log('[Aurigny] Scraper service starting...');
+  console.log(`[Aurigny] Config — cutoff: ${CUTOFF_HOUR}:00 GY, wake offset: ${WAKE_OFFSET_MINS}m`);
+  console.log(`[Aurigny] Intervals — high: ${INTERVAL_HIGH_MS / 1000}s, medium: ${INTERVAL_MEDIUM_MS / 1000}s, low: ${INTERVAL_LOW_MS / 1000}s, idle: ${INTERVAL_IDLE_MS / 1000}s`);
+  console.log(`[Aurigny] Prefetch interval: ${PREFETCH_INTERVAL_MS / 3600_000}h`);
+
+  // Start the background prefetch timer immediately (first run after PREFETCH_INTERVAL_MS)
+  setInterval(runBackgroundPrefetch, PREFETCH_INTERVAL_MS);
+
+  const currentHour = guernseyHour();
+  // WAKE_OFFSET_MINS before the earliest possible first flight (05:30) gives ~05:00.
+  // Treat anything before that as still inside the sleep window so we don't fire
+  // a redundant scrape immediately after the scheduled wake-up scrape runs.
+  const earlyMorningCutoff = 5; // 05:00 GY — consistent with nextGuernseyTime(5, 0) fallback
+  const isInSleepWindow = currentHour >= CUTOFF_HOUR || currentHour < earlyMorningCutoff;
+
+  if (isInSleepWindow) {
+    // Container restarted during the sleep window — skip the initial scrape and
+    // go straight to sleep state so we don't hammer the site in the early hours.
+    console.log(`[Aurigny] Startup during sleep window (Guernsey hour: ${currentHour}) — going straight to sleep state`);
+    await scheduleNextScrape();
+  } else {
+    // Normal startup during operating hours — scrape immediately then enter loop
+    console.log(`[Aurigny] Startup during operating hours (Guernsey hour: ${currentHour}) — running initial scrape`);
+    await runScrape('Initial scrape');
+    await scheduleNextScrape();
+  }
 }
 
 main().catch(err => {

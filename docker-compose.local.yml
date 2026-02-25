@@ -34,9 +34,20 @@ services:
       dockerfile: apps/aurigny-scraper/Dockerfile
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - SCRAPER_INTERVAL_MS=${SCRAPER_INTERVAL_MS:-300000}
       - SCRAPER_MAX_RETRIES=${SCRAPER_MAX_RETRIES:-3}
       - NODE_ENV=production
+      # Operating window — hard cutoff hour (Guernsey local, 0-23) and wake offset before first flight
+      - SCRAPER_CUTOFF_HOUR=${SCRAPER_CUTOFF_HOUR:-23}
+      - SCRAPER_WAKE_OFFSET_MINS=${SCRAPER_WAKE_OFFSET_MINS:-30}
+      # Dynamic interval tiers (milliseconds)
+      - SCRAPER_INTERVAL_HIGH_MS=${SCRAPER_INTERVAL_HIGH_MS:-120000}
+      - SCRAPER_INTERVAL_MEDIUM_MS=${SCRAPER_INTERVAL_MEDIUM_MS:-300000}
+      - SCRAPER_INTERVAL_LOW_MS=${SCRAPER_INTERVAL_LOW_MS:-600000}
+      - SCRAPER_INTERVAL_IDLE_MS=${SCRAPER_INTERVAL_IDLE_MS:-900000}
+      # Background next-day schedule prefetch interval (default 8 hours)
+      - SCRAPER_PREFETCH_INTERVAL_MS=${SCRAPER_PREFETCH_INTERVAL_MS:-28800000}
+      # Deprecated — replaced by tiered intervals above
+      - SCRAPER_INTERVAL_MS=${SCRAPER_INTERVAL_MS:-300000}
     networks:
       - docker_manga_network
     restart: unless-stopped

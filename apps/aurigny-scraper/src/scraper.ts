@@ -3,6 +3,26 @@ import { XMLParser } from 'fast-xml-parser';
 import { db, flights as flightsTable, flightDelays, flightTimes, flightNotes, scraperLogs } from '@delays/database';
 import { eq } from 'drizzle-orm';
 
+// ---------------------------------------------------------------------------
+// Timezone utility
+// ---------------------------------------------------------------------------
+
+const GY_TZ = 'Europe/London'; // Guernsey shares Europe/London (UTC+0 / BST+1)
+
+/**
+ * Returns a date string in YYYY-MM-DD format for the given UTC Date converted
+ * to Guernsey local time. Defaults to now.
+ *
+ * Using en-CA locale because it formats as YYYY-MM-DD (ISO date) natively.
+ */
+export function guernseyDateStr(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: GY_TZ }).format(d);
+}
+
+// ---------------------------------------------------------------------------
+// Proxy helpers
+// ---------------------------------------------------------------------------
+
 interface ProxyConfig {
   host: string;
   port: number;
@@ -43,6 +63,10 @@ function getRandomProxy(proxies: ProxyConfig[]): ProxyConfig | null {
   return proxies[Math.floor(Math.random() * proxies.length)];
 }
 
+// ---------------------------------------------------------------------------
+// Flight parsing types
+// ---------------------------------------------------------------------------
+
 interface ParsedDelay {
   code?: string;
   code2?: string;
@@ -80,30 +104,13 @@ interface ScrapedFlight {
   notes: ParsedNote[];
 }
 
-const USER_AGENTS = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0',
-];
-
-const VIEWPORTS = [
-  { width: 1920, height: 1080 },
-  { width: 1366, height: 768 },
-  { width: 1440, height: 900 },
-  { width: 1536, height: 864 },
-  { width: 1280, height: 720 },
-];
+// ---------------------------------------------------------------------------
+// Anti-bot helpers
+// ---------------------------------------------------------------------------
 
 function randomDelay(min: number, max: number): Promise<void> {
   const ms = Math.floor(Math.random() * (max - min + 1)) + min;
   return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function getRandomElement<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -122,6 +129,10 @@ async function simulateHumanBehavior(page: any): Promise<void> {
     await randomDelay(200, 800);
   }
 }
+
+// ---------------------------------------------------------------------------
+// XML parsing
+// ---------------------------------------------------------------------------
 
 function parseDate(val: unknown): Date | undefined {
   if (!val) return undefined;
@@ -143,7 +154,6 @@ function parseFlightXml(xmlData: string): ScrapedFlight[] {
       if (!scheduledDeparture || !scheduledArrival) continue;
 
       // Times: API returns <Times><Time><Type>X</Type><DateTime>Y</DateTime></Time>...</Times>
-      // Build a map of type → datetime for easy lookup
       const timeMap = new Map<string, Date>();
       if (f.Times?.Time) {
         const rawTimes = Array.isArray(f.Times.Time) ? f.Times.Time : [f.Times.Time];
@@ -155,7 +165,6 @@ function parseFlightXml(xmlData: string): ScrapedFlight[] {
       const times: ParsedTime[] = Array.from(timeMap.entries()).map(([type, value]) => ({ type, value }));
 
       // Delays: API returns <Delays><Delay1>...</Delay1><Delay2>...</Delay2></Delays>
-      // Keys are Delay1, Delay2, ... (not Delay)
       const delays: ParsedDelay[] = [];
       if (f.Delays && typeof f.Delays === 'object') {
         for (const key of Object.keys(f.Delays)) {
@@ -199,7 +208,7 @@ function parseFlightXml(xmlData: string): ScrapedFlight[] {
         canceled: f.Canceled === 'true' || f.Canceled === true,
         aircraftRegistration: f.AircraftRegistration ? String(f.AircraftRegistration) : undefined,
         aircraftType: f.Aircraft?.Type ? String(f.Aircraft.Type) : undefined,
-        flightDate: f.FlightDate ? String(f.FlightDate).split('T')[0] : new Date().toISOString().split('T')[0],
+        flightDate: f.FlightDate ? String(f.FlightDate).split('T')[0] : guernseyDateStr(),
         delays, times, notes,
       });
     } catch (err) {
@@ -209,6 +218,10 @@ function parseFlightXml(xmlData: string): ScrapedFlight[] {
 
   return parsed;
 }
+
+// ---------------------------------------------------------------------------
+// DB upsert
+// ---------------------------------------------------------------------------
 
 async function upsertFlights(scrapedFlights: ScrapedFlight[]): Promise<number> {
   let count = 0;
@@ -220,7 +233,7 @@ async function upsertFlights(scrapedFlights: ScrapedFlight[]): Promise<number> {
         const diff = Math.round((flight.actualDeparture.getTime() - flight.scheduledDeparture.getTime()) / 60000);
         if (diff > 0 && diff <= 1440) delayMinutes = diff;
       }
-      // Final sanity guard — PostgreSQL integer max is 2147483647, reject anything absurd
+      // Final sanity guard
       if (delayMinutes != null && (!Number.isFinite(delayMinutes) || delayMinutes < 0 || delayMinutes > 1440)) {
         delayMinutes = null;
       }
@@ -271,20 +284,32 @@ async function upsertFlights(scrapedFlights: ScrapedFlight[]): Promise<number> {
   return count;
 }
 
-export async function scrapeOnce(): Promise<{ success: boolean; count: number; error?: string }> {
-  const logEntry = await db
-    .insert(scraperLogs)
-    .values({ service: 'aurigny_live', status: 'retry', startedAt: new Date(), retryCount: 0 })
-    .returning({ id: scraperLogs.id });
-  const logId = logEntry[0].id;
+// ---------------------------------------------------------------------------
+// Core browser session — fetches one or more dates in a single browser launch
+// ---------------------------------------------------------------------------
 
-  const maxRetries = parseInt(process.env.SCRAPER_MAX_RETRIES || '3');
-
+/**
+ * Launches a real Chromium browser (with Cloudflare bypass), navigates to the
+ * Aurigny arrivals/departures page, then fetches schedule data for every date
+ * in `dates` within the same session (reusing the established CF cookies).
+ *
+ * For the first date, departures XML is captured by intercepting the XHR that
+ * the SPA fires on page load. For all dates (including the first), arrivals and
+ * any subsequent-date departures are fetched via in-page fetch() calls that
+ * inherit the live CF session cookies.
+ *
+ * Returns the total number of flights upserted across all dates.
+ */
+async function runBrowserSession(
+  dates: string[],
+  logId: number,
+  maxRetries: number,
+): Promise<{ success: boolean; count: number; error?: string }> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let browser: any = null;
     try {
-      console.log(`[Aurigny] Attempt ${attempt}/${maxRetries}`);
+      console.log(`[Aurigny] Attempt ${attempt}/${maxRetries} — dates: ${dates.join(', ')}`);
       await randomDelay(3000, 8000);
 
       const proxies = getProxyList();
@@ -330,30 +355,27 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
       }
 
       const { browser: b, page } = await connect(connectOptions);
-      
       console.log('[Aurigny] Browser launched successfully');
       browser = b;
 
-      let departuresData: string | null = null;
-      let arrivalsData: string | null = null;
+      // ---- Phase 1: load the page and capture the first date's departures XML ----
+      // The SPA fires a departures XHR on load; we intercept it to get today's data.
+      // We use the first date in the list as the "page load" date — subsequent dates
+      // are fetched entirely via in-page fetch() calls below.
+      const primaryDate = dates[0];
+      let primaryDeparturesData: string | null = null;
 
-      // Intercept both dep and arr /api/schedule responses.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let responseCount = 0;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       page.on('response', async (response: any) => {
         try {
           responseCount++;
           const url: string = response.url();
           if (url.includes('/api/schedule') && response.status() === 200) {
             const body = await response.text();
-            if (body && body.length > 100) {
-              if (url.includes('arr_dep=arr')) {
-                arrivalsData = body;
-                console.log(`[Aurigny] Captured arrivals (${body.length} bytes)`);
-              } else {
-                departuresData = body;
-                console.log(`[Aurigny] Captured departures (${body.length} bytes)`);
-              }
+            if (body && body.length > 100 && !url.includes('arr_dep=arr')) {
+              primaryDeparturesData = body;
+              console.log(`[Aurigny] Captured departures for ${primaryDate} (${body.length} bytes)`);
             }
           }
         } catch { /* ignore */ }
@@ -365,32 +387,25 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
         timeout: 120000,
       }).catch(() => {/* navigation may fail when CF redirects — that's fine */});
 
-      // Phase 1: wait for departures data (up to 120s).
-      // After the CF challenge resolves the SPA may still need to navigate and boot.
-      // If we've been on the same URL for >10s with no new responses and no data,
-      // try reloading the page to kick the SPA — sometimes CF passes the challenge
-      // cookie but the initial page load was the challenge page itself, not the SPA.
+      // Wait for departures data with stall-detection and reload
       console.log('[Aurigny] Waiting for departures data (up to 120s)...');
       const depDeadline = Date.now() + 120000;
       let lastResponseCount = 0;
       let staleSince = Date.now();
       let reloadAttempted = false;
 
-      while (Date.now() < depDeadline && !departuresData) {
+      while (Date.now() < depDeadline && !primaryDeparturesData) {
         await randomDelay(3000, 3000);
         const currentUrl: string = page.url();
-        console.log(`[Aurigny] responses: ${responseCount}, url: ${currentUrl.substring(0, 70)}, dep: ${departuresData !== null}`);
+        console.log(`[Aurigny] responses: ${responseCount}, url: ${currentUrl.substring(0, 70)}, dep: ${primaryDeparturesData !== null}`);
 
-        // Check if stuck on Cloudflare challenge
         const title = await page.title().catch(() => '');
         if (title.includes('Just a moment')) {
           console.log('[Aurigny] Waiting for Cloudflare challenge to complete...');
-          // Give Turnstile more time - it can take 30-60s
           await randomDelay(10000, 15000);
           continue;
         }
 
-        // Detect stalled state: responses stopped incrementing and still no data
         if (responseCount === lastResponseCount) {
           if (Date.now() - staleSince > 20000 && !reloadAttempted) {
             console.log('[Aurigny] Response count stalled — reloading page to trigger SPA...');
@@ -404,52 +419,78 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
         }
       }
 
-      if (!departuresData) {
+      if (!primaryDeparturesData) {
         throw new Error('No departures XML captured from /api/schedule');
       }
 
-      // Phase 2: use the page's own fetch to call the arrivals endpoint directly.
-      // This runs inside the browser context so it carries all CF cookies/headers — no
-      // need to simulate a tab click which the SPA may swallow without firing a request.
-      console.log('[Aurigny] Fetching arrivals via in-page fetch...');
-      try {
-        const today = new Date().toISOString().split('T')[0];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const arrBody = await page.evaluate(new Function('date', `
-          return fetch('/api/schedule?airport=GCI&arr_dep=arr&date=' + date + '&recaptchaToken=none&recaptchaVerified=false', {
-            headers: {
-              'Accept': '*/*',
-              'Referer': 'https://www.aurigny.com/information/arrivals-departures',
-            },
-            credentials: 'include',
-          }).then(function(r) { return r.ok ? r.text() : null; }).catch(function() { return null; });
-        `) as (d: string) => Promise<string | null>, today);
+      // Simulate human behaviour now that the page is loaded
+      await simulateHumanBehavior(page);
 
-        if (arrBody && arrBody.length > 100) {
-          arrivalsData = arrBody;
-          console.log(`[Aurigny] Fetched arrivals directly (${arrBody.length} bytes)`);
-        } else {
-          console.warn('[Aurigny] In-page arrivals fetch returned empty/null');
+      // ---- Phase 2: fetch all dates via in-page fetch (reuses CF cookies) ----
+      // For the primary date: fetch arrivals in-page (departures already captured above).
+      // For additional dates: fetch both departures and arrivals in-page.
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const inPageFetch = async (date: string, arrDep: 'arr' | 'dep'): Promise<string | null> => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const body = await page.evaluate(new Function('date', 'arrDep', `
+            return fetch('/api/schedule?airport=GCI&arr_dep=' + arrDep + '&date=' + date + '&recaptchaToken=none&recaptchaVerified=false', {
+              headers: {
+                'Accept': '*/*',
+                'Referer': 'https://www.aurigny.com/information/arrivals-departures',
+              },
+              credentials: 'include',
+            }).then(function(r) { return r.ok ? r.text() : null; }).catch(function() { return null; });
+          `) as (d: string, a: string) => Promise<string | null>, date, arrDep);
+
+          if (body && body.length > 100) {
+            console.log(`[Aurigny] Fetched ${arrDep === 'arr' ? 'arrivals' : 'departures'} for ${date} (${body.length} bytes)`);
+            return body;
+          }
+          console.warn(`[Aurigny] In-page ${arrDep} fetch for ${date} returned empty/null`);
+          return null;
+        } catch (err) {
+          console.warn(`[Aurigny] In-page ${arrDep} fetch for ${date} failed:`, err);
+          return null;
         }
-      } catch (fetchErr) {
-        console.warn('[Aurigny] In-page arrivals fetch failed:', fetchErr);
-      }
+      };
 
-      if (!arrivalsData) {
-        console.warn('[Aurigny] No arrivals data captured — will only store departures');
-      }
+      let totalUpserted = 0;
 
-      // Parse and merge both datasets
-      const depFlights = parseFlightXml(departuresData);
-      const arrFlights = arrivalsData ? parseFlightXml(arrivalsData) : [];
-      console.log(`[Aurigny] Parsed ${depFlights.length} departures + ${arrFlights.length} arrivals`);
-      const scrapedFlights = [...depFlights, ...arrFlights];
-      console.log(`[Aurigny] Parsed ${scrapedFlights.length} flights`);
-      const upsertedCount = await upsertFlights(scrapedFlights);
-      console.log(`[Aurigny] Upserted ${upsertedCount} flights`);
+      for (let i = 0; i < dates.length; i++) {
+        const date = dates[i];
+        let depXml: string | null;
+        let arrXml: string | null;
+
+        if (i === 0) {
+          // Primary date: departures already captured via XHR intercept
+          depXml = primaryDeparturesData;
+          arrXml = await inPageFetch(date, 'arr');
+        } else {
+          // Additional dates: fetch both via in-page fetch
+          // Small delay between date requests to avoid hammering the API
+          await randomDelay(2000, 4000);
+          depXml = await inPageFetch(date, 'dep');
+          arrXml = await inPageFetch(date, 'arr');
+        }
+
+        const depFlights = depXml ? parseFlightXml(depXml) : [];
+        const arrFlights = arrXml ? parseFlightXml(arrXml) : [];
+        const all = [...depFlights, ...arrFlights];
+        console.log(`[Aurigny] ${date}: parsed ${depFlights.length} departures + ${arrFlights.length} arrivals`);
+
+        if (all.length > 0) {
+          const upserted = await upsertFlights(all);
+          console.log(`[Aurigny] ${date}: upserted ${upserted} flights`);
+          totalUpserted += upserted;
+        } else {
+          console.warn(`[Aurigny] ${date}: no flights parsed — skipping upsert`);
+        }
+      }
 
       await db.update(scraperLogs)
-        .set({ status: 'success', recordsScraped: upsertedCount, completedAt: new Date(), retryCount: attempt - 1 })
+        .set({ status: 'success', recordsScraped: totalUpserted, completedAt: new Date(), retryCount: attempt - 1 })
         .where(eq(scraperLogs.id, logId));
 
       console.log('[Aurigny] Closing browser...');
@@ -462,13 +503,12 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
         new Promise(resolve => setTimeout(resolve, 3000)),
       ]);
       console.log('[Aurigny] Browser closed');
-      
-      // Force garbage collection if available
+
       if (global.gc) {
         global.gc();
       }
-      
-      return { success: true, count: upsertedCount };
+
+      return { success: true, count: totalUpserted };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[Aurigny] Attempt ${attempt} failed: ${message}`);
@@ -493,4 +533,46 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
   }
 
   return { success: false, count: 0, error: 'Exhausted retries' };
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Scrapes schedule data for one or more dates (YYYY-MM-DD) in a single browser
+ * session, reusing the Cloudflare session for all date fetches after the first.
+ *
+ * @param dates   Array of YYYY-MM-DD strings. First date uses page-intercepted
+ *                departures XHR; subsequent dates use in-page fetch only.
+ * @param service Scraper log service tag. Use 'aurigny_live' for the regular
+ *                live loop and 'aurigny_prefetch' for background prefetch runs.
+ */
+export async function scrapeMultipleDates(
+  dates: string[],
+  service: 'aurigny_live' | 'aurigny_prefetch' = 'aurigny_prefetch',
+): Promise<{ success: boolean; count: number; error?: string }> {
+  if (dates.length === 0) {
+    return { success: true, count: 0 };
+  }
+
+  const logEntry = await db
+    .insert(scraperLogs)
+    .values({ service, status: 'retry', startedAt: new Date(), retryCount: 0 })
+    .returning({ id: scraperLogs.id });
+  const logId = logEntry[0].id;
+
+  const maxRetries = parseInt(process.env.SCRAPER_MAX_RETRIES || '3');
+  return runBrowserSession(dates, logId, maxRetries);
+}
+
+/**
+ * Scrapes today's schedule (Guernsey local date). Kept as a thin wrapper around
+ * scrapeMultipleDates for backward compatibility with existing callers.
+ */
+export async function scrapeOnce(): Promise<{ success: boolean; count: number; error?: string }> {
+  // Use Guernsey local date — fixes a pre-existing bug where new Date().toISOString()
+  // would return yesterday's UTC date during the BST 23:00–00:00 window.
+  const today = guernseyDateStr();
+  return scrapeMultipleDates([today], 'aurigny_live');
 }
