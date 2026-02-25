@@ -78,8 +78,8 @@ interface InferredPosition {
 // Live polling — only for airborne flights
 const LIVE_POLL_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
-// Historical inference — once per aircraft per day (aircraft don't move while parked)
-const INFER_INTERVAL = 6 * 60 * 60 * 1000; // 6 hours
+// Historical inference — re-run each poll cycle so new completed flights are picked up promptly
+const INFER_INTERVAL = 5 * 60 * 1000; // 5 minutes (same as poll interval)
 
 // Track last poll/infer times per flight id
 const lastLivePollTimes = new Map<number, number>();

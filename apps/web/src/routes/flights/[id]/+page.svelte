@@ -76,6 +76,71 @@
     return bestDist < 30 ? best : null;
   }
 
+  /** 
+   * Find the most recently completed flight in the rotation before the current flight.
+   * Uses actual_arrival if available, otherwise falls back to scheduled_arrival for ordering.
+   */
+  function getMostRecentCompletedRotationFlight() {
+    if (!rotationFlights || rotationFlights.length === 0) return null;
+    
+    const currentFlightDep = new Date(flight.scheduledDeparture).getTime();
+    
+    const completedBefore = rotationFlights.filter(f => {
+      const status = f.status?.toLowerCase() || '';
+      const isCompleted = status.includes('completed') || status.includes('landed');
+      // Must have departed before the current flight
+      const depTime = new Date(f.scheduledDeparture).getTime();
+      return isCompleted && depTime < currentFlightDep;
+    });
+    
+    if (completedBefore.length === 0) return null;
+    
+    // Sort by actual_arrival desc (most recently landed first), fall back to scheduled
+    return completedBefore.sort((a, b) => {
+      const aTime = a.actualArrival ? new Date(a.actualArrival).getTime() : new Date(a.scheduledArrival).getTime();
+      const bTime = b.actualArrival ? new Date(b.actualArrival).getTime() : new Date(b.scheduledArrival).getTime();
+      return bTime - aTime;
+    })[0];
+  }
+
+  /** 
+   * Return the best known location for the aircraft.
+   * Rotation data is more up-to-date than stale inferred positions,
+   * so if the most recent completed rotation flight arrived AFTER the
+   * stored inferred position was recorded, prefer the rotation result.
+   */
+  function getInferredLocationFromRotation(): { airport: string; source: 'rotation' } | null {
+    const mostRecent = getMostRecentCompletedRotationFlight();
+    if (!mostRecent) return null;
+    return { airport: mostRecent.arrivalAirport, source: 'rotation' };
+  }
+
+  /**
+   * True when the stored inferred position is stale compared to rotation data.
+   * e.g. position says ACI (from GR202) but rotation shows GR205 completed at GCI after that.
+   */
+  const rotationOverridesPosition = $derived.by(() => {
+    if (!position) return false;
+    // Only applies to inferred positions — live positions are always trusted
+    if (!position.fr24Id?.startsWith('INFERRED_')) return false;
+    
+    const mostRecent = getMostRecentCompletedRotationFlight();
+    if (!mostRecent) return false;
+    
+    // Compare arrival time of the rotation's most recent flight vs the inferred position timestamp
+    const rotationArrival = mostRecent.actualArrival
+      ? new Date(mostRecent.actualArrival).getTime()
+      : new Date(mostRecent.scheduledArrival).getTime();
+    const inferredAt = new Date(position.positionTimestamp).getTime();
+    
+    // Rotation is newer if the flight arrived after the inferred position was recorded,
+    // OR if the inferred position airport doesn't match the rotation's conclusion
+    const rotationAirport = mostRecent.arrivalAirport;
+    const inferredAirport = position.destIata ?? null;
+    
+    return rotationArrival > inferredAt || rotationAirport !== inferredAirport;
+  });
+
   function getFlightProgressDescription(): string {
     if (!position || !hasPosition) return 'Location unavailable';
     const isInferred = position.fr24Id?.startsWith('INFERRED_');
@@ -398,7 +463,7 @@
   </div>
 
   <!-- Live position -->
-  {#if hasPosition && position}
+  {#if hasPosition && position && !rotationOverridesPosition}
     {@const isInferred = position.fr24Id?.startsWith('INFERRED_')}
     <div class="rounded-lg border bg-card mb-6 overflow-hidden">
       <!-- Header with toggle -->
@@ -506,12 +571,30 @@
       {/if}
     </div>
   {:else}
+    {@const inferredLocation = getInferredLocationFromRotation()}
     <!-- No live position -->
     <div class="rounded-lg border bg-card px-4 py-3 mb-6">
       <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Aircraft Location</p>
-      <p class="text-sm text-muted-foreground">
-        Aircraft not currently tracked by Flightradar24. It may be at {airportName(flight.departureAirport)} ({flight.departureAirport}), {airportName(flight.arrivalAirport)} ({flight.arrivalAirport}), or en route to/from base airport. Live tracking will appear once the aircraft transmits position data.
-      </p>
+      {#if inferredLocation}
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-600">
+              <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+              <circle cx="12" cy="10" r="3"/>
+            </svg>
+          </div>
+          <div>
+            <p class="font-semibold text-foreground">
+              On the ground at {airportName(inferredLocation.airport)} <span class="opacity-50 font-normal">({inferredLocation.airport})</span>
+            </p>
+            <p class="text-xs text-amber-600 mt-0.5">Inferred from flight history</p>
+          </div>
+        </div>
+      {:else}
+        <p class="text-sm text-muted-foreground">
+          Aircraft not currently tracked by Flightradar24. It may be at {airportName(flight.departureAirport)} ({flight.departureAirport}), {airportName(flight.arrivalAirport)} ({flight.arrivalAirport}), or en route to/from base airport. Live tracking will appear once the aircraft transmits position data.
+        </p>
+      {/if}
     </div>
   {/if}
 
