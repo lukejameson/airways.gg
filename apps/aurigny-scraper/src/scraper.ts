@@ -301,9 +301,9 @@ export async function scrapeOnce(): Promise<{ success: boolean; count: number; e
       const isDocker = process.env.CHROME_PATH !== undefined;
       const chromePath = process.env.CHROME_PATH;
       const connectOptions: Record<string, unknown> = {
-        headless: true,
+        headless: false,
         turnstile: true,
-        disableXvfb: true,
+        disableXvfb: false,
         args: [
           '--disable-dev-shm-usage',
           '--disable-gpu',
