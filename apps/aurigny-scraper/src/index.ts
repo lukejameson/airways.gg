@@ -32,23 +32,25 @@ import { eq, and, not, inArray, asc, desc, count } from 'drizzle-orm';
 // ---------------------------------------------------------------------------
 
 if (process.env.SCRAPER_INTERVAL_MS) {
-  console.warn('[Aurigny] SCRAPER_INTERVAL_MS is deprecated — use the tiered interval env vars instead (SCRAPER_INTERVAL_HIGH_MS, _MEDIUM_MS, _LOW_MS, _IDLE_MS)');
+  console.warn('[Aurigny] SCRAPER_INTERVAL_MS is deprecated — use the tiered interval env vars instead (SCRAPER_INTERVAL_HIGH_MINS, _MEDIUM_MINS, _LOW_MINS, _IDLE_MINS)');
 }
 
+const mins = (n: number) => n * 60_000;
+
 /** Hour (0–23, Guernsey local) at which the scraper hard-stops for the night */
-const CUTOFF_HOUR         = parseInt(process.env.SCRAPER_CUTOFF_HOUR          || '23', 10);
+const CUTOFF_HOUR          = parseInt(process.env.SCRAPER_CUTOFF_HOUR           || '23', 10);
 /** Minutes before the first scheduled flight to wake up from sleep */
-const WAKE_OFFSET_MINS    = parseInt(process.env.SCRAPER_WAKE_OFFSET_MINS      || '30', 10);
-/** Interval when < 20 min to next flight event (ms) */
-const INTERVAL_HIGH_MS    = parseInt(process.env.SCRAPER_INTERVAL_HIGH_MS      || '120000',  10); // 2 min
-/** Interval when 20–60 min to next flight event (ms) */
-const INTERVAL_MEDIUM_MS  = parseInt(process.env.SCRAPER_INTERVAL_MEDIUM_MS    || '300000',  10); // 5 min
-/** Interval when 60–120 min to next flight event (ms) */
-const INTERVAL_LOW_MS     = parseInt(process.env.SCRAPER_INTERVAL_LOW_MS       || '600000',  10); // 10 min
-/** Interval when > 120 min to next flight event, or no active flights (ms) */
-const INTERVAL_IDLE_MS    = parseInt(process.env.SCRAPER_INTERVAL_IDLE_MS      || '900000',  10); // 15 min
-/** How often to run the background next-day schedule prefetch (ms) */
-const PREFETCH_INTERVAL_MS = parseInt(process.env.SCRAPER_PREFETCH_INTERVAL_MS || '28800000', 10); // 8 h
+const WAKE_OFFSET_MINS     = parseInt(process.env.SCRAPER_WAKE_OFFSET_MINS       || '30', 10);
+/** Interval when < 20 min to next flight event (ms) — env var in minutes */
+const INTERVAL_HIGH_MS     = mins(parseInt(process.env.SCRAPER_INTERVAL_HIGH_MINS   || '5',  10));
+/** Interval when 20–60 min to next flight event (ms) — env var in minutes */
+const INTERVAL_MEDIUM_MS   = mins(parseInt(process.env.SCRAPER_INTERVAL_MEDIUM_MINS || '5',  10));
+/** Interval when 60–120 min to next flight event (ms) — env var in minutes */
+const INTERVAL_LOW_MS      = mins(parseInt(process.env.SCRAPER_INTERVAL_LOW_MINS    || '10', 10));
+/** Interval when > 120 min to next flight event, or no active flights (ms) — env var in minutes */
+const INTERVAL_IDLE_MS     = mins(parseInt(process.env.SCRAPER_INTERVAL_IDLE_MINS   || '15', 10));
+/** How often to run the background next-day schedule prefetch (ms) — env var in minutes */
+const PREFETCH_INTERVAL_MS = mins(parseInt(process.env.SCRAPER_PREFETCH_INTERVAL_MINS || '480', 10)); // 8 h
 
 // Terminal statuses — a flight in one of these states is finished for the day
 const TERMINAL_STATUSES = ['Completed', 'Landed', 'Cancelled'];
