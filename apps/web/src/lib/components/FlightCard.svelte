@@ -6,6 +6,8 @@
 
   type Flight = typeof flights.$inferSelect & {
     prediction: (typeof delayPredictions.$inferSelect) | null;
+    estimatedDeparture?: string | null;
+    estimatedArrival?: string | null;
   };
 
   interface DaylightData {
@@ -91,27 +93,42 @@
   const isDeparture = $derived(flight.departureAirport === 'GCI');
   const scheduledTime = $derived(isDeparture ? flight.scheduledDeparture : flight.scheduledArrival);
   const actualTime = $derived(isDeparture ? flight.actualDeparture : flight.actualArrival);
+  const estimatedTime = $derived(isDeparture ? flight.estimatedDeparture : flight.estimatedArrival);
+  
+  // Check if estimated time has passed but flight hasn't landed yet
+  const estimatedTimeExpired = $derived.by(() => {
+    if (!estimatedTime || actualTime) return false;
+    const status = flight.status?.toLowerCase() ?? '';
+    // If flight has landed or cancelled, estimated time is still valid
+    if (status.includes('landed') || status.includes('completed') || status.includes('cancel')) return false;
+    // Check if estimated time has passed
+    return new Date(estimatedTime).getTime() < Date.now();
+  });
+  
+  // Use estimated time only if it hasn't expired, otherwise fall back to scheduled
+  const displayTime = $derived(actualTime ?? (estimatedTimeExpired ? null : estimatedTime));
   const otherAirport = $derived(isDeparture ? flight.arrivalAirport : flight.departureAirport);
   const delayMinutes = $derived(flight.delayMinutes ?? 0);
+  const isEstimate = $derived(!actualTime && !!estimatedTime && !estimatedTimeExpired);
 
   const isCompleted = $derived.by(() => {
     const s = flight.status?.toLowerCase() ?? '';
-    return s === 'completed' || flight.canceled === true;
+    return s === 'landed' || s === 'completed' || flight.canceled === true;
   });
 
-  // Calculate delay from available data (actual time takes precedence over stored delayMinutes)
+  // Calculate delay from available data (display time takes precedence over stored delayMinutes)
   const calculatedDelayMinutes = $derived.by(() => {
-    if (actualTime && scheduledTime) {
-      return Math.round((new Date(actualTime).getTime() - new Date(scheduledTime).getTime()) / 60000);
+    if (displayTime && scheduledTime) {
+      return Math.round((new Date(displayTime).getTime() - new Date(scheduledTime).getTime()) / 60000);
     }
     return delayMinutes;
   });
 
   // Calculate our own status when external source is unreliable
   const calculatedStatus = $derived.by(() => {
-    // If flight is already completed/landed/airborne/cancelled, trust that status
+    // If flight is already landed/airborne/cancelled, trust that status
     const currentStatus = flight.status?.toLowerCase() ?? '';
-    if (currentStatus.includes('completed') || currentStatus.includes('landed') || 
+    if (currentStatus.includes('landed') || 
         currentStatus.includes('airborne') || currentStatus.includes('cancel')) {
       return flight.status;
     }
@@ -144,7 +161,6 @@
   });
 
   const isDelayed = $derived(calculatedStatus?.toLowerCase().includes('delayed'));
-  const showEstimate = $derived(isDelayed && !!actualTime && !flight.actualDeparture);
 
   type BadgeTone = 'green' | 'yellow' | 'red' | 'blue' | 'gray';
   const tone = $derived.by((): BadgeTone => {
@@ -178,13 +194,12 @@
 
       <!-- Time -->
       <div class="w-16 shrink-0 text-center">
-        {#if showEstimate}
+        {#if displayTime}
           <p class="text-xs tabular-nums text-muted-foreground line-through leading-none">{fmt(scheduledTime)}</p>
-          <p class="text-lg font-bold tabular-nums leading-none text-amber-600 mt-1">{fmt(actualTime)}</p>
-          <p class="text-[10px] text-amber-500 leading-none mt-0.5">est.</p>
-        {:else if actualTime && calculatedDelayMinutes > 0}
-          <p class="text-xs tabular-nums text-muted-foreground line-through leading-none">{fmt(scheduledTime)}</p>
-          <p class="text-lg font-bold tabular-nums leading-none text-red-500 mt-1">{fmt(actualTime)}</p>
+          <p class="text-lg font-bold tabular-nums leading-none {calculatedDelayMinutes > 0 ? 'text-red-500' : 'text-foreground'} mt-1">{fmt(displayTime)}</p>
+          {#if isEstimate}
+            <p class="text-[10px] text-muted-foreground leading-none mt-0.5">est.</p>
+          {/if}
         {:else}
           <p class="text-lg font-bold tabular-nums leading-none text-foreground">{fmt(scheduledTime)}</p>
         {/if}

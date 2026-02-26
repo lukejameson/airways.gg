@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { db, flights, delayPredictions, weatherData, scraperLogs, airportDaylight } from '$lib/server/db';
+import { db, flights, delayPredictions, weatherData, scraperLogs, airportDaylight, flightTimes } from '$lib/server/db';
 import { and, gte, lte, inArray, or, eq, desc, count, not, sql } from 'drizzle-orm';
 
 // Guernsey local timezone
@@ -32,7 +32,7 @@ async function countFlightsForDate(dateStr: string): Promise<number> {
 
 /** Get all active (non-terminal) flights for a given date */
 async function getActiveFlightsForDate(dateStr: string) {
-  const TERMINAL_STATUSES = ['Completed', 'Landed', 'Cancelled'];
+  const TERMINAL_STATUSES = ['Landed', 'Cancelled'];
   try {
     return await db
       .select()
@@ -101,9 +101,35 @@ export const load: PageServerLoad = async ({ url }) => {
       for (const p of predictions) predMap.set(p.flightId, p);
     }
 
+    // Estimated times (EstimatedBlockOff for departures, EstimatedBlockOn for arrivals)
+    const estimatedTimesMap = new Map<number, { estimatedDeparture?: string; estimatedArrival?: string }>();
+    if (displayFlights.length > 0) {
+      const flightIds = displayFlights.map(f => f.id);
+      const estimatedTimes = await db
+        .select()
+        .from(flightTimes)
+        .where(
+          and(
+            inArray(flightTimes.flightId, flightIds),
+            inArray(flightTimes.timeType, ['EstimatedBlockOff', 'EstimatedBlockOn'])
+          )
+        );
+      for (const t of estimatedTimes) {
+        const existing = estimatedTimesMap.get(t.flightId) ?? {};
+        if (t.timeType === 'EstimatedBlockOff') {
+          existing.estimatedDeparture = t.timeValue.toISOString();
+        } else if (t.timeType === 'EstimatedBlockOn') {
+          existing.estimatedArrival = t.timeValue.toISOString();
+        }
+        estimatedTimesMap.set(t.flightId, existing);
+      }
+    }
+
     const flightsWithPredictions = displayFlights.map(f => ({
       ...f,
       prediction: predMap.get(f.id) ?? null,
+      estimatedDeparture: estimatedTimesMap.get(f.id)?.estimatedDeparture ?? null,
+      estimatedArrival: estimatedTimesMap.get(f.id)?.estimatedArrival ?? null,
     }));
 
     // Collect all unique airports across display flights

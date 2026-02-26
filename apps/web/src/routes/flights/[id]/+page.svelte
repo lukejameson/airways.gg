@@ -55,9 +55,9 @@
   // Calculate our own status when external source is unreliable
   // If we have delay minutes or the actual/estimated time differs from scheduled by > 15 min
   const calculatedStatus = $derived.by(() => {
-    // If flight is already completed/landed/airborne/cancelled, trust that status
+    // If flight is already landed/airborne/cancelled, trust that status
     const currentStatus = flight.status?.toLowerCase() ?? '';
-    if (currentStatus.includes('completed') || currentStatus.includes('landed') || 
+    if (currentStatus.includes('landed') || currentStatus.includes('completed') || 
         currentStatus.includes('airborne') || currentStatus.includes('cancel')) {
       return flight.status;
     }
@@ -121,7 +121,7 @@
 
   function rotationStatusTone(status: string | null): string {
     const s = status?.toLowerCase() ?? '';
-    if (s.includes('completed') || s.includes('landed')) return 'blue';
+    if (s.includes('landed') || s.includes('completed')) return 'blue';
     if (s.includes('airborne')) return 'green';
     if (s.includes('delayed')) return 'yellow';
     if (s.includes('cancel')) return 'red';
@@ -154,26 +154,26 @@
   }
 
   /** 
-   * Find the most recently completed flight in the rotation before the current flight.
+   * Find the most recently landed flight in the rotation before the current flight.
    * Uses actual_arrival if available, otherwise falls back to scheduled_arrival for ordering.
    */
-  function getMostRecentCompletedRotationFlight() {
+  function getMostRecentLandedRotationFlight() {
     if (!rotationFlights || rotationFlights.length === 0) return null;
     
     const currentFlightDep = new Date(flight.scheduledDeparture).getTime();
     
-    const completedBefore = rotationFlights.filter(f => {
+    const landedBefore = rotationFlights.filter(f => {
       const status = f.status?.toLowerCase() || '';
-      const isCompleted = status.includes('completed') || status.includes('landed');
+      const isLanded = status.includes('landed') || status.includes('completed');
       // Must have departed before the current flight
       const depTime = new Date(f.scheduledDeparture).getTime();
-      return isCompleted && depTime < currentFlightDep;
+      return isLanded && depTime < currentFlightDep;
     });
     
-    if (completedBefore.length === 0) return null;
+    if (landedBefore.length === 0) return null;
     
     // Sort by actual_arrival desc (most recently landed first), fall back to scheduled
-    return completedBefore.sort((a, b) => {
+    return landedBefore.sort((a, b) => {
       const aTime = a.actualArrival ? new Date(a.actualArrival).getTime() : new Date(a.scheduledArrival).getTime();
       const bTime = b.actualArrival ? new Date(b.actualArrival).getTime() : new Date(b.scheduledArrival).getTime();
       return bTime - aTime;
@@ -183,25 +183,25 @@
   /** 
    * Return the best known location for the aircraft.
    * Rotation data is more up-to-date than stale inferred positions,
-   * so if the most recent completed rotation flight arrived AFTER the
+   * so if the most recent landed rotation flight arrived AFTER the
    * stored inferred position was recorded, prefer the rotation result.
    */
   function getInferredLocationFromRotation(): { airport: string; source: 'rotation' } | null {
-    const mostRecent = getMostRecentCompletedRotationFlight();
+    const mostRecent = getMostRecentLandedRotationFlight();
     if (!mostRecent) return null;
     return { airport: mostRecent.arrivalAirport, source: 'rotation' };
   }
 
   /**
    * True when the stored inferred position is stale compared to rotation data.
-   * e.g. position says ACI (from GR202) but rotation shows GR205 completed at GCI after that.
+   * e.g. position says ACI (from GR202) but rotation shows GR205 landed at GCI after that.
    */
   const rotationOverridesPosition = $derived.by(() => {
     if (!position) return false;
     // Only applies to inferred positions — live positions are always trusted
     if (!position.fr24Id?.startsWith('INFERRED_')) return false;
     
-    const mostRecent = getMostRecentCompletedRotationFlight();
+    const mostRecent = getMostRecentLandedRotationFlight();
     if (!mostRecent) return false;
     
     // Compare arrival time of the rotation's most recent flight vs the inferred position timestamp
@@ -323,7 +323,7 @@
     if (s.includes('on time')) return 'text-green-600';
     if (s.includes('delayed')) return 'text-yellow-600';
     if (s.includes('cancelled')) return 'text-red-600';
-    if (s.includes('landed') || s.includes('airborne')) return 'text-blue-600';
+    if (s.includes('landed') || s.includes('airborne') || s.includes('completed')) return 'text-blue-600';
     return 'text-muted-foreground';
   }
 
@@ -332,7 +332,7 @@
     if (s.includes('on time')) return 'bg-green-500';
     if (s.includes('delayed')) return 'bg-yellow-500';
     if (s.includes('cancelled')) return 'bg-red-500';
-    if (s.includes('landed') || s.includes('airborne')) return 'bg-blue-500';
+    if (s.includes('landed') || s.includes('airborne') || s.includes('completed')) return 'bg-blue-500';
     return 'bg-gray-400';
   }
 

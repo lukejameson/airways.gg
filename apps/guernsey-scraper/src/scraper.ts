@@ -175,7 +175,7 @@ function deriveStatus(updates: StatusUpdate[]): string | null {
   if (last.includes('landed')) return 'Landed';
   if (last.includes('airborne')) return 'Airborne';
   if (last.includes('cancelled') || last.includes('canceled')) return 'Cancelled';
-  if (last.includes('voyagereported')) return 'Completed';
+  if (last.includes('voyagereported')) return 'Landed';
   return updates[updates.length - 1].statusMessage;
 }
 

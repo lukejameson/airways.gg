@@ -93,7 +93,7 @@
 
   const isCompleted = (f: (typeof data.flights)[0]) => {
     const s = f.status?.toLowerCase() ?? '';
-    return s === 'completed' || f.canceled === true;
+    return s === 'landed' || s === 'completed' || f.canceled === true;
   };
 
   const departures = $derived(

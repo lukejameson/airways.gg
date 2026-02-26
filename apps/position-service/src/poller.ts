@@ -123,7 +123,7 @@ function isTerminal(status: string | null): boolean {
  *      (Aurigny writes ActualBlockOff before it writes status='Airborne', so this
  *       catches the gap between pushback and the scraper's next status update)
  *
- * Terminal flights (Completed/Landed/Cancelled) are always excluded.
+ * Terminal flights (Landed/Cancelled) are always excluded.
  * Flights that haven't departed yet and have no actualDeparture are excluded.
  */
 function shouldPollFR24(flight: Pick<FlightToPoll, 'status' | 'actualDeparture'>): boolean {
@@ -140,7 +140,7 @@ function shouldPollFR24(flight: Pick<FlightToPoll, 'status' | 'actualDeparture'>
  * FR24 gives us real-time altitude, ground speed, and vertical speed — enough
  * to distinguish between taxiing, climbing, cruising, and descending.
  * These are only written when they represent a meaningful step forward from
- * the current DB status; terminal statuses (Landed/Completed/Cancelled) are
+ * the current DB status; terminal statuses (Landed/Cancelled) are
  * never overwritten by FR24 data.
  *
  * Returns null if no status update is warranted.
@@ -168,7 +168,7 @@ function deriveStatusFromFR24(
     return null;
   }
 
-  // Stationary on the ground — don't overwrite anything; Aurigny will write Landed/Completed.
+  // Stationary on the ground — don't overwrite anything; Aurigny will write Landed.
   return null;
 }
 
@@ -243,10 +243,10 @@ async function inferPositionsFromOwnDb(
     if (result.has(reg)) continue; // already have the most recent
 
     const status = f.status?.toLowerCase() ?? '';
-    const isCompleted = status.includes('completed') || status.includes('landed');
+    const isLanded = status.includes('landed');
     const isAirborneStatus = status.includes('airborne');
 
-    if (!isCompleted && !isAirborneStatus) continue;
+    if (!isLanded && !isAirborneStatus) continue;
 
     // For an airborne flight the plane isn't at the arrival airport yet — skip
     if (isAirborneStatus) continue;

@@ -42,7 +42,7 @@ const CUTOFF_HOUR          = parseInt(process.env.SCRAPER_CUTOFF_HOUR           
 /** Minutes before the first scheduled flight to wake up from sleep */
 const WAKE_OFFSET_MINS     = parseInt(process.env.SCRAPER_WAKE_OFFSET_MINS       || '30', 10);
 /** Interval when < 20 min to next flight event (ms) — env var in minutes */
-const INTERVAL_HIGH_MS     = mins(parseInt(process.env.SCRAPER_INTERVAL_HIGH_MINS   || '5',  10));
+const INTERVAL_HIGH_MS     = mins(parseInt(process.env.SCRAPER_INTERVAL_HIGH_MINS   || '2',  10));
 /** Interval when 20–60 min to next flight event (ms) — env var in minutes */
 const INTERVAL_MEDIUM_MS   = mins(parseInt(process.env.SCRAPER_INTERVAL_MEDIUM_MINS || '5',  10));
 /** Interval when 60–120 min to next flight event (ms) — env var in minutes */
@@ -67,7 +67,7 @@ const CIRCUIT_BREAKER_THRESHOLD = parseInt(process.env.SCRAPER_CIRCUIT_BREAKER_T
 const CIRCUIT_BREAKER_RESET_MS = parseInt(process.env.SCRAPER_CIRCUIT_BREAKER_RESET_MS || '60000', 10); // 1 min
 
 // Terminal statuses — a flight in one of these states is finished for the day
-const TERMINAL_STATUSES = ['Completed', 'Landed', 'Cancelled'];
+const TERMINAL_STATUSES = ['Landed', 'Cancelled'];
 
 // ---------------------------------------------------------------------------
 // State Management & Circuit Breaker
