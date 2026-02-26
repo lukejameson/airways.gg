@@ -1,4 +1,3 @@
-ALTER TYPE "public"."scraper_service" ADD VALUE 'aurigny_prefetch';--> statement-breakpoint
 CREATE TABLE "airport_daylight" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"airport_code" varchar(10) NOT NULL,
