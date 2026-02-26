@@ -1,4 +1,4 @@
-ALTER TABLE "airports" ADD COLUMN "display_name" varchar(255);--> statement-breakpoint
+ALTER TABLE "airports" ADD COLUMN IF NOT EXISTS "display_name" varchar(255);--> statement-breakpoint
 UPDATE "airports" SET "display_name" = TRIM(
   REGEXP_REPLACE(
     REGEXP_REPLACE(
