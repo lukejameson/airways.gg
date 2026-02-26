@@ -36,6 +36,15 @@ export function airportLabel(iata: string): { name: string; code: string } {
   return { name, code: iata };
 }
 
+export function airportNameShort(iata: string): string {
+  const name = airportName(iata);
+  return name
+    .replace(/\s+International\s+Airport$/i, '')
+    .replace(/\s+Airport$/i, '')
+    .replace(/\s+Intl\.?\s+Airport$/i, '')
+    .trim();
+}
+
 export function getAirportCoords(iata: string): [number, number] | null {
   let coords: [number, number] | null = null;
   const unsub = airportsStore.subscribe(a => {

@@ -2,7 +2,7 @@
   import type { PageData } from './$types';
   import { browser } from '$app/environment';
   import { page } from '$app/stores';
-  import { airportName, getAirportCoords, getAirportsForNearestSearch } from '$lib/airports';
+  import { airportName, airportNameShort, getAirportCoords, getAirportsForNearestSearch } from '$lib/airports';
   import Icon from '$lib/components/Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
 
@@ -655,7 +655,8 @@
       {#if rotationExpanded}
         <div class="border-t border-border">
           <div bind:this={rotationScrollEl} class="max-h-72 overflow-y-auto">
-            <table class="w-full text-sm">
+            <!-- Desktop Table -->
+            <table class="hidden md:table w-full text-sm">
               <thead class="sticky top-0 bg-muted/80 backdrop-blur-sm">
                 <tr class="text-xs text-muted-foreground uppercase tracking-wide">
                   <th class="px-4 py-2 text-left font-medium">Flight</th>
@@ -732,6 +733,82 @@
                 {/each}
               </tbody>
             </table>
+
+            <!-- Mobile Cards -->
+            <div class="md:hidden divide-y divide-border">
+              {#each rotationFlights as rf}
+                {@const isCurrent = rf.id === flight.id}
+                {@const tone = rotationStatusTone(rf.status)}
+                <a
+                  href="/flights/{rf.id}"
+                  data-current={isCurrent}
+                  class="block px-4 py-3 transition-colors {isCurrent ? 'bg-primary/8' : 'hover:bg-muted/30'}"
+                >
+                  <!-- Header: Flight + Status -->
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="font-semibold {isCurrent ? 'text-primary' : 'text-foreground'}">{rf.flightNumber}</span>
+                      {#if isCurrent}
+                        <span class="text-[10px] font-bold uppercase tracking-wide text-primary opacity-70">this flight</span>
+                      {/if}
+                    </div>
+                    {#if tone === 'blue'}
+                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700">{rf.status}</span>
+                    {:else if tone === 'green'}
+                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700">{rf.status}</span>
+                    {:else if tone === 'yellow'}
+                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">{rf.status}</span>
+                    {:else if tone === 'red'}
+                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">{rf.status}</span>
+                    {:else}
+                      <span class="text-muted-foreground text-xs">{rf.status ?? 'Scheduled'}</span>
+                    {/if}
+                  </div>
+
+                  <!-- Route: From -> To -->
+                  <div class="flex items-center gap-2 text-sm mb-2">
+                    <span class="font-medium text-foreground">{airportNameShort(rf.departureAirport)}</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
+                      <path d="M5 12h14"/>
+                      <path d="m12 5 7 7-7 7"/>
+                    </svg>
+                    <span class="font-medium text-foreground">{airportNameShort(rf.arrivalAirport)}</span>
+                  </div>
+
+                  <!-- Times: Act Dep -> Act Arr -->
+                  <div class="flex items-center gap-3 text-sm">
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-xs text-muted-foreground">Dep</span>
+                      {#if rf.actualDeparture}
+                        <span class="tabular-nums font-medium {rf.actualDeparture > rf.scheduledDeparture ? 'text-amber-600' : 'text-green-600'}">
+                          {formatTime(rf.actualDeparture)}
+                        </span>
+                      {:else if rf.scheduledDeparture}
+                        <span class="tabular-nums text-muted-foreground">{formatTime(rf.scheduledDeparture)}</span>
+                      {:else}
+                        <span class="text-muted-foreground">—</span>
+                      {/if}
+                    </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
+                      <path d="M5 12h14"/>
+                      <path d="m12 5 7 7-7 7"/>
+                    </svg>
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-xs text-muted-foreground">Arr</span>
+                      {#if rf.actualArrival}
+                        <span class="tabular-nums font-medium {rf.actualArrival > rf.scheduledArrival ? 'text-amber-600' : 'text-green-600'}">
+                          {formatTime(rf.actualArrival)}
+                        </span>
+                      {:else if rf.scheduledArrival}
+                        <span class="tabular-nums text-muted-foreground">{formatTime(rf.scheduledArrival)}</span>
+                      {:else}
+                        <span class="text-muted-foreground">—</span>
+                      {/if}
+                    </div>
+                  </div>
+                </a>
+              {/each}
+            </div>
           </div>
         </div>
       {/if}
