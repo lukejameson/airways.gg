@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invalidateAll, replaceState } from '$app/navigation';
+  import { invalidateAll, replaceState, goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { FlightBoard } from '$lib/components';
@@ -14,6 +14,26 @@
   let showCompleted = $state($page.url.searchParams.get('completed') === '1');
   let searchQuery = $state('');
   let isLoading = $state(true);
+  
+  // Date navigation
+  const displayDate = $derived(data.displayDate);
+  const isViewingTomorrow = $derived(displayDate === data.tomorrowStr);
+  
+  function navigateToDate(dateStr: string) {
+    // Clear "Next hour" filter when navigating to tomorrow (since it won't make sense)
+    if (dateStr === data.tomorrowStr && activeFilters.includes('next-hour')) {
+      activeFilters = activeFilters.filter(f => f !== 'next-hour');
+    }
+    goto(`/?date=${dateStr}`);
+  }
+  
+  function goToToday() {
+    navigateToDate(data.todayStr);
+  }
+  
+  function goToTomorrow() {
+    navigateToDate(data.tomorrowStr);
+  }
 
   // Derive lastUpdated from server data - shows when scraper last ran
   const lastUpdated = $derived(data.lastUpdated);
@@ -48,6 +68,8 @@
 
   function updateUrl() {
     const params = new URLSearchParams();
+    // Preserve date parameter if not viewing today and displayDate is valid
+    if (displayDate && displayDate !== data.todayStr) params.set('date', displayDate);
     if (activeTab !== 'departures') params.set('tab', activeTab);
     if (showCompleted) params.set('completed', '1');
     const query = params.toString();
@@ -147,20 +169,34 @@
 </script>
 
 <svelte:head>
-  <title>delays.gg — Live Flight Board</title>
-  <meta name="description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
+  {#if isViewingTomorrow}
+    <title>delays.gg — Tomorrow's Flights (Guernsey)</title>
+    <meta name="description" content="Tomorrow's departures and arrivals for Guernsey Airport (GCI) with AI-powered delay predictions." />
+    <meta property="og:title" content="delays.gg — Tomorrow's Flights" />
+    <meta property="og:description" content="Tomorrow's departures and arrivals for Guernsey Airport (GCI) with AI-powered delay predictions." />
+    <meta name="twitter:title" content="delays.gg — Tomorrow's Flights" />
+    <meta name="twitter:description" content="Tomorrow's departures and arrivals for Guernsey Airport (GCI) with AI-powered delay predictions." />
+  {:else}
+    <title>delays.gg — Live Flight Board</title>
+    <meta name="description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
+    <meta property="og:title" content="delays.gg — Live Flight Board" />
+    <meta property="og:description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
+    <meta name="twitter:title" content="delays.gg — Live Flight Board" />
+    <meta name="twitter:description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
+  {/if}
   <link rel="canonical" href={data.siteUrl} />
-
-  <meta property="og:title" content="delays.gg — Live Flight Board" />
-  <meta property="og:description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
   <meta property="og:url" content={data.siteUrl} />
   <meta property="og:type" content="website" />
-
-  <meta name="twitter:title" content="delays.gg — Live Flight Board" />
-  <meta name="twitter:description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
 </svelte:head>
 
 <div class="mx-auto max-w-4xl px-4 py-4 sm:py-8">
+  <!-- Auto-advance banner -->
+  {#if data.autoAdvanced}
+    <div class="mb-4 p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-900 dark:text-blue-100">
+      <strong>Today's flights have all completed.</strong> Showing tomorrow's schedule instead.
+    </div>
+  {/if}
+
   <!-- Compact Header -->
   <header class="mb-4 sm:mb-6">
     <div class="flex items-center justify-between gap-2">
@@ -192,6 +228,47 @@
       </div>
     </div>
   </header>
+
+  <!-- Date Navigation -->
+  <div class="mb-4 flex items-center justify-center gap-4">
+    <button
+      onclick={goToToday}
+      disabled={displayDate === data.todayStr}
+      class="flex items-center gap-1 px-3 py-2 rounded-md text-sm transition-colors
+        {displayDate === data.todayStr
+          ? 'text-muted-foreground/50 cursor-not-allowed'
+          : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}"
+      aria-label="Go to today's flights"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"></polyline>
+      </svg>
+      <span class="hidden sm:inline">Today</span>
+    </button>
+    
+    <span class="text-sm font-medium">
+      {#if isViewingTomorrow}
+        Tomorrow
+      {:else}
+        Today
+      {/if}
+    </span>
+    
+    <button
+      onclick={goToTomorrow}
+      disabled={displayDate === data.tomorrowStr}
+      class="flex items-center gap-1 px-3 py-2 rounded-md text-sm transition-colors
+        {displayDate === data.tomorrowStr
+          ? 'text-muted-foreground/50 cursor-not-allowed'
+          : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}"
+      aria-label="Go to tomorrow's flights"
+    >
+      <span class="hidden sm:inline">Tomorrow</span>
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="9 18 15 12 9 6"></polyline>
+      </svg>
+    </button>
+  </div>
 
   <!-- Recently Viewed -->
   {#if recentlyViewed.length > 0 && !searchQuery}
@@ -288,18 +365,20 @@
     <div class="flex-1"></div>
 
     <!-- Filters -->
-    {#if !searchQuery && !isLoading}
-      <div class="flex items-center gap-1.5">
-        <button
-          onclick={() => toggleFilter('next-hour')}
-          class="min-h-[36px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-full border transition-colors
-            {activeFilters.includes('next-hour')
-              ? 'bg-primary text-primary-foreground border-primary'
-              : 'bg-background text-muted-foreground border-border hover:border-muted-foreground'}"
-        >
-          <span class="hidden sm:inline">Next hour</span>
-          <span class="sm:hidden">1hr</span>
-        </button>
+     {#if !searchQuery && !isLoading}
+       <div class="flex items-center gap-1.5">
+         {#if !isViewingTomorrow}
+           <button
+             onclick={() => toggleFilter('next-hour')}
+             class="min-h-[36px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-full border transition-colors
+               {activeFilters.includes('next-hour')
+                 ? 'bg-primary text-primary-foreground border-primary'
+                 : 'bg-background text-muted-foreground border-border hover:border-muted-foreground'}"
+           >
+             <span class="hidden sm:inline">Next hour</span>
+             <span class="sm:hidden">1hr</span>
+           </button>
+         {/if}
         <button
           onclick={() => toggleFilter('delayed')}
           class="min-h-[36px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-full border transition-colors

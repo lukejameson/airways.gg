@@ -194,7 +194,7 @@ async function fetchAllMetars(airports: { code: string; icao: string }[]): Promi
 
 async function fetchAllTafs(airports: { code: string; icao: string }[]): Promise<Map<string, WeatherRow[]>> {
   const icaos = airports.map(a => a.icao).join(',');
-  const url = `${AVIATION_WEATHER_BASE}/taf?ids=${icaos}&hours=12`;
+  const url = `${AVIATION_WEATHER_BASE}/taf?ids=${icaos}&hours=24`;
   // Create lookup map for faster access
   const airportByIcao = new Map(airports.map(a => [a.icao, a]));
 
@@ -315,13 +315,15 @@ async function fetchAllTafs(airports: { code: string; icao: string }[]): Promise
 }
 
 async function getAirportsFromFlights(): Promise<{ code: string; icao: string }[]> {
-  // Get today's date range
+  // Get today's and tomorrow's date ranges
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
+  const dayAfterTomorrow = new Date(tomorrow);
+  dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 1);
 
-  // Query unique airports from today's flights
+  // Query unique airports from today's AND tomorrow's flights
   const todaysFlights = await db
     .select({
       departureAirport: flights.departureAirport,
@@ -329,7 +331,7 @@ async function getAirportsFromFlights(): Promise<{ code: string; icao: string }[
     })
     .from(flights)
     .where(
-      sql`${flights.scheduledDeparture} >= ${today} AND ${flights.scheduledDeparture} < ${tomorrow}`
+      sql`${flights.scheduledDeparture} >= ${today} AND ${flights.scheduledDeparture} < ${dayAfterTomorrow}`
     );
 
   // Collect unique airport codes

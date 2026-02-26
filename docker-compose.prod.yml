@@ -54,9 +54,21 @@ services:
       - SCRAPER_INTERVAL_MEDIUM_MINS=${SCRAPER_INTERVAL_MEDIUM_MINS:-5}
       - SCRAPER_INTERVAL_LOW_MINS=${SCRAPER_INTERVAL_LOW_MINS:-10}
       - SCRAPER_INTERVAL_IDLE_MINS=${SCRAPER_INTERVAL_IDLE_MINS:-15}
-      # Background next-day schedule prefetch interval (default 8 hours)
-      - SCRAPER_PREFETCH_INTERVAL_MINS=${SCRAPER_PREFETCH_INTERVAL_MINS:-480}
+      # Smart bundling window for wall-clock prefetch slots (default 15 minutes)
+      - SCRAPER_PREFETCH_BUNDLE_WINDOW_MINS=${SCRAPER_PREFETCH_BUNDLE_WINDOW_MINS:-15}
+      # Delay before running startup prefetch (default 30 seconds, 0 to disable)
+      - SCRAPER_STARTUP_PREFETCH_DELAY_SECS=${SCRAPER_STARTUP_PREFETCH_DELAY_SECS:-30}
       # Deprecated — replaced by tiered intervals above
+      # High frequency threshold - below this interval (mins), prefetches won't bundle
+      - SCRAPER_HIGH_FREQ_THRESHOLD_MINS=${SCRAPER_HIGH_FREQ_THRESHOLD_MINS:-20}
+      # Max retries for slot operations
+      - SCRAPER_MAX_SLOT_RETRIES=${SCRAPER_MAX_SLOT_RETRIES:-5}
+      # Exponential backoff settings (ms)
+      - SCRAPER_RETRY_BASE_DELAY_MS=${SCRAPER_RETRY_BASE_DELAY_MS:-1000}
+      - SCRAPER_RETRY_MAX_DELAY_MS=${SCRAPER_RETRY_MAX_DELAY_MS:-300000}
+      # Circuit breaker settings
+      - SCRAPER_CIRCUIT_BREAKER_THRESHOLD=${SCRAPER_CIRCUIT_BREAKER_THRESHOLD:-5}
+      - SCRAPER_CIRCUIT_BREAKER_RESET_MS=${SCRAPER_CIRCUIT_BREAKER_RESET_MS:-60000}
       - SCRAPER_INTERVAL_MS=${SCRAPER_INTERVAL_MS:-300000}
     networks:
       - web

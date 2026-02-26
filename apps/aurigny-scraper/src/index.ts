@@ -49,11 +49,126 @@ const INTERVAL_MEDIUM_MS   = mins(parseInt(process.env.SCRAPER_INTERVAL_MEDIUM_M
 const INTERVAL_LOW_MS      = mins(parseInt(process.env.SCRAPER_INTERVAL_LOW_MINS    || '10', 10));
 /** Interval when > 120 min to next flight event, or no active flights (ms) — env var in minutes */
 const INTERVAL_IDLE_MS     = mins(parseInt(process.env.SCRAPER_INTERVAL_IDLE_MINS   || '15', 10));
-/** How often to run the background next-day schedule prefetch (ms) — env var in minutes */
-const PREFETCH_INTERVAL_MS = mins(parseInt(process.env.SCRAPER_PREFETCH_INTERVAL_MINS || '480', 10)); // 8 h
+/** How many minutes after a prefetch slot to bundle tomorrow's data into a live scrape (if one fires within this window) — env var in minutes */
+const PREFETCH_BUNDLE_WINDOW_MINS = parseInt(process.env.SCRAPER_PREFETCH_BUNDLE_WINDOW_MINS || '15', 10);
+/** Delay before running startup prefetch (milliseconds) — env var in seconds, default 30s */
+const STARTUP_PREFETCH_DELAY_MS = parseInt(process.env.SCRAPER_STARTUP_PREFETCH_DELAY_SECS || '30', 10) * 1000;
+/** Threshold for high-frequency mode (minutes). Below this, we don't bundle prefetches */
+const HIGH_FREQ_THRESHOLD_MINS = parseInt(process.env.SCRAPER_HIGH_FREQ_THRESHOLD_MINS || '20', 10);
+/** Max retries for slot operations before giving up */
+const MAX_SLOT_RETRIES = parseInt(process.env.SCRAPER_MAX_SLOT_RETRIES || '5', 10);
+/** Base delay for exponential backoff (ms) */
+const RETRY_BASE_DELAY_MS = parseInt(process.env.SCRAPER_RETRY_BASE_DELAY_MS || '1000', 10);
+/** Max delay for exponential backoff (ms) */
+const RETRY_MAX_DELAY_MS = parseInt(process.env.SCRAPER_RETRY_MAX_DELAY_MS || '300000', 10); // 5 min
+/** Circuit breaker: failures before opening */
+const CIRCUIT_BREAKER_THRESHOLD = parseInt(process.env.SCRAPER_CIRCUIT_BREAKER_THRESHOLD || '5', 10);
+/** Circuit breaker: reset timeout (ms) */
+const CIRCUIT_BREAKER_RESET_MS = parseInt(process.env.SCRAPER_CIRCUIT_BREAKER_RESET_MS || '60000', 10); // 1 min
 
 // Terminal statuses — a flight in one of these states is finished for the day
 const TERMINAL_STATUSES = ['Completed', 'Landed', 'Cancelled'];
+
+// ---------------------------------------------------------------------------
+// State Management & Circuit Breaker
+// ---------------------------------------------------------------------------
+
+interface TimerState {
+  scrapeTimeout: ReturnType<typeof setTimeout> | null;
+  wakeTimeout: ReturnType<typeof setTimeout> | null;
+  prefetchSlotTimeout: ReturnType<typeof setTimeout> | null;
+  startupPrefetchTimeout: ReturnType<typeof setTimeout> | null;
+}
+
+const timers: TimerState = {
+  scrapeTimeout: null,
+  wakeTimeout: null,
+  prefetchSlotTimeout: null,
+  startupPrefetchTimeout: null,
+};
+
+interface CircuitBreakerState {
+  failures: number;
+  lastFailureTime: number | null;
+  isOpen: boolean;
+}
+
+const circuitBreaker: CircuitBreakerState = {
+  failures: 0,
+  lastFailureTime: null,
+  isOpen: false,
+};
+
+interface PrefetchState {
+  claimed: boolean;
+  lastBundleAttempt: number | null;
+  bundleAttempts: number;
+  consecutiveFailures: number;
+}
+
+const prefetchState: PrefetchState = {
+  claimed: false,
+  lastBundleAttempt: null,
+  bundleAttempts: 0,
+  consecutiveFailures: 0,
+};
+
+/** Clear all active timers */
+function clearAllTimers(): void {
+  Object.keys(timers).forEach((key) => {
+    const timerKey = key as keyof TimerState;
+    if (timers[timerKey]) {
+      clearTimeout(timers[timerKey]!);
+      timers[timerKey] = null;
+    }
+  });
+}
+
+/** Check and update circuit breaker state */
+function checkCircuitBreaker(): boolean {
+  if (circuitBreaker.isOpen) {
+    const now = Date.now();
+    if (circuitBreaker.lastFailureTime && 
+        now - circuitBreaker.lastFailureTime > CIRCUIT_BREAKER_RESET_MS) {
+      // Reset circuit breaker
+      circuitBreaker.isOpen = false;
+      circuitBreaker.failures = 0;
+      console.log('[Aurigny] Circuit breaker reset, resuming operations');
+      return true;
+    }
+    console.log('[Aurigny] Circuit breaker is OPEN, skipping operation');
+    return false;
+  }
+  return true;
+}
+
+/** Record a failure in the circuit breaker */
+function recordFailure(): void {
+  circuitBreaker.failures++;
+  circuitBreaker.lastFailureTime = Date.now();
+  
+  if (circuitBreaker.failures >= CIRCUIT_BREAKER_THRESHOLD) {
+    circuitBreaker.isOpen = true;
+    console.error(`[Aurigny] Circuit breaker OPENED after ${circuitBreaker.failures} failures`);
+  }
+}
+
+/** Record a success in the circuit breaker */
+function recordSuccess(): void {
+  if (circuitBreaker.failures > 0) {
+    circuitBreaker.failures = Math.max(0, circuitBreaker.failures - 1);
+  }
+}
+
+/** Calculate exponential backoff delay */
+function getBackoffDelay(attempt: number): number {
+  const delay = Math.min(
+    RETRY_BASE_DELAY_MS * Math.pow(2, attempt),
+    RETRY_MAX_DELAY_MS
+  );
+  // Add jitter to prevent thundering herd
+  return delay + Math.random() * 1000;
+}
 
 // ---------------------------------------------------------------------------
 // Timezone utilities
@@ -396,10 +511,10 @@ async function computeWakeTime(): Promise<{ wakeAt: Date; reason: string }> {
 // State machine
 // ---------------------------------------------------------------------------
 
-/** Reference to the active wake timeout so the prefetch timer can reschedule it. */
-let wakeTimeoutRef: ReturnType<typeof setTimeout> | null = null;
 /** The UTC timestamp we're currently scheduled to wake at (for prefetch comparison). */
 let scheduledWakeAtMs: number | null = null;
+/** The UTC timestamp of the next scheduled prefetch slot (00:00, 06:00, 12:00, 18:00 GY). */
+let nextPrefetchSlotMs: number | null = null;
 
 /**
  * Returns how many milliseconds ago the last successful aurigny_live scrape
@@ -421,12 +536,20 @@ async function msSinceLastScrape(): Promise<number> {
   }
 }
 
-async function runScrape(label: string): Promise<void> {
-  const result = await scrapeOnce();
+async function runScrape(label: string, bundleTomorrow = false): Promise<void> {
+  const dates = [guernseyDateStr()];
+  if (bundleTomorrow) {
+    dates.push(guernseyTomorrowStr());
+  }
+
+  const result = await scrapeMultipleDates(dates, 'aurigny_live');
   if (!result.success) {
     console.error(`[Aurigny] ${label} failed: ${result.error}`);
   } else {
-    console.log(`[Aurigny] ${label} complete — ${result.count} flights upserted`);
+    console.log(
+      `[Aurigny] ${label} complete — ${result.count} flights upserted` +
+      (bundleTomorrow ? ' (bundled with tomorrow)' : ''),
+    );
   }
 }
 
@@ -459,13 +582,28 @@ async function scheduleNextScrape(): Promise<void> {
     const sleepMs = Math.max(0, wakeAt.getTime() - Date.now());
 
     await logSchedulerEvent('sleep', `Sleeping for ${Math.round(sleepMs / 60_000)}m. ${wakeReason}`);
+    console.log(`[Aurigny] Setting wake timeout: will fire in ${Math.round(sleepMs / 1000)}s at ${wakeAt.toISOString()}`);
 
-    wakeTimeoutRef = setTimeout(async () => {
-      wakeTimeoutRef = null;
-      scheduledWakeAtMs = null;
-      await logSchedulerEvent('wake', `Waking up — ${wakeReason}`);
-      await runScrape('Post-sleep scrape');
-      await scheduleNextScrape();
+    timers.wakeTimeout = setTimeout(async () => {
+      try {
+        timers.wakeTimeout = null;
+        scheduledWakeAtMs = null;
+        await logSchedulerEvent('wake', `Waking up — ${wakeReason}`);
+        await runScrape('Post-sleep scrape');
+        await scheduleNextScrape();
+      } catch (err) {
+        console.error('[Aurigny] Error in wake timeout callback:', err);
+        timers.wakeTimeout = null;
+        scheduledWakeAtMs = null;
+        // Reschedule to try again (with error handling)
+        try {
+          await scheduleNextScrape();
+        } catch (err2) {
+          console.error('[Aurigny] Fatal: Failed to reschedule after wake error:', err2);
+          // Last resort: schedule a simple retry in 5 minutes
+          setTimeout(() => scheduleNextScrape().catch(e => console.error('[Aurigny] Fatal retry failed:', e)), 5 * 60 * 1000);
+        }
+      }
     }, sleepMs);
 
     return;
@@ -479,8 +617,73 @@ async function scheduleNextScrape(): Promise<void> {
     `[Aurigny] Next scrape in ${Math.round(ms / 1000)}s + ${Math.round(jitterMs / 1000)}s jitter = ${Math.round(totalMs / 1000)}s. Reason: ${intervalReason}`,
   );
 
-  setTimeout(async () => {
-    await runScrape('Scheduled scrape');
+  // Check if an upcoming prefetch slot falls within the bundling window
+  // Bundle if slot fires within [now, scrapeTime + buffer] to avoid firing a standalone prefetch
+  let bundleTomorrow = false;
+  const now = Date.now();
+  
+  // Check if we recently failed a bundle attempt (within last 2 minutes)
+  const recentBundleFailure = prefetchState.lastBundleAttempt && 
+    (now - prefetchState.lastBundleAttempt < 2 * 60 * 1000);
+  
+  if (nextPrefetchSlotMs !== null && !prefetchState.claimed && !recentBundleFailure) {
+    const msUntilSlot = nextPrefetchSlotMs - now;
+    const bufferMs = PREFETCH_BUNDLE_WINDOW_MINS * 60_000;
+
+    // Bundle if slot fires: after now AND before/at (scrape completion + buffer)
+    // This prevents a standalone prefetch from firing right after this scrape
+    if (msUntilSlot > 0 && msUntilSlot <= totalMs + bufferMs) {
+      // Use the already-calculated interval (ms) - it's the time until next flight event
+      // Convert to minutes for the frequency check
+      const minsUntilNextFlight = ms / 60_000;
+
+      // Only bundle if we have medium/low/idle frequency (minsUntilNextFlight >= HIGH_FREQ_THRESHOLD_MINS)
+      if (minsUntilNextFlight >= HIGH_FREQ_THRESHOLD_MINS) {
+        console.log(
+          `[Aurigny] Prefetch slot in ${Math.round(msUntilSlot / 60_000)}m — ` +
+          `bundling tomorrow's data into this scrape (interval: ${minsUntilNextFlight.toFixed(0)}min)`,
+        );
+        bundleTomorrow = true;
+        prefetchState.claimed = true;
+        prefetchState.bundleAttempts++;
+        prefetchState.lastBundleAttempt = now;
+      }
+    }
+  }
+
+  // Clear any existing scrape timeout before setting new one
+  if (timers.scrapeTimeout) {
+    clearTimeout(timers.scrapeTimeout);
+    timers.scrapeTimeout = null;
+  }
+
+  timers.scrapeTimeout = setTimeout(async () => {
+    timers.scrapeTimeout = null;
+    
+    // Check circuit breaker before scraping
+    if (!checkCircuitBreaker()) {
+      console.log('[Aurigny] Circuit breaker open, skipping scrape and rescheduling');
+      await scheduleNextScrape();
+      return;
+    }
+    
+    try {
+      await runScrape('Scheduled scrape', bundleTomorrow);
+      recordSuccess();
+      prefetchState.consecutiveFailures = 0;
+    } catch (err) {
+      console.error('[Aurigny] Error in scheduled scrape:', err);
+      recordFailure();
+      prefetchState.consecutiveFailures++;
+      
+      // Reset the claim so the slot can fire standalone, but only if this was a recent bundle attempt
+      if (bundleTomorrow && prefetchState.lastBundleAttempt && 
+          (Date.now() - prefetchState.lastBundleAttempt < 5 * 60 * 1000)) {
+        console.log('[Aurigny] Bundle attempt failed, resetting claim for standalone prefetch');
+        prefetchState.claimed = false;
+        prefetchState.bundleAttempts = 0;
+      }
+    }
     await scheduleNextScrape();
   }, totalMs);
 }
@@ -509,23 +712,130 @@ async function runBackgroundPrefetch(): Promise<void> {
 
   // If the scraper is sleeping, check whether the newly loaded data changes the
   // optimal wake time — reschedule if it differs by more than 5 minutes.
-  if (wakeTimeoutRef !== null && scheduledWakeAtMs !== null) {
+  if (timers.wakeTimeout !== null && scheduledWakeAtMs !== null) {
     const { wakeAt, reason } = await computeWakeTime();
     const diffMs = Math.abs(wakeAt.getTime() - scheduledWakeAtMs);
     if (diffMs > 5 * 60_000) {
-      console.log(`[Aurigny] Prefetch updated first-flight data — rescheduling wake from ${new Date(scheduledWakeAtMs).toISOString()} to ${wakeAt.toISOString()}`);
-      clearTimeout(wakeTimeoutRef);
-      scheduledWakeAtMs = wakeAt.getTime();
-      const sleepMs = Math.max(0, wakeAt.getTime() - Date.now());
-      wakeTimeoutRef = setTimeout(async () => {
-        wakeTimeoutRef = null;
-        scheduledWakeAtMs = null;
-        await logSchedulerEvent('wake', `Waking up (rescheduled by prefetch) — ${reason}`);
-        await runScrape('Post-sleep scrape');
-        await scheduleNextScrape();
+       console.log(`[Aurigny] Prefetch updated first-flight data — rescheduling wake from ${new Date(scheduledWakeAtMs).toISOString()} to ${wakeAt.toISOString()}`);
+       clearTimeout(timers.wakeTimeout);
+       scheduledWakeAtMs = wakeAt.getTime();
+       const sleepMs = Math.max(0, wakeAt.getTime() - Date.now());
+       console.log(`[Aurigny] Rescheduled wake timeout: will fire in ${Math.round(sleepMs / 1000)}s`);
+      timers.wakeTimeout = setTimeout(async () => {
+        try {
+          timers.wakeTimeout = null;
+          scheduledWakeAtMs = null;
+          await logSchedulerEvent('wake', `Waking up (rescheduled by prefetch) — ${reason}`);
+          await runScrape('Post-sleep scrape');
+          await scheduleNextScrape();
+        } catch (err) {
+          console.error('[Aurigny] Error in rescheduled wake timeout callback:', err);
+          timers.wakeTimeout = null;
+          scheduledWakeAtMs = null;
+          // Reschedule to try again (with error handling)
+          try {
+            await scheduleNextScrape();
+          } catch (err2) {
+            console.error('[Aurigny] Fatal: Failed to reschedule after rescheduled wake error:', err2);
+            // Last resort: schedule a simple retry in 5 minutes
+            setTimeout(() => scheduleNextScrape().catch(e => console.error('[Aurigny] Fatal retry failed:', e)), 5 * 60 * 1000);
+          }
+        }
       }, sleepMs);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Wall-clock prefetch scheduler (00:00, 06:00, 12:00, 18:00 GY local)
+// ---------------------------------------------------------------------------
+
+/**
+ * Computes the next wall-clock prefetch slot (00:00, 06:00, 12:00, 18:00 GY local)
+ * and schedules a timeout for it. If a live scrape fires within PREFETCH_BUNDLE_WINDOW_MINS
+ * of the slot, it will bundle tomorrow's data into that scrape instead of running standalone.
+ */
+let slotRetryCount = 0;
+
+async function schedulePrefetchSlot(): Promise<void> {
+  const SLOT_HOURS = [0, 6, 12, 18]; // GY local hours
+  const now = new Date();
+  const currentHourGY = guernseyHour(now);
+
+  // Find the next slot
+  let nextSlotHour = SLOT_HOURS.find(h => h > currentHourGY);
+  if (nextSlotHour === undefined) {
+    // All today's slots have passed — next is tomorrow at 00:00
+    nextSlotHour = 0;
+  }
+
+  const nextSlotTime = nextGuernseyTime(nextSlotHour, 0);
+  nextPrefetchSlotMs = nextSlotTime.getTime();
+  
+  // Only reset claimed state if enough time has passed (prevents double-reset on container restart)
+  const nowMs = Date.now();
+  if (!prefetchState.lastBundleAttempt || (nowMs - prefetchState.lastBundleAttempt > 60 * 60 * 1000)) {
+    prefetchState.claimed = false;
+    prefetchState.bundleAttempts = 0;
+  }
+
+  const slotMs = Math.max(0, nextSlotTime.getTime() - now.getTime());
+  console.log(
+    `[Aurigny] Next prefetch slot scheduled: ${nextSlotHour.toString().padStart(2, '0')}:00 GY ` +
+    `(${Math.round(slotMs / 60_000)} minutes from now)`,
+  );
+
+  // Clear any existing prefetch slot timeout
+  if (timers.prefetchSlotTimeout) {
+    clearTimeout(timers.prefetchSlotTimeout);
+    timers.prefetchSlotTimeout = null;
+  }
+
+  timers.prefetchSlotTimeout = setTimeout(async () => {
+    timers.prefetchSlotTimeout = null;
+    
+    // Check if we've exceeded max retries
+    if (slotRetryCount >= MAX_SLOT_RETRIES) {
+      console.error(`[Aurigny] Max slot retries (${MAX_SLOT_RETRIES}) exceeded, skipping this slot`);
+      slotRetryCount = 0;
+      await schedulePrefetchSlot();
+      return;
+    }
+    
+    try {
+      // Slot fires — if not claimed by a live scrape, run standalone prefetch
+      if (!prefetchState.claimed) {
+        console.log('[Aurigny] Prefetch slot fired (not bundled with live scrape) — running standalone');
+        await runBackgroundPrefetch();
+        slotRetryCount = 0; // Reset on success
+      } else {
+        console.log('[Aurigny] Prefetch slot fired (already bundled with live scrape)');
+        slotRetryCount = 0; // Reset on success
+      }
+
+      // Reschedule the next slot
+      await schedulePrefetchSlot();
+    } catch (err) {
+      slotRetryCount++;
+      console.error(`[Aurigny] Error in prefetch slot timeout (attempt ${slotRetryCount}/${MAX_SLOT_RETRIES}):`, err);
+      
+      // Exponential backoff before retrying
+      const backoffMs = getBackoffDelay(slotRetryCount);
+      console.log(`[Aurigny] Retrying slot scheduling in ${Math.round(backoffMs / 1000)}s`);
+      
+      setTimeout(async () => {
+        try {
+          await schedulePrefetchSlot();
+        } catch (err2) {
+          console.error('[Aurigny] Fatal error rescheduling prefetch slot:', err2);
+          // Even on fatal error, try one more time with longer delay
+          setTimeout(() => schedulePrefetchSlot().catch(e => {
+            console.error('[Aurigny] Giving up on prefetch slot scheduling:', e);
+          }), RETRY_MAX_DELAY_MS);
+        }
+      }, backoffMs);
+    }
+  }, slotMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -536,10 +846,10 @@ async function main() {
   console.log('[Aurigny] Scraper service starting...');
   console.log(`[Aurigny] Config — cutoff: ${CUTOFF_HOUR}:00 GY, wake offset: ${WAKE_OFFSET_MINS}m`);
   console.log(`[Aurigny] Intervals — high: ${INTERVAL_HIGH_MS / 1000}s, medium: ${INTERVAL_MEDIUM_MS / 1000}s, low: ${INTERVAL_LOW_MS / 1000}s, idle: ${INTERVAL_IDLE_MS / 1000}s`);
-  console.log(`[Aurigny] Prefetch interval: ${PREFETCH_INTERVAL_MS / 3600_000}h`);
+  console.log(`[Aurigny] Prefetch bundle window: ${PREFETCH_BUNDLE_WINDOW_MINS}m`);
 
-  // Start the background prefetch timer immediately (first run after PREFETCH_INTERVAL_MS)
-  setInterval(runBackgroundPrefetch, PREFETCH_INTERVAL_MS);
+  // Schedule wall-clock prefetch slots at 00:00, 06:00, 12:00, 18:00 GY local
+  schedulePrefetchSlot();
 
   const currentHour = guernseyHour();
   // WAKE_OFFSET_MINS before the earliest possible first flight (05:30) gives ~05:00.
@@ -547,6 +857,41 @@ async function main() {
   // a redundant scrape immediately after the scheduled wake-up scrape runs.
   const earlyMorningCutoff = 5; // 05:00 GY — consistent with nextGuernseyTime(5, 0) fallback
   const isInSleepWindow = currentHour >= CUTOFF_HOUR || currentHour < earlyMorningCutoff;
+
+  // Schedule a delayed startup prefetch to ensure tomorrow's data is available
+  // This is non-blocking and doesn't interfere with the main scheduler
+  // Skip if we're in sleep mode (no point loading data until we wake up)
+  if (!isInSleepWindow && STARTUP_PREFETCH_DELAY_MS > 0) {
+    console.log(`[Aurigny] Scheduling startup prefetch in ${STARTUP_PREFETCH_DELAY_MS / 1000}s`);
+    timers.startupPrefetchTimeout = setTimeout(async () => {
+      timers.startupPrefetchTimeout = null;
+      
+      // Check circuit breaker before running startup prefetch
+      if (!checkCircuitBreaker()) {
+        console.log('[Aurigny] Circuit breaker open, skipping startup prefetch');
+        return;
+      }
+      
+      try {
+        console.log('[Aurigny] Running delayed startup prefetch to load tomorrow\'s schedule...');
+        const today = guernseyDateStr();
+        const tomorrow = guernseyTomorrowStr();
+        const result = await scrapeMultipleDates([today, tomorrow], 'aurigny_live');
+        if (result.success) {
+          console.log(`[Aurigny] Delayed startup prefetch complete: ${result.count} flights upserted`);
+          recordSuccess();
+        } else {
+          console.warn(`[Aurigny] Delayed startup prefetch failed: ${result.error}`);
+          recordFailure();
+        }
+      } catch (err) {
+        console.error('[Aurigny] Error in delayed startup prefetch:', err);
+        recordFailure();
+      }
+    }, STARTUP_PREFETCH_DELAY_MS);
+  } else {
+    console.log(`[Aurigny] Skipping startup prefetch (in sleep window or disabled)`);
+  }
 
   if (isInSleepWindow) {
     // Container restarted during the sleep window — skip the initial scrape and
@@ -582,7 +927,28 @@ async function main() {
   }
 }
 
+// Cleanup handlers for graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('[Aurigny] SIGTERM received, cleaning up...');
+  clearAllTimers();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('[Aurigny] SIGINT received, cleaning up...');
+  clearAllTimers();
+  process.exit(0);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('[Aurigny] Uncaught exception:', err);
+  clearAllTimers();
+  process.exit(1);
+});
+
 main().catch(err => {
   console.error('[Aurigny] Fatal startup error:', err);
+  clearAllTimers();
   process.exit(1);
 });
