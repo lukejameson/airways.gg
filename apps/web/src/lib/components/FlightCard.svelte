@@ -1,18 +1,26 @@
 <script lang="ts">
   import type { flights, delayPredictions } from '@delays/database';
   import { airportName } from '$lib/airports';
+  import Icon from './Icon.svelte';
+  import { getWeatherIconName, isDaytime } from '$lib/daylight';
 
   type Flight = typeof flights.$inferSelect & {
     prediction: (typeof delayPredictions.$inferSelect) | null;
   };
 
+  interface DaylightData {
+    sunrise: Date;
+    sunset: Date;
+  }
+
   interface Props {
     flight: Flight;
     weatherMap?: Record<string, any>;
+    daylightMap?: Record<string, DaylightData[]>;
     returnTab?: string;
   }
 
-  let { flight, weatherMap = {}, returnTab }: Props = $props();
+  let { flight, weatherMap = {}, daylightMap = {}, returnTab }: Props = $props();
 
   function fmt(date: string | Date | null | undefined): string {
     if (!date) return '--:--';
@@ -31,17 +39,41 @@
     });
   }
 
-  function weatherIcon(code: number | null): string {
-    if (code == null) return '';
-    if (code === 0) return '☀️';
-    if (code <= 2)  return '🌤️';
-    if (code === 3) return '☁️';
-    if (code <= 49) return '🌫️';
-    if (code <= 67) return '🌧️';
-    if (code <= 77) return '❄️';
-    if (code <= 82) return '🌦️';
-    if (code <= 86) return '🌨️';
-    return '⛈️';
+  // Find daylight data for a specific date
+  function findDaylight(airportCode: string, targetTime: Date): DaylightData | null {
+    const daylightArray = daylightMap[airportCode];
+    if (!daylightArray || daylightArray.length === 0) return null;
+    
+    const target = new Date(targetTime);
+    
+    // Find the daylight data closest to the target time
+    return daylightArray.reduce((closest: DaylightData | null, current: DaylightData) => {
+      if (!closest) return current;
+      const closestSunrise = new Date(closest.sunrise);
+      const currentSunrise = new Date(current.sunrise);
+      const closestDiff = Math.abs(closestSunrise.getTime() - target.getTime());
+      const currentDiff = Math.abs(currentSunrise.getTime() - target.getTime());
+      return currentDiff < closestDiff ? current : closest;
+    }, null);
+  }
+
+  // Determine if it's daytime for a given airport and time
+  function getIsDay(airportCode: string, targetTime: Date): boolean {
+    const daylight = findDaylight(airportCode, targetTime);
+    if (!daylight) return true; // Default to day if no daylight data
+    
+    // Ensure all dates are proper Date objects (they come as strings from JSON)
+    const sunrise = new Date(daylight.sunrise);
+    const sunset = new Date(daylight.sunset);
+    const time = new Date(targetTime);
+    
+    return isDaytime(sunrise, sunset, time);
+  }
+
+  // Get weather icon name based on code, airport, and time
+  function getWeatherIcon(airportCode: string, targetTime: Date, weatherCode: number | null): string {
+    const isDay = getIsDay(airportCode, targetTime);
+    return getWeatherIconName(weatherCode, isDay);
   }
 
   function fmtWeather(w: any): string {
@@ -83,6 +115,14 @@
   const depWeather = $derived(findClosestWeather(flight.departureAirport, flight.scheduledDeparture));
   const arrWeather = $derived(findClosestWeather(flight.arrivalAirport, flight.scheduledArrival));
   const hasWeather = $derived(!!depWeather || !!arrWeather);
+
+  // Get weather icons with day/night awareness
+  const depWeatherIcon = $derived(
+    depWeather ? getWeatherIcon(flight.departureAirport, flight.scheduledDeparture, depWeather.weatherCode) : 'cloud'
+  );
+  const arrWeatherIcon = $derived(
+    arrWeather ? getWeatherIcon(flight.arrivalAirport, flight.scheduledArrival, arrWeather.weatherCode) : 'cloud'
+  );
 </script>
 
 <a href="/flights/{flight.id}{returnTab ? `?tab=${returnTab}` : ''}" class="group block {isCompleted ? 'opacity-60 hover:opacity-80' : ''}" style="-webkit-tap-highlight-color: transparent;">
@@ -163,7 +203,7 @@
           <span class="text-xs text-muted-foreground flex items-center gap-1">
             <span class="font-medium">{airportName(flight.departureAirport)}</span>
             <span class="opacity-50">({flight.departureAirport})</span>
-            <span>{weatherIcon(depWeather.weatherCode)}</span>
+            <Icon name={depWeatherIcon as any} size="16px" weather class="flex-shrink-0" />
             <span>{fmtWeather(depWeather)}</span>
           </span>
         {/if}
@@ -174,7 +214,7 @@
           <span class="text-xs text-muted-foreground flex items-center gap-1">
             <span class="font-medium">{airportName(flight.arrivalAirport)}</span>
             <span class="opacity-50">({flight.arrivalAirport})</span>
-            <span>{weatherIcon(arrWeather.weatherCode)}</span>
+            <Icon name={arrWeatherIcon as any} size="16px" weather class="flex-shrink-0" />
             <span>{fmtWeather(arrWeather)}</span>
           </span>
         {/if}

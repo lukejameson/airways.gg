@@ -179,6 +179,18 @@ export const weatherData = pgTable('weather_data', {
   uniqueIndex('weather_data_unique_idx').on(table.airportCode, table.timestamp),
 ]);
 
+export const airportDaylight = pgTable('airport_daylight', {
+  id: serial('id').primaryKey(),
+  airportCode: varchar('airport_code', { length: 10 }).notNull(),
+  date: date('date').notNull(),
+  sunrise: timestamp('sunrise').notNull(),
+  sunset: timestamp('sunset').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('airport_daylight_unique_idx').on(table.airportCode, table.date),
+  index('airport_daylight_airport_idx').on(table.airportCode),
+]);
+
 export const airports = pgTable('airports', {
   id: serial('id').primaryKey(),
   iataCode: varchar('iata_code', { length: 10 }).notNull().unique(),

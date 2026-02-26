@@ -10,10 +10,13 @@
   },
   "dependencies": {
     "@delays/database": "*",
-    "dotenv": "^16.0.0"
+    "dotenv": "^16.0.0",
+    "geo-tz": "^8.1.5",
+    "suncalc": "^1.9.0"
   },
   "devDependencies": {
-    "typescript": "^5.3.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "@types/suncalc": "^1.9.2",
+    "typescript": "^5.3.0"
   }
 }

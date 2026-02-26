@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { db, flights, delayPredictions, weatherData, scraperLogs } from '$lib/server/db';
+import { db, flights, delayPredictions, weatherData, scraperLogs, airportDaylight } from '$lib/server/db';
 import { and, gte, lte, inArray, or, eq, desc, count, not, sql } from 'drizzle-orm';
 
 // Guernsey local timezone
@@ -137,6 +137,29 @@ export const load: PageServerLoad = async ({ url }) => {
       }
     }
 
+    // Fetch daylight data for today and tomorrow for all airports
+    let daylightMap: Record<string, typeof airportDaylight.$inferSelect[]> = {};
+    if (airportCodes.length > 0) {
+      const daylightRows = await db
+        .select()
+        .from(airportDaylight)
+        .where(
+          and(
+            inArray(airportDaylight.airportCode, airportCodes),
+            or(
+              eq(airportDaylight.date, todayStr),
+              eq(airportDaylight.date, tomorrowStr)
+            )
+          ),
+        );
+
+      // Group by airport code
+      for (const row of daylightRows) {
+        if (!daylightMap[row.airportCode]) daylightMap[row.airportCode] = [];
+        daylightMap[row.airportCode].push(row);
+      }
+    }
+
     // Current GCI weather for the header - find the record closest to now
     let currentGciWeather: typeof weatherData.$inferSelect | null = null;
     if (weatherMap['GCI'] && weatherMap['GCI'].length > 0) {
@@ -159,6 +182,7 @@ export const load: PageServerLoad = async ({ url }) => {
       flights: flightsWithPredictions,
       weather: currentGciWeather,              // current GCI weather for the header
       weatherMap,                              // all airports for per-flight display
+      daylightMap,                             // sunrise/sunset data for airports
       lastUpdated: lastScrape?.completedAt ?? now,
       displayDate: displayDateStr,             // YYYY-MM-DD for display
       todayStr,                                // Today's date
@@ -171,6 +195,7 @@ export const load: PageServerLoad = async ({ url }) => {
       flights: [], 
       weather: null, 
       weatherMap: {},
+      daylightMap: {},
       displayDate: displayDateStr,
       todayStr,
       tomorrowStr,

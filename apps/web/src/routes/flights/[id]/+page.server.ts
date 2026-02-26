@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { db, flights, flightStatusHistory, flightNotes, delayPredictions, weatherData, aircraftPositions, flightTimes } from '$lib/server/db';
+import { db, flights, flightStatusHistory, flightNotes, delayPredictions, weatherData, aircraftPositions, flightTimes, airportDaylight } from '$lib/server/db';
 import { eq, desc, and, lte, gte, inArray, isNotNull, asc } from 'drizzle-orm';
 import { error } from '@sveltejs/kit';
 
@@ -40,7 +40,11 @@ export const load: PageServerLoad = async ({ params }) => {
         .orderBy(asc(flights.scheduledDeparture))
       : [];
 
-    const [statusHistory, notes, predictions, weatherRows, positionRows, times] = await Promise.all([
+    // Get flight dates for daylight lookup
+    const depDate = flight.scheduledDeparture.toISOString().split('T')[0];
+    const arrDate = flight.scheduledArrival.toISOString().split('T')[0];
+
+    const [statusHistory, notes, predictions, weatherRows, positionRows, times, daylightRows] = await Promise.all([
       db.select().from(flightStatusHistory)
         .where(eq(flightStatusHistory.flightId, id))
         .orderBy(desc(flightStatusHistory.statusTimestamp)),
@@ -67,6 +71,12 @@ export const load: PageServerLoad = async ({ params }) => {
       // Estimated/actual times from API
       db.select().from(flightTimes)
         .where(eq(flightTimes.flightId, id)),
+      // Daylight data for both airports
+      db.select().from(airportDaylight)
+        .where(and(
+          inArray(airportDaylight.airportCode, airports),
+          inArray(airportDaylight.date, [depDate, arrDate]),
+        )),
     ]);
 
     // Most recent row per airport within the window
@@ -75,12 +85,20 @@ export const load: PageServerLoad = async ({ params }) => {
       if (!weatherMap[row.airportCode]) weatherMap[row.airportCode] = row;
     }
 
+    // Group daylight data by airport
+    const daylightMap: Record<string, typeof airportDaylight.$inferSelect[]> = {};
+    for (const row of daylightRows) {
+      if (!daylightMap[row.airportCode]) daylightMap[row.airportCode] = [];
+      daylightMap[row.airportCode].push(row);
+    }
+
     return {
       flight,
       statusHistory,
       notes,
       prediction: predictions[0] ?? null,
       weatherMap,
+      daylightMap,
       position: positionRows[0] ?? null,
       rotationFlights,
       times,

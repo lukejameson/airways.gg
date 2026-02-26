@@ -1,13 +1,19 @@
 <script lang="ts">
   import FlightCard from './FlightCard.svelte';
 
+  interface DaylightData {
+    sunrise: Date;
+    sunset: Date;
+  }
+
   interface Props {
     flights: any[];
     weatherMap?: Record<string, any>;
+    daylightMap?: Record<string, DaylightData[]>;
     returnTab?: string;
   }
 
-  let { flights, weatherMap = {}, returnTab }: Props = $props();
+  let { flights, weatherMap = {}, daylightMap = {}, returnTab }: Props = $props();
 </script>
 
 {#if flights.length === 0}
@@ -21,7 +27,7 @@
 {:else}
   <div class="flex flex-col gap-1.5">
     {#each flights as flight (flight.id)}
-      <FlightCard {flight} {weatherMap} {returnTab} />
+      <FlightCard {flight} {weatherMap} {daylightMap} {returnTab} />
     {/each}
   </div>
   <p class="mt-3 text-center text-xs text-muted-foreground/60">

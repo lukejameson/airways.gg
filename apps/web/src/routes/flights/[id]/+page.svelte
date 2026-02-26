@@ -3,15 +3,33 @@
   import { browser } from '$app/environment';
   import { page } from '$app/stores';
   import { airportName, getAirportCoords, getAirportsForNearestSearch } from '$lib/airports';
+  import Icon from '$lib/components/Icon.svelte';
+  import { getWeatherIconName, isDaytime } from '$lib/daylight';
 
   let { data }: { data: PageData } = $props();
   
   // Get return tab from URL query param
   const returnTab = $derived($page.url.searchParams.get('tab') ?? '');
 
-  const { flight, statusHistory, prediction, weatherMap, position, rotationFlights, times } = $derived(data);
+  const { flight, statusHistory, prediction, weatherMap, daylightMap, position, rotationFlights, times } = $derived(data);
   const depWeather = $derived(weatherMap?.[flight.departureAirport] ?? null);
   const arrWeather = $derived(weatherMap?.[flight.arrivalAirport] ?? null);
+
+  // Determine if it's daytime at departure and arrival airports
+  const depIsDay = $derived.by(() => {
+    const daylight = daylightMap?.[flight.departureAirport]?.[0];
+    if (!daylight) return true;
+    return isDaytime(new Date(daylight.sunrise), new Date(daylight.sunset), new Date(flight.scheduledDeparture));
+  });
+  const arrIsDay = $derived.by(() => {
+    const daylight = daylightMap?.[flight.arrivalAirport]?.[0];
+    if (!daylight) return true;
+    return isDaytime(new Date(daylight.sunrise), new Date(daylight.sunset), new Date(flight.scheduledArrival));
+  });
+
+  // Get weather icons with day/night awareness
+  const depWeatherIcon = $derived(depWeather ? getWeatherIconName(depWeather.weatherCode, depIsDay) : 'cloud');
+  const arrWeatherIcon = $derived(arrWeather ? getWeatherIconName(arrWeather.weatherCode, arrIsDay) : 'cloud');
 
   // SEO
   const seoTitle = $derived(`${flight.flightNumber} · ${flight.departureAirport} → ${flight.arrivalAirport} — delays.gg`);
@@ -723,7 +741,6 @@
   <!-- Weather: dep + arr side by side -->
   {#if depWeather || arrWeather}
     {@const dirs = ['N','NE','E','SE','S','SW','W','NW']}
-    {@const wIcon = (c: number | null) => !c && c !== 0 ? '' : c===0?'☀️':c<=2?'🌤️':c===3?'☁️':c<=49?'🌫️':c<=67?'🌧️':c<=77?'❄️':c<=82?'🌦️':c<=86?'🌨️':'⛈️'}
     {@const wRow = (w: any) => [
       w.temperature != null ? `${Math.round(w.temperature)}°C` : null,
       w.windSpeed != null ? `${Math.round(w.windSpeed)}mph ${w.windDirection != null ? dirs[Math.round(w.windDirection/45)%8] : ''}`.trim() : null,
@@ -737,7 +754,7 @@
           <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
             {airportName(flight.departureAirport)} <span class="opacity-60">({flight.departureAirport})</span> · Departure weather
           </p>
-          <p class="text-2xl mb-1">{wIcon(depWeather.weatherCode)}</p>
+          <p class="text-2xl mb-1"><Icon name={depWeatherIcon as any} size="32px" weather /></p>
           <p class="text-sm text-foreground">{wRow(depWeather)}</p>
         </div>
       {/if}
@@ -746,7 +763,7 @@
           <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
             {airportName(flight.arrivalAirport)} <span class="opacity-60">({flight.arrivalAirport})</span> · Arrival weather
           </p>
-          <p class="text-2xl mb-1">{wIcon(arrWeather.weatherCode)}</p>
+          <p class="text-2xl mb-1"><Icon name={arrWeatherIcon as any} size="32px" weather /></p>
           <p class="text-sm text-foreground">{wRow(arrWeather)}</p>
         </div>
       {/if}

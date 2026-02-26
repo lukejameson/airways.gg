@@ -1,4 +1,7 @@
 <script lang="ts">
+  import Icon from './Icon.svelte';
+  import { getWeatherIconName, isDaytime } from '$lib/daylight';
+
   interface Weather {
     temperature: number | null;
     windSpeed: number | null;
@@ -10,36 +13,41 @@
     timestamp: string | Date;
   }
 
+  interface DaylightData {
+    sunrise: Date;
+    sunset: Date;
+  }
+
   interface Props {
     weather: Weather | null;
     label?: string;
+    daylight?: DaylightData | null;
   }
 
-  let { weather, label = 'GCI' }: Props = $props();
+  let { weather, label = 'GCI', daylight }: Props = $props();
 
   function windDir(deg: number | null): string {
     if (deg == null) return '';
     return ['N','NE','E','SE','S','SW','W','NW'][Math.round(deg / 45) % 8];
   }
 
-  function icon(code: number | null): string {
-    if (code == null) return '–';
-    if (code === 0) return '☀️';
-    if (code <= 2)  return '🌤️';
-    if (code === 3) return '☁️';
-    if (code <= 49) return '🌫️';
-    if (code <= 67) return '🌧️';
-    if (code <= 77) return '❄️';
-    if (code <= 82) return '🌦️';
-    if (code <= 86) return '🌨️';
-    return '⛈️';
-  }
+  // Determine if it's currently daytime
+  const isDay = $derived.by(() => {
+    if (!daylight) return true; // Default to day icons if no daylight data
+    const now = new Date();
+    return isDaytime(daylight.sunrise, daylight.sunset, now);
+  });
+
+  // Get appropriate icon name based on weather code and time of day
+  const iconName = $derived(
+    weather ? getWeatherIconName(weather.weatherCode, isDay) : 'cloud' as const
+  );
 </script>
 
 {#if weather}
   <div class="inline-flex items-center gap-2.5 text-sm">
     <span class="font-medium text-muted-foreground text-xs">{label}</span>
-    <span>{icon(weather.weatherCode)}</span>
+    <Icon name={iconName as any} size="20px" weather class="flex-shrink-0" />
     {#if weather.temperature != null}
       <span class="font-semibold">{Math.round(weather.temperature)}°C</span>
     {/if}

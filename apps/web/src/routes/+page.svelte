@@ -5,6 +5,8 @@
   import { FlightBoard } from '$lib/components';
   import FlightCardSkeleton from '$lib/components/FlightCardSkeleton.svelte';
   import { airportName } from '$lib/airports';
+  import Icon from '$lib/components/Icon.svelte';
+  import { getWeatherIconName, isDaytime } from '$lib/daylight';
 
   let { data } = $props();
 
@@ -37,6 +39,19 @@
 
   // Derive lastUpdated from server data - shows when scraper last ran
   const lastUpdated = $derived(data.lastUpdated);
+
+  // Determine if it's currently daytime at GCI for weather icon selection
+  const gciIsDay = $derived.by(() => {
+    const gciDaylight = (data.daylightMap as Record<string, { sunrise: Date; sunset: Date }[] | undefined>)?.['GCI']?.[0];
+    if (!gciDaylight) return true; // Default to day
+    const now = new Date();
+    return isDaytime(new Date(gciDaylight.sunrise), new Date(gciDaylight.sunset), now);
+  });
+
+  // Get appropriate weather icon for GCI based on current conditions
+  const gciWeatherIcon = $derived(
+    data.weather ? getWeatherIconName(data.weather.weatherCode, gciIsDay) : 'cloud'
+  );
 
   // Sync state from URL only when the URL path/search actually changes (back/forward nav)
   let lastSeenUrl = $state($page.url.href);
@@ -199,14 +214,15 @@
 
   <!-- Compact Header -->
   <header class="mb-4 sm:mb-6">
-    <div class="flex items-center justify-between gap-2">
-      <div class="min-w-0">
-        <p class="text-sm text-muted-foreground">
+    <div class="relative flex items-center justify-center min-h-[32px]">
+      <!-- Weather - Left side -->
+      <div class="absolute left-0 min-w-0 flex items-center">
+        <p class="text-sm text-muted-foreground flex items-center">
           Guernsey (GCI)
           {#if data.weather}
             <span class="mx-1 opacity-40">·</span>
-            <span class="inline-flex items-center gap-1">
-              <span>{data.weather.weatherCode !== null && data.weather.weatherCode <= 2 ? '☀️' : data.weather.weatherCode !== null && data.weather.weatherCode <= 3 ? '☁️' : data.weather.weatherCode !== null && data.weather.weatherCode <= 67 ? '🌧️' : '🌤️'}</span>
+            <span class="inline-flex items-center gap-1.5">
+              <Icon name={gciWeatherIcon as any} size="20px" weather />
               {#if data.weather.temperature != null}
                 <span class="font-medium">{Math.round(data.weather.temperature)}°C</span>
               {/if}
@@ -217,7 +233,50 @@
           {/if}
         </p>
       </div>
-      <div class="flex items-center gap-1.5 shrink-0 text-right">
+
+      <!-- Date Navigation - Desktop only, centered -->
+      <div class="hidden sm:flex items-center gap-1">
+        <button
+          onclick={goToToday}
+          disabled={displayDate === data.todayStr}
+          class="flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
+            {displayDate === data.todayStr
+              ? 'text-muted-foreground/40 cursor-not-allowed'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'}"
+          aria-label="Go to today's flights"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+          <span>Today</span>
+        </button>
+
+        <span class="text-sm font-semibold text-foreground px-3">
+          {#if isViewingTomorrow}
+            Tomorrow
+          {:else}
+            Today
+          {/if}
+        </span>
+
+        <button
+          onclick={goToTomorrow}
+          disabled={displayDate === data.tomorrowStr}
+          class="flex items-center gap-1.5 min-h-[36px] px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
+            {displayDate === data.tomorrowStr
+              ? 'text-muted-foreground/40 cursor-not-allowed'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'}"
+          aria-label="Go to tomorrow's flights"
+        >
+          <span>Tomorrow</span>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Live indicator - Right side -->
+      <div class="absolute right-0 flex items-center gap-1.5 shrink-0 text-right">
         <span class="h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
         <span class="text-sm text-muted-foreground">Live</span>
         {#if lastUpdated}
@@ -229,24 +288,24 @@
     </div>
   </header>
 
-  <!-- Date Navigation -->
-  <div class="mb-4 flex items-center justify-center gap-4">
+  <!-- Date Navigation - Mobile only -->
+  <div class="sm:hidden mb-5 flex items-center justify-center gap-2">
     <button
       onclick={goToToday}
       disabled={displayDate === data.todayStr}
-      class="flex items-center gap-1 px-3 py-2 rounded-md text-sm transition-colors
+      class="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-lg text-sm font-medium transition-colors active:scale-95
         {displayDate === data.todayStr
-          ? 'text-muted-foreground/50 cursor-not-allowed'
-          : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}"
+          ? 'text-muted-foreground/40 cursor-not-allowed'
+          : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 active:bg-muted'}"
       aria-label="Go to today's flights"
     >
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
         <polyline points="15 18 9 12 15 6"></polyline>
       </svg>
-      <span class="hidden sm:inline">Today</span>
+      <span>Today</span>
     </button>
     
-    <span class="text-sm font-medium">
+    <span class="text-sm font-semibold text-foreground px-3">
       {#if isViewingTomorrow}
         Tomorrow
       {:else}
@@ -257,14 +316,14 @@
     <button
       onclick={goToTomorrow}
       disabled={displayDate === data.tomorrowStr}
-      class="flex items-center gap-1 px-3 py-2 rounded-md text-sm transition-colors
+      class="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 rounded-lg text-sm font-medium transition-colors active:scale-95
         {displayDate === data.tomorrowStr
-          ? 'text-muted-foreground/50 cursor-not-allowed'
-          : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'}"
+          ? 'text-muted-foreground/40 cursor-not-allowed'
+          : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 active:bg-muted'}"
       aria-label="Go to tomorrow's flights"
     >
-      <span class="hidden sm:inline">Tomorrow</span>
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <span>Tomorrow</span>
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
         <polyline points="9 18 15 12 9 6"></polyline>
       </svg>
     </button>
@@ -427,6 +486,6 @@
       <FlightCardSkeleton count={6} />
     </div>
   {:else}
-    <FlightBoard flights={filteredFlights} weatherMap={data.weatherMap} returnTab={activeTab} />
+    <FlightBoard flights={filteredFlights} weatherMap={data.weatherMap} daylightMap={data.daylightMap} returnTab={activeTab} />
   {/if}
 </div>

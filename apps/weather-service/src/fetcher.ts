@@ -1,6 +1,7 @@
-import { db, weatherData, flights } from '@delays/database';
-import { sql } from 'drizzle-orm';
+import { db, weatherData, flights, airportDaylight, airports } from '@delays/database';
+import { sql, eq, inArray } from 'drizzle-orm';
 import { getIcaoMapping } from './airports';
+import SunCalc from 'suncalc';
 
 const AVIATION_WEATHER_BASE = 'https://aviationweather.gov/api/data';
 const BATCH_SIZE = 50;
@@ -315,13 +316,13 @@ async function fetchAllTafs(airports: { code: string; icao: string }[]): Promise
 }
 
 async function getAirportsFromFlights(): Promise<{ code: string; icao: string }[]> {
-  // Get today's and tomorrow's date ranges
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Get today's and tomorrow's date ranges in UTC (flights are stored in UTC)
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
   const dayAfterTomorrow = new Date(tomorrow);
-  dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 1);
+  dayAfterTomorrow.setUTCDate(dayAfterTomorrow.getUTCDate() + 1);
 
   // Query unique airports from today's AND tomorrow's flights
   const todaysFlights = await db
@@ -356,28 +357,135 @@ async function getAirportsFromFlights(): Promise<{ code: string; icao: string }[
   return airports;
 }
 
+interface AirportLocation {
+  code: string;
+  latitude: number;
+  longitude: number;
+}
+
+async function fetchAirportLocations(airportCodes: string[]): Promise<AirportLocation[]> {
+  if (airportCodes.length === 0) return [];
+  
+  const rows = await db
+    .select({
+      code: airports.iataCode,
+      latitude: airports.latitude,
+      longitude: airports.longitude,
+    })
+    .from(airports)
+    .where(inArray(airports.iataCode, airportCodes));
+  
+  return rows
+    .filter(row => row.latitude != null && row.longitude != null)
+    .map(row => ({
+      code: row.code,
+      latitude: row.latitude!,
+      longitude: row.longitude!,
+    }));
+}
+
+async function calculateAndStoreDaylight(airportLocations: AirportLocation[]): Promise<void> {
+  if (airportLocations.length === 0) return;
+
+  // Get current UTC time
+  const now = new Date();
+
+  // Create dates for today and tomorrow (for suncalc, we use dates at midnight UTC)
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const tomorrow = new Date(today);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+
+  // Format date to YYYY-MM-DD string for the date column
+  const formatDate = (d: Date): string => d.toISOString().split('T')[0];
+
+  const daylightRows: {
+    airportCode: string;
+    date: string;
+    sunrise: Date;
+    sunset: Date;
+  }[] = [];
+
+  for (const airport of airportLocations) {
+    // Calculate for today - getTimes returns times in local system time (Europe/London)
+    // We need to convert them to UTC for proper comparison with flight times
+    const todayTimes = SunCalc.getTimes(today, airport.latitude, airport.longitude);
+    const tomorrowTimes = SunCalc.getTimes(tomorrow, airport.latitude, airport.longitude);
+
+    // Convert local system time to UTC
+    // getTimezoneOffset() returns the offset in minutes between UTC and local time
+    // For Europe/London: GMT (winter) = 0, BST (summer) = -60
+    const timezoneOffsetMinutes = todayTimes.sunrise.getTimezoneOffset();
+
+    const convertToUtc = (localDate: Date): Date => {
+      // Add the offset to convert local time to UTC
+      // Example: 17:40 BST (local) with offset -60 -> 16:40 UTC
+      return new Date(localDate.getTime() + timezoneOffsetMinutes * 60000);
+    };
+
+    const todaySunriseUtc = convertToUtc(todayTimes.sunrise);
+    const todaySunsetUtc = convertToUtc(todayTimes.sunset);
+    const tomorrowSunriseUtc = convertToUtc(tomorrowTimes.sunrise);
+    const tomorrowSunsetUtc = convertToUtc(tomorrowTimes.sunset);
+
+    daylightRows.push({
+      airportCode: airport.code,
+      date: formatDate(today),
+      sunrise: todaySunriseUtc,
+      sunset: todaySunsetUtc,
+    });
+
+    daylightRows.push({
+      airportCode: airport.code,
+      date: formatDate(tomorrow),
+      sunrise: tomorrowSunriseUtc,
+      sunset: tomorrowSunsetUtc,
+    });
+  }
+  
+  // Batch upsert using raw SQL for efficiency
+  for (const row of daylightRows) {
+    await db.insert(airportDaylight)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [airportDaylight.airportCode, airportDaylight.date],
+        set: {
+          sunrise: sql`EXCLUDED.sunrise`,
+          sunset: sql`EXCLUDED.sunset`,
+          createdAt: new Date(),
+        },
+      });
+  }
+  
+  console.log(`[Weather] Stored daylight data for ${airportLocations.length} airports`);
+}
+
 export async function fetchAllWeather(): Promise<void> {
   // Get airports dynamically from today's flights
-  const airports = await getAirportsFromFlights();
+  const airportsList = await getAirportsFromFlights();
   
-  if (airports.length === 0) {
+  if (airportsList.length === 0) {
     console.log('[Weather] No airports found in today\'s flights');
     return;
   }
 
-  console.log(`[Weather] Fetching aviation weather for ${airports.length} airports: ${airports.map(a => a.code).join(', ')}`);
+  console.log(`[Weather] Fetching aviation weather for ${airportsList.length} airports: ${airportsList.map(a => a.code).join(', ')}`);
+  
+  // Calculate and store sunrise/sunset times for all airports
+  const airportCodes = airportsList.map(a => a.code);
+  const airportLocations = await fetchAirportLocations(airportCodes);
+  await calculateAndStoreDaylight(airportLocations);
   
   try {
     // Fetch all METARs in one request
     console.log('[Weather] Fetching METARs...');
-    const metars = await fetchAllMetars(airports);
+    const metars = await fetchAllMetars(airportsList);
     console.log(`[Weather] Received ${metars.size} METARs`);
     
     // Convert METARs to weather rows
     const metarRows: WeatherRow[] = [];
     const now = new Date();
     
-    for (const airport of airports) {
+    for (const airport of airportsList) {
       const data = metars.get(airport.icao);
       if (!data || data.temp == null) {
         console.log(`[Weather] No METAR for ${airport.code}`);
@@ -406,7 +514,7 @@ export async function fetchAllWeather(): Promise<void> {
     
     // Fetch all TAFs in one request
     console.log('[Weather] Fetching TAFs...');
-    const tafs = await fetchAllTafs(airports);
+    const tafs = await fetchAllTafs(airportsList);
     console.log(`[Weather] Received TAFs for ${tafs.size} airports`);
     
     // Flatten all TAF forecasts

@@ -12,6 +12,7 @@ export {
   flightNotes,
   flightStatusHistory,
   weatherData,
+  airportDaylight,
   delayPredictions,
   scraperLogs,
   mlModelMetrics,
