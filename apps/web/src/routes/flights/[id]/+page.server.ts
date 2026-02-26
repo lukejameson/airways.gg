@@ -1,16 +1,7 @@
 import type { PageServerLoad } from './$types';
-import { db, flights, flightStatusHistory, flightNotes, delayPredictions, weatherData, aircraftPositions, flightTimes, airportDaylight, airports as airportsTable } from '$lib/server/db';
+import { db, flights, flightStatusHistory, flightNotes, delayPredictions, weatherData, aircraftPositions, flightTimes, airportDaylight } from '$lib/server/db';
 import { eq, desc, and, lte, gte, inArray, isNotNull, asc } from 'drizzle-orm';
 import { error } from '@sveltejs/kit';
-
-function shortAirportName(name: string): string {
-  return name
-    .replace(/\s+International\s+Airport$/i, '')
-    .replace(/\s+Airport$/i, '')
-    .replace(/\s+Airfield$/i, '')
-    .replace(/\s+Aerodrome$/i, '')
-    .trim();
-}
 
 export const load: PageServerLoad = async ({ params }) => {
   const id = parseInt(params.id, 10);
@@ -48,18 +39,6 @@ export const load: PageServerLoad = async ({ params }) => {
         ))
         .orderBy(asc(flights.scheduledDeparture))
       : [];
-
-    // Build short airport name map for all airports in the rotation
-    const rotationIatas = [...new Set(rotationFlights.flatMap(f => [f.departureAirport, f.arrivalAirport]))];
-    const rotationAirportRows = rotationIatas.length > 0
-      ? await db.select({ iataCode: airportsTable.iataCode, name: airportsTable.name })
-          .from(airportsTable)
-          .where(inArray(airportsTable.iataCode, rotationIatas))
-      : [];
-    const rotationAirportNames: Record<string, string> = {};
-    for (const row of rotationAirportRows) {
-      rotationAirportNames[row.iataCode] = shortAirportName(row.name);
-    }
 
     // Get flight dates for daylight lookup
     const depDate = flight.scheduledDeparture.toISOString().split('T')[0];
@@ -122,7 +101,6 @@ export const load: PageServerLoad = async ({ params }) => {
       daylightMap,
       position: positionRows[0] ?? null,
       rotationFlights,
-      rotationAirportNames,
       times,
     };
   } catch (err: any) {

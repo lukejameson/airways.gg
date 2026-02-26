@@ -196,6 +196,7 @@ export const airports = pgTable('airports', {
   iataCode: varchar('iata_code', { length: 10 }).notNull().unique(),
   icaoCode: varchar('icao_code', { length: 10 }),
   name: varchar('name', { length: 255 }).notNull(),
+  displayName: varchar('display_name', { length: 255 }),
   city: varchar('city', { length: 100 }),
   country: varchar('country', { length: 100 }),
   latitude: real('latitude'),

@@ -1,5 +1,5 @@
-import { db, flights, aircraftPositions } from '@delays/database';
-import { and, gte, lte, or, eq, desc, isNotNull, not } from 'drizzle-orm';
+import { db, flights, aircraftPositions, airports } from '@delays/database';
+import { and, gte, lte, or, eq, desc, isNotNull, not, inArray } from 'drizzle-orm';
 
 const FR24_BASE = 'https://fr24api.flightradar24.com';
 
@@ -230,31 +230,31 @@ function isAirborne(status: string | null): boolean {
   return status?.toLowerCase() === 'airborne';
 }
 
-// Airport coordinates lookup
-const AIRPORT_COORDS: Record<string, [number, number]> = {
-  GCI: [49.4348, -2.5986],
-  JER: [49.2079, -2.1955],
-  LGW: [51.1481, -0.1903],
-  LCY: [51.5048,  0.0495],
-  MAN: [53.3537, -2.2750],
-  BRS: [51.3827, -2.7191],
-  BHX: [52.4539, -1.7480],
-  SOU: [50.9503, -1.3568],
-  ACI: [49.7061, -2.2147],
-  CDG: [49.0097,  2.5478],
-  EMA: [52.8311, -1.3280],
-  DUB: [53.4213, -6.2700],
-  EDI: [55.9500, -3.3725],
-  EGJB: [49.4348, -2.5986], // GCI ICAO
-  EGJJ: [49.2079, -2.1955], // JER ICAO
-  EGKK: [51.1481, -0.1903], // LGW ICAO
-  EGLC: [51.5048,  0.0495], // LCY ICAO
-  EGCC: [53.3537, -2.2750], // MAN ICAO
-  EGGD: [51.3827, -2.7191], // BRS ICAO
-  EGBB: [52.4539, -1.7480], // BHX ICAO
-  EGHI: [50.9503, -1.3568], // SOU ICAO
-  LFPG: [49.0097,  2.5478], // CDG ICAO
-};
+// Airport coordinates cache — populated from DB on first use
+let airportCoordsCache: Map<string, [number, number]> | null = null;
+
+async function getAirportCoords(iataCodes: string[]): Promise<Map<string, [number, number]>> {
+  if (!airportCoordsCache) {
+    // Load all airport coords from DB once
+    const rows = await db
+      .select({ iataCode: airports.iataCode, icaoCode: airports.icaoCode, latitude: airports.latitude, longitude: airports.longitude })
+      .from(airports);
+    airportCoordsCache = new Map();
+    for (const row of rows) {
+      if (row.latitude != null && row.longitude != null) {
+        airportCoordsCache.set(row.iataCode, [row.latitude, row.longitude]);
+        if (row.icaoCode) airportCoordsCache.set(row.icaoCode, [row.latitude, row.longitude]);
+      }
+    }
+    console.log(`[Position] Loaded ${airportCoordsCache.size} airport coordinate entries from DB`);
+  }
+  const result = new Map<string, [number, number]>();
+  for (const code of iataCodes) {
+    const coords = airportCoordsCache.get(code);
+    if (coords) result.set(code, coords);
+  }
+  return result;
+}
 
 /**
  * Use our own flights table to infer where each grounded aircraft currently is.
@@ -450,6 +450,18 @@ export async function pollPositions(): Promise<number> {
       lastInferTimes.set(reg.replace('-', ''), nowMs);
     }
 
+    // Collect all airport codes we need coords for
+    const allAirportCodes = new Set<string>();
+    for (const flight of groundedFlights) {
+      if (!flight.aircraftRegistration) continue;
+      const reg = flight.aircraftRegistration;
+      const ownDb = ownDbMap.get(reg);
+      const fr24 = fr24Map.get(reg);
+      if (ownDb) allAirportCodes.add(ownDb.airportCode);
+      else if (fr24) allAirportCodes.add(fr24.airportCode);
+    }
+    const coordsMap = await getAirportCoords([...allAirportCodes]);
+
     // Apply inferred position to every grounded flight using that registration
     for (const flight of groundedFlights) {
       if (!flight.aircraftRegistration) continue;
@@ -478,12 +490,17 @@ export async function pollPositions(): Promise<number> {
         continue;
       }
 
-      const coords = AIRPORT_COORDS[airportCode];
+      const coords = coordsMap.get(airportCode);
+      if (!coords) {
+        console.warn(`[Position] No coordinates for airport ${airportCode} — skipping inferred position for ${flight.flightNumber}`);
+        continue;
+      }
+
       try {
         await db.insert(aircraftPositions).values({
           flightId: flight.id,
           fr24Id: `INFERRED_${flightNumber}_${arrivedAt.getTime()}`,
-          lat: coords?.[0] ?? null, lon: coords?.[1] ?? null,
+          lat: coords[0], lon: coords[1],
           altitudeFt: 0, groundSpeedKts: 0, heading: 0, verticalSpeedFpm: 0,
           registration: reg,
           originIata,
@@ -495,7 +512,7 @@ export async function pollPositions(): Promise<number> {
           target: [aircraftPositions.flightId, aircraftPositions.positionTimestamp],
           set: {
             fr24Id: `INFERRED_${flightNumber}_${arrivedAt.getTime()}`,
-            lat: coords?.[0] ?? null, lon: coords?.[1] ?? null,
+            lat: coords[0], lon: coords[1],
             originIata,
             destIata: airportCode,
             onGround: true,

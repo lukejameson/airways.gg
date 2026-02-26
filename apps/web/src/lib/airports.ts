@@ -5,6 +5,7 @@ export type AirportInfo = {
   iataCode: string;
   icaoCode: string | null;
   name: string;
+  displayName: string | null;
   city: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -21,7 +22,8 @@ export const AIRPORTS = derived(airportsStore, $a => $a);
 export function airportName(iata: string): string {
   let name = iata;
   const unsub = airportsStore.subscribe(a => {
-    name = a[iata]?.name ?? iata;
+    const airport = a[iata];
+    name = airport?.displayName ?? airport?.name ?? iata;
   });
   unsub();
   return name;
@@ -30,24 +32,11 @@ export function airportName(iata: string): string {
 export function airportLabel(iata: string): { name: string; code: string } {
   let name = iata;
   const unsub = airportsStore.subscribe(a => {
-    name = a[iata]?.name ?? iata;
+    const airport = a[iata];
+    name = airport?.displayName ?? airport?.name ?? iata;
   });
   unsub();
   return { name, code: iata };
-}
-
-export function airportNameShort(iata: string): string {
-  const name = airportName(iata);
-  if (!name || name === iata) return iata;
-  
-  // Remove common airport suffixes
-  return name
-    .replace(/\s+International\s+Airport$/i, '')
-    .replace(/\s+Airport$/i, '')
-    .replace(/\s+Airfield$/i, '')
-    .replace(/\s+Aerodrome$/i, '')
-    .replace(/\s+Intl\.?\s+Airport$/i, '')
-    .trim();
 }
 
 export function getAirportCoords(iata: string): [number, number] | null {

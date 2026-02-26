@@ -6,21 +6,12 @@
   import Icon from '$lib/components/Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
 
-  function shortName(iata: string): string {
-    return airportName(iata)
-      .replace(/\s+International\s+Airport$/i, '')
-      .replace(/\s+Airport$/i, '')
-      .replace(/\s+Airfield$/i, '')
-      .replace(/\s+Aerodrome$/i, '')
-      .trim();
-  }
-
   let { data }: { data: PageData } = $props();
   
   // Get return tab from URL query param
   const returnTab = $derived($page.url.searchParams.get('tab') ?? '');
 
-  const { flight, statusHistory, prediction, weatherMap, daylightMap, position, rotationFlights, rotationAirportNames, times } = $derived(data);
+  const { flight, statusHistory, prediction, weatherMap, daylightMap, position, rotationFlights, times } = $derived(data);
   const depWeather = $derived(weatherMap?.[flight.departureAirport] ?? null);
   const arrWeather = $derived(weatherMap?.[flight.arrivalAirport] ?? null);
 
@@ -748,8 +739,8 @@
               {#each rotationFlights as rf}
                 {@const isCurrent = rf.id === flight.id}
                 {@const tone = rotationStatusTone(rf.status)}
-                {@const depShort = rotationAirportNames?.[rf.departureAirport] ?? rf.departureAirport}
-                {@const arrShort = rotationAirportNames?.[rf.arrivalAirport] ?? rf.arrivalAirport}
+                {@const depShort = airportName(rf.departureAirport)}
+                {@const arrShort = airportName(rf.arrivalAirport)}
                 <a
                   href="/flights/{rf.id}"
                   data-current={isCurrent}
