@@ -98,12 +98,57 @@
     const s = flight.status?.toLowerCase() ?? '';
     return s === 'completed' || flight.canceled === true;
   });
-  const isDelayed = $derived(flight.status?.toLowerCase() === 'delayed');
-  const showEstimate = $derived(isDelayed && !!actualTime);
+
+  // Calculate delay from available data (actual time takes precedence over stored delayMinutes)
+  const calculatedDelayMinutes = $derived.by(() => {
+    if (actualTime && scheduledTime) {
+      return Math.round((new Date(actualTime).getTime() - new Date(scheduledTime).getTime()) / 60000);
+    }
+    return delayMinutes;
+  });
+
+  // Calculate our own status when external source is unreliable
+  const calculatedStatus = $derived.by(() => {
+    // If flight is already completed/landed/airborne/cancelled, trust that status
+    const currentStatus = flight.status?.toLowerCase() ?? '';
+    if (currentStatus.includes('completed') || currentStatus.includes('landed') || 
+        currentStatus.includes('airborne') || currentStatus.includes('cancel')) {
+      return flight.status;
+    }
+    
+    // Check calculated delay from times
+    if (calculatedDelayMinutes > 15) {
+      return 'Delayed';
+    } else if (calculatedDelayMinutes < -15) {
+      const absMins = Math.abs(calculatedDelayMinutes);
+      if (absMins >= 60) {
+        const hrs = Math.floor(absMins / 60);
+        const mins = absMins % 60;
+        return mins > 0 ? `${hrs}h ${mins}m early` : `${hrs}h early`;
+      }
+      return `${absMins}m early`;
+    }
+    
+    // Otherwise trust the external status
+    return flight.status || 'Scheduled';
+  });
+
+  // Format delay for display (e.g., "5h 35m" or "45m")
+  const formattedDelay = $derived.by(() => {
+    if (calculatedDelayMinutes <= 0) return null;
+    const hrs = Math.floor(calculatedDelayMinutes / 60);
+    const mins = calculatedDelayMinutes % 60;
+    if (hrs > 0 && mins > 0) return `${hrs}h ${mins}m`;
+    if (hrs > 0) return `${hrs}h`;
+    return `${mins}m`;
+  });
+
+  const isDelayed = $derived(calculatedStatus?.toLowerCase().includes('delayed'));
+  const showEstimate = $derived(isDelayed && !!actualTime && !flight.actualDeparture);
 
   type BadgeTone = 'green' | 'yellow' | 'red' | 'blue' | 'gray';
   const tone = $derived.by((): BadgeTone => {
-    const s = flight.status?.toLowerCase() ?? '';
+    const s = calculatedStatus?.toLowerCase() ?? '';
     if (s.includes('delayed'))   return 'yellow';
     if (s.includes('cancel'))    return 'red';
     if (s.includes('landed') || s.includes('airborne') || s.includes('completed')) return 'blue';
@@ -137,7 +182,7 @@
           <p class="text-xs tabular-nums text-muted-foreground line-through leading-none">{fmt(scheduledTime)}</p>
           <p class="text-lg font-bold tabular-nums leading-none text-amber-600 mt-1">{fmt(actualTime)}</p>
           <p class="text-[10px] text-amber-500 leading-none mt-0.5">est.</p>
-        {:else if actualTime && delayMinutes > 0}
+        {:else if actualTime && calculatedDelayMinutes > 0}
           <p class="text-xs tabular-nums text-muted-foreground line-through leading-none">{fmt(scheduledTime)}</p>
           <p class="text-lg font-bold tabular-nums leading-none text-red-500 mt-1">{fmt(actualTime)}</p>
         {:else}
@@ -165,31 +210,31 @@
 
       <!-- Status & Delay - fixed width on mobile to prevent jumping -->
       <div class="flex items-center gap-2 shrink-0 ml-auto">
-        {#if delayMinutes > 0}
-          <span class="text-xs font-bold text-red-600">+{delayMinutes}m</span>
+        {#if formattedDelay}
+          <span class="text-sm font-bold text-red-600">+{formattedDelay}</span>
         {/if}
 
         <!-- Status badge -->
         <div class="shrink-0">
           {#if tone === 'yellow'}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
-              <span class="h-2 w-2 rounded-full bg-amber-500"></span>{flight.status || 'Scheduled'}
+              <span class="h-2 w-2 rounded-full bg-amber-500"></span>{calculatedStatus}
             </span>
           {:else if tone === 'red'}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-red-100 text-red-800 border border-red-300">
-              <span class="h-2 w-2 rounded-full bg-red-500"></span>{flight.status || 'Scheduled'}
+              <span class="h-2 w-2 rounded-full bg-red-500"></span>{calculatedStatus}
             </span>
           {:else if tone === 'blue'}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">
-              <span class="h-2 w-2 rounded-full bg-blue-500"></span>{flight.status || 'Scheduled'}
+              <span class="h-2 w-2 rounded-full bg-blue-500"></span>{calculatedStatus}
             </span>
           {:else if tone === 'green'}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
-              <span class="h-2 w-2 rounded-full bg-green-500"></span>{flight.status || 'Scheduled'}
+              <span class="h-2 w-2 rounded-full bg-green-500"></span>{calculatedStatus}
             </span>
           {:else}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
-              <span class="h-2 w-2 rounded-full bg-gray-400"></span>{flight.status || 'Scheduled'}
+              <span class="h-2 w-2 rounded-full bg-gray-400"></span>{calculatedStatus}
             </span>
           {/if}
         </div>

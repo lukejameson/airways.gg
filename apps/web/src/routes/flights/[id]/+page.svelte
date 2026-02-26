@@ -31,6 +31,64 @@
   const depWeatherIcon = $derived(depWeather ? getWeatherIconName(depWeather.weatherCode, depIsDay) : 'cloud');
   const arrWeatherIcon = $derived(arrWeather ? getWeatherIconName(arrWeather.weatherCode, arrIsDay) : 'cloud');
 
+  // Time calculations (needed for status calculation)
+  const isDeparture = $derived(flight.departureAirport === 'GCI');
+  const scheduledTime = $derived(isDeparture ? flight.scheduledDeparture : flight.scheduledArrival);
+  const actualTime = $derived(isDeparture ? flight.actualDeparture : flight.actualArrival);
+  const estimatedTime = $derived.by(() => {
+    const timeType = isDeparture ? 'EstimatedBlockOff' : 'EstimatedBlockOn';
+    return times?.find((t: { timeType: string }) => t.timeType === timeType)?.timeValue ?? null;
+  });
+  const displayTime = $derived(actualTime ?? estimatedTime);
+  const otherAirport = $derived(isDeparture ? flight.arrivalAirport : flight.departureAirport);
+  const delayMinutes = $derived(flight.delayMinutes ?? 0);
+  
+  // Calculate delay from times if available
+  const calculatedDelayMinutes = $derived.by(() => {
+    if (delayMinutes > 0) return delayMinutes;
+    if (displayTime && scheduledTime) {
+      return Math.round((new Date(displayTime).getTime() - new Date(scheduledTime).getTime()) / 60000);
+    }
+    return 0;
+  });
+
+  // Calculate our own status when external source is unreliable
+  // If we have delay minutes or the actual/estimated time differs from scheduled by > 15 min
+  const calculatedStatus = $derived.by(() => {
+    // If flight is already completed/landed/airborne/cancelled, trust that status
+    const currentStatus = flight.status?.toLowerCase() ?? '';
+    if (currentStatus.includes('completed') || currentStatus.includes('landed') || 
+        currentStatus.includes('airborne') || currentStatus.includes('cancel')) {
+      return flight.status;
+    }
+    
+    // Check calculated delay from times
+    if (calculatedDelayMinutes > 15) {
+      return 'Delayed';
+    } else if (calculatedDelayMinutes < -15) {
+      const absMins = Math.abs(calculatedDelayMinutes);
+      if (absMins >= 60) {
+        const hrs = Math.floor(absMins / 60);
+        const mins = absMins % 60;
+        return mins > 0 ? `${hrs}h ${mins}m early` : `${hrs}h early`;
+      }
+      return `${absMins}m early`;
+    }
+    
+    // Otherwise trust the external status
+    return flight.status || 'Scheduled';
+  });
+
+  // Format delay for display (e.g., "5h 35m" or "45m")
+  const formattedDelay = $derived.by(() => {
+    if (calculatedDelayMinutes <= 0) return null;
+    const hrs = Math.floor(calculatedDelayMinutes / 60);
+    const mins = calculatedDelayMinutes % 60;
+    if (hrs > 0 && mins > 0) return `${hrs}h ${mins}m`;
+    if (hrs > 0) return `${hrs}h`;
+    return `${mins}m`;
+  });
+
   // SEO
   const seoTitle = $derived(`${flight.flightNumber} · ${flight.departureAirport} → ${flight.arrivalAirport} — delays.gg`);
   const seoDate = $derived(
@@ -39,7 +97,7 @@
       : ''
   );
   const seoDescription = $derived(
-    `${flight.flightNumber} from ${flight.departureAirport} to ${flight.arrivalAirport}${seoDate ? ` on ${seoDate}` : ''}${flight.status ? ` · ${flight.status}` : ''}${flight.delayMinutes && flight.delayMinutes > 0 ? ` · Delayed ${flight.delayMinutes} min` : ''}. Track live flight status and delay predictions on delays.gg.`
+    `${flight.flightNumber} from ${flight.departureAirport} to ${flight.arrivalAirport}${seoDate ? ` on ${seoDate}` : ''}${formattedDelay ? ` · Delayed ${formattedDelay}` : ''}. Track live flight status and delay predictions on delays.gg.`
   );
   const seoCanonical = $derived(`${data.siteUrl}/flights/${flight.id}`);
 
@@ -223,17 +281,7 @@
     return `${Math.floor(secs / 3600)}h ago`;
   }
 
-  const isDeparture = $derived(flight.departureAirport === 'GCI');
-  const scheduledTime = $derived(isDeparture ? flight.scheduledDeparture : flight.scheduledArrival);
-  const actualTime = $derived(isDeparture ? flight.actualDeparture : flight.actualArrival);
-  const estimatedTime = $derived(() => {
-    const timeType = isDeparture ? 'EstimatedBlockOff' : 'EstimatedBlockOn';
-    return times?.find((t: { timeType: string }) => t.timeType === timeType)?.timeValue ?? null;
-  });
-  const displayTime = $derived(actualTime ?? estimatedTime());
-  const isEstimate = $derived(!actualTime && !!estimatedTime());
-  const otherAirport = $derived(isDeparture ? flight.arrivalAirport : flight.departureAirport);
-  const delayMinutes = $derived(flight.delayMinutes ?? 0);
+  const isEstimate = $derived(!actualTime && !!estimatedTime);
 
   function formatTime(date: string | Date | null | undefined): string {
     if (!date) return '--:--';
@@ -414,28 +462,23 @@
     <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
       <span class="text-muted-foreground">{shortDate(flight.flightDate)}</span>
       <span class="opacity-30 hidden sm:inline">·</span>
+      {#if formattedDelay}
+        <span class="text-sm font-bold text-red-600">+{formattedDelay}</span>
+      {/if}
       <div class="flex items-center gap-1.5">
-        <span class="h-2 w-2 rounded-full {getStatusDotColor(flight.status)}"></span>
-        <span class="font-medium {getStatusColor(flight.status)}">
-          {flight.status || 'Scheduled'}
+        <span class="h-2 w-2 rounded-full {getStatusDotColor(calculatedStatus)}"></span>
+        <span class="font-medium {getStatusColor(calculatedStatus)}">
+          {calculatedStatus}
         </span>
       </div>
-      {#if delayMinutes > 0}
-        <span class="opacity-30 hidden sm:inline">·</span>
-        <span class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">
-          +{delayMinutes}m
-        </span>
-      {:else if delayMinutes < 0}
+      {#if calculatedStatus?.toLowerCase().includes('delayed')}
+        <!-- Delay already shown above -->
+      {:else if calculatedDelayMinutes < -15}
         <span class="opacity-30 hidden sm:inline">·</span>
         <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
-          {Math.abs(delayMinutes)}m early
+          {calculatedStatus}
         </span>
-      {:else if flight.status?.toLowerCase().includes('delayed')}
-        <span class="opacity-30 hidden sm:inline">·</span>
-        <span class="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-700">
-          Delay TBC
-        </span>
-      {:else}
+      {:else if calculatedDelayMinutes <= 15}
         <span class="opacity-30 hidden sm:inline">·</span>
         <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
           On Time

@@ -227,12 +227,24 @@ async function upsertFlights(scrapedFlights: ScrapedFlight[]): Promise<number> {
   let count = 0;
   for (const flight of scrapedFlights) {
     try {
-      // Prefer summed delay codes; fall back to computing from estimated vs scheduled time
+      // Prefer summed delay codes
       let delayMinutes: number | null = flight.delays.reduce((s, d) => s + d.minutes, 0) || null;
+      
+      // Fall back to computing from actual departure vs scheduled
       if (!delayMinutes && flight.actualDeparture && flight.scheduledDeparture) {
         const diff = Math.round((flight.actualDeparture.getTime() - flight.scheduledDeparture.getTime()) / 60000);
         if (diff > 0 && diff <= 1440) delayMinutes = diff;
       }
+      
+      // Also check estimated departure time for delays
+      if (!delayMinutes && flight.scheduledDeparture) {
+        const estimatedBlockOff = flight.times.find(t => t.type === 'EstimatedBlockOff');
+        if (estimatedBlockOff) {
+          const diff = Math.round((estimatedBlockOff.value.getTime() - flight.scheduledDeparture.getTime()) / 60000);
+          if (diff > 15 && diff <= 1440) delayMinutes = diff;
+        }
+      }
+      
       // Final sanity guard
       if (delayMinutes != null && (!Number.isFinite(delayMinutes) || delayMinutes < 0 || delayMinutes > 1440)) {
         delayMinutes = null;
