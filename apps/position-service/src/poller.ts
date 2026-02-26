@@ -47,7 +47,7 @@ interface FlightToPoll {
 // Credits used: 8 per returned flight on the /live/flight-positions/full endpoint.
 // At 3-minute intervals with ~3 simultaneous Aurigny flights the estimated
 // monthly spend is ~22,000 credits — well within the 30,000/month plan.
-const LIVE_POLL_INTERVAL = parseInt(process.env.POSITION_INTERVAL_LIVE_SECS ?? '180', 10) * 1000;
+const LIVE_POLL_INTERVAL = parseInt(process.env.POSITION_INTERVAL_LIVE_SECS ?? '300', 10) * 1000;
 
 // Historical inference — re-run each poll cycle so new completed flights are picked up promptly
 const INFER_INTERVAL = 5 * 60 * 1000; // 5 minutes (same as before)
@@ -117,10 +117,11 @@ function isTerminal(status: string | null): boolean {
  * so a flight could be airborne for 15+ minutes before FR24 was ever queried.
  *
  * New logic — poll FR24 if ANY of the following are true:
- *   1. status === 'Airborne'  (confirmed by Aurigny scraper — existing behaviour)
- *   2. actualDeparture is set AND the flight is not in a terminal status
+ *   1. status === 'Airborne'  (confirmed by Aurigny scraper or back-written by us)
+ *   2. status === 'Taxiing'   (back-written by us when FR24 shows ground movement)
+ *   3. actualDeparture is set AND the flight is not in a terminal status
  *      (Aurigny writes ActualBlockOff before it writes status='Airborne', so this
- *       catches the gap between engine-start and the scraper's next status update)
+ *       catches the gap between pushback and the scraper's next status update)
  *
  * Terminal flights (Completed/Landed/Cancelled) are always excluded.
  * Flights that haven't departed yet and have no actualDeparture are excluded.
@@ -128,9 +129,47 @@ function isTerminal(status: string | null): boolean {
 function shouldPollFR24(flight: Pick<FlightToPoll, 'status' | 'actualDeparture'>): boolean {
   if (isTerminal(flight.status)) return false;
   const s = flight.status?.toLowerCase() ?? '';
-  if (s === 'airborne') return true;
+  if (s === 'airborne' || s === 'taxiing') return true;
   if (flight.actualDeparture != null) return true;
   return false;
+}
+
+/**
+ * Derives the most accurate flight status from a live FR24 position response.
+ *
+ * FR24 gives us real-time altitude, ground speed, and vertical speed — enough
+ * to distinguish between taxiing, climbing, cruising, and descending.
+ * These are only written when they represent a meaningful step forward from
+ * the current DB status; terminal statuses (Landed/Completed/Cancelled) are
+ * never overwritten by FR24 data.
+ *
+ * Returns null if no status update is warranted.
+ */
+function deriveStatusFromFR24(
+  pos: { alt: number; gspeed: number; vspeed: number },
+  onGround: boolean,
+  currentStatus: string | null,
+): string | null {
+  if (isTerminal(currentStatus)) return null;
+  const current = currentStatus?.toLowerCase() ?? '';
+
+  if (!onGround) {
+    // Aircraft is airborne — already the most we can say from position data
+    if (current !== 'airborne') return 'Airborne';
+    return null;
+  }
+
+  // Aircraft is on the ground
+  if (pos.gspeed > 5) {
+    // Moving on the ground — taxiing out (before departure) or vacating runway (after landing).
+    // Only write Taxiing if the flight isn't already Airborne (i.e. we haven't seen it fly yet).
+    // Once a flight has been Airborne, ground movement means it's landing — let Aurigny handle that.
+    if (current !== 'airborne' && current !== 'taxiing') return 'Taxiing';
+    return null;
+  }
+
+  // Stationary on the ground — don't overwrite anything; Aurigny will write Landed/Completed.
+  return null;
 }
 
 // Airport coordinates cache — populated from DB on first use
@@ -330,20 +369,24 @@ export async function pollPositions(): Promise<number> {
       }
 
       // ── Status back-write ──────────────────────────────────────────────────
-      // If FR24 confirms the aircraft is clearly airborne (significant altitude
-      // or speed) and our DB still shows a pre-departure status, write 'Airborne'
-      // directly. This makes the Aurigny scraper's status lag irrelevant — the
-      // position service becomes the source of truth during the flight window.
+      // Derive the best available status from the FR24 position data and write
+      // it to flights.status if it represents a meaningful state change.
+      // This makes the Aurigny scraper's update lag irrelevant during the active
+      // flight window — the position service becomes the live source of truth.
       const matchedFlight = flightById.get(flightId);
-      if (matchedFlight && !onGround && !isTerminal(matchedFlight.status)) {
-        const isConfirmedAirborne = pos.alt > 500 || pos.gspeed > 100;
-        if (isConfirmedAirborne && matchedFlight.status?.toLowerCase() !== 'airborne') {
+      if (matchedFlight) {
+        const derivedStatus = deriveStatusFromFR24(pos, onGround, matchedFlight.status);
+        if (derivedStatus !== null) {
           try {
             await db
               .update(flights)
-              .set({ status: 'Airborne', updatedAt: now })
+              .set({ status: derivedStatus, updatedAt: now })
               .where(eq(flights.id, flightId));
-            console.log(`[Position] Status back-write: flight ${matchedFlight.flightNumber} (id=${flightId}) → Airborne (alt=${pos.alt}ft, speed=${pos.gspeed}kts)`);
+            console.log(
+              `[Position] Status back-write: ${matchedFlight.flightNumber} (id=${flightId}) ` +
+              `${matchedFlight.status} → ${derivedStatus} ` +
+              `(alt=${pos.alt}ft, speed=${pos.gspeed}kts, vspeed=${pos.vspeed}fpm)`,
+            );
           } catch (err) {
             console.error(`[Position] Failed status back-write for flight ${matchedFlight.flightNumber}:`, err);
           }
