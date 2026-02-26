@@ -25,8 +25,11 @@ if (envPath) {
 import { pollPositions } from './poller';
 
 async function main() {
+  const intervalSecs = parseInt(process.env.POSITION_INTERVAL_LIVE_SECS ?? '180', 10);
   console.log('[Position] Aircraft position service starting...');
-  console.log('[Position] Smart polling: Airborne=5min, Active=15min, Scheduled=30min');
+  console.log(`[Position] Poll interval: ${intervalSecs}s for live/implied-airborne flights`);
+  console.log('[Position] FR24 gate: status=Airborne OR actualDeparture is set (and not terminal)');
+  console.log('[Position] Status back-write enabled: will write Airborne to flights table when FR24 confirms');
 
   if (!process.env.FR24_API_TOKEN) {
     console.error('[Position] FR24_API_TOKEN is not set — position service will not run');

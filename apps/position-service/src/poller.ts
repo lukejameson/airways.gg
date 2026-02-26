@@ -37,15 +37,20 @@ interface FlightToPoll {
   flightNumber: string;
   status: string | null;
   scheduledDeparture: Date;
+  actualDeparture: Date | null;
   aircraftRegistration: string | null;
   priority: 'high' | 'medium' | 'low';
 }
 
-// Live polling — only for airborne flights
-const LIVE_POLL_INTERVAL = 5 * 60 * 1000; // 5 minutes
+// ── Poll interval configuration ────────────────────────────────────────────
+// Env var POSITION_INTERVAL_LIVE_SECS overrides the default (180 = 3 minutes).
+// Credits used: 8 per returned flight on the /live/flight-positions/full endpoint.
+// At 3-minute intervals with ~3 simultaneous Aurigny flights the estimated
+// monthly spend is ~22,000 credits — well within the 30,000/month plan.
+const LIVE_POLL_INTERVAL = parseInt(process.env.POSITION_INTERVAL_LIVE_SECS ?? '180', 10) * 1000;
 
 // Historical inference — re-run each poll cycle so new completed flights are picked up promptly
-const INFER_INTERVAL = 5 * 60 * 1000; // 5 minutes (same as poll interval)
+const INFER_INTERVAL = 5 * 60 * 1000; // 5 minutes (same as before)
 
 // Track last poll/infer times per flight id
 const lastLivePollTimes = new Map<number, number>();
@@ -95,8 +100,37 @@ function normaliseReg(reg: string): string {
   return reg;
 }
 
-function isAirborne(status: string | null): boolean {
-  return status?.toLowerCase() === 'airborne';
+/**
+ * Returns true if a flight is in a terminal status (no further movement expected).
+ * Terminal statuses are never polled against FR24.
+ */
+function isTerminal(status: string | null): boolean {
+  const s = status?.toLowerCase() ?? '';
+  return s.includes('completed') || s.includes('landed') || s.includes('cancelled') || s.includes('canceled');
+}
+
+/**
+ * Determines whether a flight should be polled against the FR24 live API.
+ *
+ * Previously this was a strict `status === 'airborne'` check, which caused a
+ * significant gap: Aurigny's schedule scraper updates status every 3–15 minutes,
+ * so a flight could be airborne for 15+ minutes before FR24 was ever queried.
+ *
+ * New logic — poll FR24 if ANY of the following are true:
+ *   1. status === 'Airborne'  (confirmed by Aurigny scraper — existing behaviour)
+ *   2. actualDeparture is set AND the flight is not in a terminal status
+ *      (Aurigny writes ActualBlockOff before it writes status='Airborne', so this
+ *       catches the gap between engine-start and the scraper's next status update)
+ *
+ * Terminal flights (Completed/Landed/Cancelled) are always excluded.
+ * Flights that haven't departed yet and have no actualDeparture are excluded.
+ */
+function shouldPollFR24(flight: Pick<FlightToPoll, 'status' | 'actualDeparture'>): boolean {
+  if (isTerminal(flight.status)) return false;
+  const s = flight.status?.toLowerCase() ?? '';
+  if (s === 'airborne') return true;
+  if (flight.actualDeparture != null) return true;
+  return false;
 }
 
 // Airport coordinates cache — populated from DB on first use
@@ -203,6 +237,7 @@ export async function pollPositions(): Promise<number> {
       flightNumber: flights.flightNumber,
       status: flights.status,
       scheduledDeparture: flights.scheduledDeparture,
+      actualDeparture: flights.actualDeparture,
       aircraftRegistration: flights.aircraftRegistration,
     })
     .from(flights)
@@ -218,30 +253,41 @@ export async function pollPositions(): Promise<number> {
     return 60 * 1000;
   }
 
-  // ── Track 1: LIVE polling — airborne flights only ──────────────────────────
-  const airborneFlights = todaysFlights.filter(f => isAirborne(f.status));
-  const airborneNeedingPoll = airborneFlights.filter(f => {
+  // ── Track 1: LIVE polling ──────────────────────────────────────────────────
+  // Poll FR24 for any flight that is confirmed airborne (status='Airborne') OR
+  // has an actualDeparture recorded (departed but Aurigny hasn't yet updated
+  // the status field). This closes the lag window between actual takeoff and
+  // the scraper's next status update cycle.
+  const liveFlights = todaysFlights.filter(f => shouldPollFR24(f));
+  const liveNeedingPoll = liveFlights.filter(f => {
     const lastPoll = lastLivePollTimes.get(f.id) ?? 0;
     return nowMs - lastPoll >= LIVE_POLL_INTERVAL;
   });
 
   let liveSaved = 0;
-  if (airborneNeedingPoll.length > 0) {
-    console.log(`[Position] Live polling ${airborneNeedingPoll.length} airborne flights`);
-    const positions = await fetchPositions(airborneNeedingPoll.map(f => f.flightNumber));
+  if (liveNeedingPoll.length > 0) {
+    const confirmedAirborne = liveNeedingPoll.filter(f => f.status?.toLowerCase() === 'airborne').length;
+    const impliedAirborne   = liveNeedingPoll.length - confirmedAirborne;
+    console.log(
+      `[Position] Live polling ${liveNeedingPoll.length} flight(s) ` +
+      `(${confirmedAirborne} status=Airborne, ${impliedAirborne} implied via actualDeparture)`,
+    );
+    const positions = await fetchPositions(liveNeedingPoll.map(f => f.flightNumber));
     console.log(`[Position] Received ${positions.length} live position(s)`);
 
-    for (const flight of airborneNeedingPoll) {
+    for (const flight of liveNeedingPoll) {
       lastLivePollTimes.set(flight.id, nowMs);
     }
 
-    const flightIdByNumber = new Map(airborneNeedingPoll.map(f => [f.flightNumber, f.id]));
+    const flightIdByNumber = new Map(liveNeedingPoll.map(f => [f.flightNumber, f.id]));
     // Secondary lookup by registration — FR24 sometimes returns null for flight number
     const flightIdByReg = new Map(
-      airborneNeedingPoll
+      liveNeedingPoll
         .filter(f => f.aircraftRegistration)
         .map(f => [normaliseReg(f.aircraftRegistration!), f.id])
     );
+    // Map id → flight for status back-write
+    const flightById = new Map(liveNeedingPoll.map(f => [f.id, f]));
 
     for (const pos of positions) {
       // Try flight number first, fall back to registration
@@ -282,11 +328,32 @@ export async function pollPositions(): Promise<number> {
       } catch (err) {
         console.error(`[Position] Failed to save live position for ${pos.flight}:`, err);
       }
+
+      // ── Status back-write ──────────────────────────────────────────────────
+      // If FR24 confirms the aircraft is clearly airborne (significant altitude
+      // or speed) and our DB still shows a pre-departure status, write 'Airborne'
+      // directly. This makes the Aurigny scraper's status lag irrelevant — the
+      // position service becomes the source of truth during the flight window.
+      const matchedFlight = flightById.get(flightId);
+      if (matchedFlight && !onGround && !isTerminal(matchedFlight.status)) {
+        const isConfirmedAirborne = pos.alt > 500 || pos.gspeed > 100;
+        if (isConfirmedAirborne && matchedFlight.status?.toLowerCase() !== 'airborne') {
+          try {
+            await db
+              .update(flights)
+              .set({ status: 'Airborne', updatedAt: now })
+              .where(eq(flights.id, flightId));
+            console.log(`[Position] Status back-write: flight ${matchedFlight.flightNumber} (id=${flightId}) → Airborne (alt=${pos.alt}ft, speed=${pos.gspeed}kts)`);
+          } catch (err) {
+            console.error(`[Position] Failed status back-write for flight ${matchedFlight.flightNumber}:`, err);
+          }
+        }
+      }
     }
   }
 
-  // ── Track 2: INFERRED positions — non-airborne flights, once per 6h per aircraft ──
-  const groundedFlights = todaysFlights.filter(f => !isAirborne(f.status));
+  // ── Track 2: INFERRED positions — non-live flights, once per 5 min per aircraft ──
+  const groundedFlights = todaysFlights.filter(f => !shouldPollFR24(f));
 
   // Get unique registrations that haven't been inferred recently
   const regsNeedingInfer = [...new Set(
@@ -374,6 +441,5 @@ export async function pollPositions(): Promise<number> {
 
   console.log(`[Position] Cycle complete — ${liveSaved} live, ${inferSaved} inferred`);
 
-  // Next run: either when an airborne flight needs repoll, or 5 min (to catch new airborne flights)
   return LIVE_POLL_INTERVAL;
 }
