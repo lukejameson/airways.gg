@@ -28,29 +28,8 @@ interface Fr24Position {
   eta: string | null;
 }
 
-interface Fr24FlightSummary {
-  fr24_id: string;
-  flight: string | null;
-  callsign: string | null;
-  reg: string | null;
-  type: string | null;
-  orig_icao: string | null;
-  orig_iata: string | null;
-  dest_icao: string | null;
-  dest_iata: string | null;
-  datetime_takeoff: string | null;
-  datetime_landed: string | null;
-  flight_ended: boolean;
-  first_seen: string | null;
-  last_seen: string | null;
-}
-
 interface Fr24Response {
   data: Fr24Position[];
-}
-
-interface Fr24SummaryResponse {
-  data: Fr24FlightSummary[];
 }
 
 interface FlightToPoll {
@@ -60,19 +39,6 @@ interface FlightToPoll {
   scheduledDeparture: Date;
   aircraftRegistration: string | null;
   priority: 'high' | 'medium' | 'low';
-}
-
-interface InferredPosition {
-  flightId: number;
-  lat: number | null;
-  lon: number | null;
-  airportCode: string;
-  airportName: string;
-  lastFlightNumber: string;
-  lastFlightOrigin: string;
-  lastFlightDestination: string;
-  landedAt: Date;
-  inferred: true;
 }
 
 // Live polling — only for airborne flights
@@ -127,103 +93,6 @@ function normaliseReg(reg: string): string {
     return `${reg[0]}-${reg.slice(1)}`;
   }
   return reg;
-}
-
-/** FR24 datetime format: YYYY-MM-DDTHH:MM:SS (no Z, no ms) */
-function fr24Date(d: Date): string {
-  return d.toISOString().split('.')[0];
-}
-
-async function fetchInferredPositionsBatched(registrations: string[]): Promise<Map<string, InferredPosition>> {
-  const token = process.env.FR24_API_TOKEN;
-  if (!token) return new Map();
-
-  const results = new Map<string, InferredPosition>();
-  const now = new Date();
-  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-  // Batch up to 15 registrations per request (FR24 limit)
-  for (let i = 0; i < registrations.length; i += 15) {
-    const batch = registrations.slice(i, i + 15);
-    // Normalise all registrations to FR24 format (e.g. GPBOT → G-PBOT)
-    const normalisedBatch = batch.map(normaliseReg);
-    const regsParam = normalisedBatch.join(',');
-    const url = `${FR24_BASE}/api/flight-summary/full?registrations=${encodeURIComponent(regsParam)}&flight_datetime_from=${fr24Date(sevenDaysAgo)}&flight_datetime_to=${fr24Date(now)}`;
-
-    try {
-      const res = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json',
-          'Accept-Version': 'v1',
-        },
-      });
-
-      if (!res.ok) {
-        console.log(`[Position] Historical lookup failed for batch: ${res.status}`);
-        // If rate limited (429), wait and continue
-        if (res.status === 429) {
-          await new Promise(r => setTimeout(r, 10000));
-        }
-        continue;
-      }
-
-      const json = (await res.json()) as Fr24SummaryResponse;
-      const flightData = json.data ?? [];
-
-      // Group by registration and find most recent completed flight for each
-      const flightsByReg = new Map<string, Fr24FlightSummary[]>();
-      for (const flight of flightData) {
-        if (!flight.reg) continue;
-        if (!flightsByReg.has(flight.reg)) {
-          flightsByReg.set(flight.reg, []);
-        }
-        flightsByReg.get(flight.reg)!.push(flight);
-      }
-
-      // Process each registration
-      for (const [reg, flights] of flightsByReg as Map<string, Fr24FlightSummary[]>) {
-        const completedFlights = flights
-          .filter(f => f.flight_ended && f.datetime_landed)
-          .sort((a, b) => new Date(b.datetime_landed!).getTime() - new Date(a.datetime_landed!).getTime());
-
-        if (completedFlights.length === 0) continue;
-
-        const lastFlight = completedFlights[0];
-        const destination = lastFlight.dest_iata || lastFlight.dest_icao || 'Unknown';
-        const origin = lastFlight.orig_iata || lastFlight.orig_icao || 'Unknown';
-
-        // Store under both the normalised and raw form so the lookup works
-        // regardless of whether the DB has GPBOT or G-PBOT
-        const rawReg = reg.replace('-', '');
-        const inferred: InferredPosition = {
-          flightId: 0,
-          lat: null,
-          lon: null,
-          airportCode: destination,
-          airportName: destination,
-          lastFlightNumber: lastFlight.flight || 'Unknown',
-          lastFlightOrigin: origin,
-          lastFlightDestination: destination,
-          landedAt: new Date(lastFlight.datetime_landed!),
-          inferred: true,
-        };
-
-        results.set(reg, inferred);     // G-PBOT
-        results.set(rawReg, inferred);  // GPBOT (as stored in DB)
-        console.log(`[Position] Inferred ${reg} location: ${destination} (last flight ${lastFlight.flight} from ${origin})`);
-      }
-
-      // Rate limit: 6 second delay between batches (10 req/min max)
-      if (i + 15 < registrations.length) {
-        await new Promise(r => setTimeout(r, 6000));
-      }
-    } catch (err) {
-      console.error(`[Position] Error fetching historical data for batch:`, err);
-    }
-  }
-
-  return results;
 }
 
 function isAirborne(status: string | null): boolean {
@@ -438,12 +307,6 @@ export async function pollPositions(): Promise<number> {
     const ownDbMap = await inferPositionsFromOwnDb(regsNeedingInfer);
     console.log(`[Position] Own-DB inferred ${ownDbMap.size}/${regsNeedingInfer.length} aircraft`);
 
-    // ── Fallback: only ask FR24 for registrations not resolved from our own DB ──
-    const needsFr24 = regsNeedingInfer.filter(r => !ownDbMap.has(r));
-    const fr24Map = needsFr24.length > 0
-      ? await fetchInferredPositionsBatched(needsFr24)
-      : new Map<string, InferredPosition>();
-
     // Mark all queried registrations as done
     for (const reg of regsNeedingInfer) {
       lastInferTimes.set(reg, nowMs);
@@ -456,9 +319,7 @@ export async function pollPositions(): Promise<number> {
       if (!flight.aircraftRegistration) continue;
       const reg = flight.aircraftRegistration;
       const ownDb = ownDbMap.get(reg);
-      const fr24 = fr24Map.get(reg);
       if (ownDb) allAirportCodes.add(ownDb.airportCode);
-      else if (fr24) allAirportCodes.add(fr24.airportCode);
     }
     const coordsMap = await getAirportCoords([...allAirportCodes]);
 
@@ -467,28 +328,14 @@ export async function pollPositions(): Promise<number> {
       if (!flight.aircraftRegistration) continue;
       const reg = flight.aircraftRegistration;
 
-      // Try own-DB first, then FR24
+      // Only use own-DB for grounded flights (no FR24 fallback)
       const ownDb = ownDbMap.get(reg);
-      const fr24 = fr24Map.get(reg);
+      if (!ownDb) continue;
 
-      let airportCode: string;
-      let flightNumber: string;
-      let arrivedAt: Date;
-      let originIata: string | undefined;
-
-      if (ownDb) {
-        airportCode  = ownDb.airportCode;
-        flightNumber = ownDb.flightNumber;
-        arrivedAt    = ownDb.arrivedAt;
-        console.log(`[Position] Own-DB: ${reg} → ${airportCode} (last flight ${flightNumber})`);
-      } else if (fr24) {
-        airportCode  = fr24.airportCode;
-        flightNumber = fr24.lastFlightNumber;
-        arrivedAt    = fr24.landedAt;
-        originIata   = fr24.lastFlightOrigin;
-      } else {
-        continue;
-      }
+      const airportCode = ownDb.airportCode;
+      const flightNumber = ownDb.flightNumber;
+      const arrivedAt = ownDb.arrivedAt;
+      console.log(`[Position] Own-DB: ${reg} → ${airportCode} (last flight ${flightNumber})`);
 
       const coords = coordsMap.get(airportCode);
       if (!coords) {
@@ -503,7 +350,6 @@ export async function pollPositions(): Promise<number> {
           lat: coords[0], lon: coords[1],
           altitudeFt: 0, groundSpeedKts: 0, heading: 0, verticalSpeedFpm: 0,
           registration: reg,
-          originIata,
           destIata: airportCode,
           onGround: true,
           positionTimestamp: now,
@@ -513,7 +359,6 @@ export async function pollPositions(): Promise<number> {
           set: {
             fr24Id: `INFERRED_${flightNumber}_${arrivedAt.getTime()}`,
             lat: coords[0], lon: coords[1],
-            originIata,
             destIata: airportCode,
             onGround: true,
             fetchedAt: now,

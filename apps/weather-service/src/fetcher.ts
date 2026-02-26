@@ -534,6 +534,106 @@ export async function fetchAllWeather(): Promise<void> {
   }
 }
 
+/**
+ * Fetch weather for flights departing or arriving in the next 20 minutes.
+ * This ensures weather is fresh ~15 minutes before the flight time.
+ */
+export async function fetchWeatherForUpcomingFlights(): Promise<void> {
+  const now = new Date();
+  const twentyMinutesFromNow = new Date(now.getTime() + 20 * 60 * 1000);
+  const fifteenMinutesAgo = new Date(now.getTime() - 15 * 60 * 1000);
+
+  // Find flights departing or arriving in the next 20 minutes
+  const upcomingFlights = await db
+    .select({
+      departureAirport: flights.departureAirport,
+      arrivalAirport: flights.arrivalAirport,
+      scheduledDeparture: flights.scheduledDeparture,
+      scheduledArrival: flights.scheduledArrival,
+      actualDeparture: flights.actualDeparture,
+      actualArrival: flights.actualArrival,
+      flightNumber: flights.flightNumber,
+      status: flights.status,
+    })
+    .from(flights)
+    .where(
+      sql`(
+        -- Departing in the next 20 minutes (use actual/estimated if available, otherwise scheduled)
+        (${flights.actualDeparture} IS NOT NULL AND ${flights.actualDeparture} >= ${now} AND ${flights.actualDeparture} <= ${twentyMinutesFromNow})
+        OR 
+        (${flights.actualDeparture} IS NULL AND ${flights.scheduledDeparture} >= ${now} AND ${flights.scheduledDeparture} <= ${twentyMinutesFromNow})
+        OR
+        -- Arriving in the next 20 minutes (use actual/estimated if available, otherwise scheduled)
+        (${flights.actualArrival} IS NOT NULL AND ${flights.actualArrival} >= ${now} AND ${flights.actualArrival} <= ${twentyMinutesFromNow})
+        OR
+        (${flights.actualArrival} IS NULL AND ${flights.scheduledArrival} >= ${now} AND ${flights.scheduledArrival} <= ${twentyMinutesFromNow})
+        OR
+        -- Recently departed (within last 15 min) - refresh arrival airport weather
+        (${flights.actualDeparture} IS NOT NULL AND ${flights.actualDeparture} >= ${fifteenMinutesAgo} AND ${flights.actualDeparture} <= ${now})
+        OR
+        (${flights.actualDeparture} IS NULL AND ${flights.scheduledDeparture} >= ${fifteenMinutesAgo} AND ${flights.scheduledDeparture} <= ${now})
+      )`
+    );
+
+  if (upcomingFlights.length === 0) {
+    return;
+  }
+
+  // Collect unique airport codes
+  const airportCodes = new Set<string>();
+  for (const flight of upcomingFlights) {
+    airportCodes.add(flight.departureAirport);
+    airportCodes.add(flight.arrivalAirport);
+  }
+
+  const icaoMapping = await getIcaoMapping(Array.from(airportCodes));
+  
+  const airportsList: { code: string; icao: string }[] = [];
+  for (const code of airportCodes) {
+    const icao = icaoMapping.get(code);
+    if (icao) {
+      airportsList.push({ code, icao });
+    }
+  }
+
+  if (airportsList.length === 0) {
+    return;
+  }
+
+  console.log(`[Weather] Upcoming flights check: refreshing ${airportsList.length} airports for ${upcomingFlights.length} flights: ${airportsList.map(a => a.code).join(', ')}`);
+
+  try {
+    // Fetch METARs for just these airports
+    const metars = await fetchAllMetars(airportsList);
+    
+    const metarRows: WeatherRow[] = [];
+    for (const airport of airportsList) {
+      const data = metars.get(airport.icao);
+      if (!data || data.temp == null) continue;
+      
+      const cloudCover = getCloudCoverPercent(data);
+      metarRows.push({
+        airportCode: airport.code,
+        timestamp: now,
+        temperature: data.temp,
+        windSpeed: data.wspd ?? null,
+        windDirection: data.wdir ?? null,
+        visibility: data.visib ?? null,
+        cloudCover,
+        pressure: data.pressure ?? null,
+        weatherCode: getWeatherCode(cloudCover),
+      });
+    }
+    
+    if (metarRows.length > 0) {
+      const metarCount = await batchInsertWeather(metarRows);
+      console.log(`[Weather] Upcoming flights: refreshed ${metarCount} METAR records`);
+    }
+  } catch (err) {
+    console.error('[Weather] Error fetching weather for upcoming flights:', err);
+  }
+}
+
 // WMO weather code → human-readable description
 export function describeWeatherCode(code: number): string {
   if (code === 0) return 'Clear sky';
