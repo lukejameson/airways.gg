@@ -38,9 +38,14 @@ export function airportLabel(iata: string): { name: string; code: string } {
 
 export function airportNameShort(iata: string): string {
   const name = airportName(iata);
+  if (!name || name === iata) return iata;
+  
+  // Remove common airport suffixes
   return name
     .replace(/\s+International\s+Airport$/i, '')
     .replace(/\s+Airport$/i, '')
+    .replace(/\s+Airfield$/i, '')
+    .replace(/\s+Aerodrome$/i, '')
     .replace(/\s+Intl\.?\s+Airport$/i, '')
     .trim();
 }

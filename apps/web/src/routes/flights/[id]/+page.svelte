@@ -2,16 +2,25 @@
   import type { PageData } from './$types';
   import { browser } from '$app/environment';
   import { page } from '$app/stores';
-  import { airportName, airportNameShort, getAirportCoords, getAirportsForNearestSearch } from '$lib/airports';
+  import { airportName, getAirportCoords, getAirportsForNearestSearch } from '$lib/airports';
   import Icon from '$lib/components/Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
+
+  function shortName(iata: string): string {
+    return airportName(iata)
+      .replace(/\s+International\s+Airport$/i, '')
+      .replace(/\s+Airport$/i, '')
+      .replace(/\s+Airfield$/i, '')
+      .replace(/\s+Aerodrome$/i, '')
+      .trim();
+  }
 
   let { data }: { data: PageData } = $props();
   
   // Get return tab from URL query param
   const returnTab = $derived($page.url.searchParams.get('tab') ?? '');
 
-  const { flight, statusHistory, prediction, weatherMap, daylightMap, position, rotationFlights, times } = $derived(data);
+  const { flight, statusHistory, prediction, weatherMap, daylightMap, position, rotationFlights, rotationAirportNames, times } = $derived(data);
   const depWeather = $derived(weatherMap?.[flight.departureAirport] ?? null);
   const arrWeather = $derived(weatherMap?.[flight.arrivalAirport] ?? null);
 
@@ -739,6 +748,8 @@
               {#each rotationFlights as rf}
                 {@const isCurrent = rf.id === flight.id}
                 {@const tone = rotationStatusTone(rf.status)}
+                {@const depShort = rotationAirportNames?.[rf.departureAirport] ?? rf.departureAirport}
+                {@const arrShort = rotationAirportNames?.[rf.arrivalAirport] ?? rf.arrivalAirport}
                 <a
                   href="/flights/{rf.id}"
                   data-current={isCurrent}
@@ -767,12 +778,12 @@
 
                   <!-- Route: From -> To -->
                   <div class="flex items-center gap-2 text-sm mb-2">
-                    <span class="font-medium text-foreground">{airportNameShort(rf.departureAirport)}</span>
+                    <span class="font-medium text-foreground">{depShort}</span>
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
                       <path d="M5 12h14"/>
                       <path d="m12 5 7 7-7 7"/>
                     </svg>
-                    <span class="font-medium text-foreground">{airportNameShort(rf.arrivalAirport)}</span>
+                    <span class="font-medium text-foreground">{arrShort}</span>
                   </div>
 
                   <!-- Times: Act Dep -> Act Arr -->
