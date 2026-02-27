@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { db, flights, flightStatusHistory, scraperLogs } from '@delays/database';
+import { db, flights, flightStatusHistory, scraperLogs } from '@airways/database';
 import { eq, and, isNull } from 'drizzle-orm';
 
 interface StatusUpdate {

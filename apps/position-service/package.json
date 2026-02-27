@@ -1,7 +1,7 @@
 {
-  "name": "@delays/position-service",
+  "name": "@airways/position-service",
   "version": "1.0.0",
-  "description": "FR24 aircraft position poller for delays.gg",
+  "description": "FR24 aircraft position poller for airways.gg",
   "type": "commonjs",
   "scripts": {
     "build": "tsc",
@@ -9,7 +9,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@delays/database": "*",
+    "@airways/database": "*",
     "dotenv": "^16.0.0"
   },
   "devDependencies": {

@@ -1,5 +1,5 @@
 {
-  "name": "@delays/guernsey-scraper",
+  "name": "@airways/guernsey-scraper",
   "version": "1.0.0",
   "description": "Guernsey Airport historical flight data scraper",
   "main": "dist/index.js",
@@ -9,7 +9,7 @@
     "dev": "tsc && node dist/index.js"
   },
   "dependencies": {
-    "@delays/database": "*",
+    "@airways/database": "*",
     "cheerio": "^1.0.0",
     "dotenv": "^16.4.0",
     "drizzle-orm": "^0.45.1"

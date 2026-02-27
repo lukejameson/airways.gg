@@ -1,7 +1,7 @@
 {
-  "name": "@delays/web",
+  "name": "@airways/web",
   "version": "1.0.0",
-  "description": "delays.gg - Flight delay prediction platform",
+  "description": "airways.gg - Flight tracking platform",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -25,7 +25,7 @@
     "vite": "^6.4.1"
   },
   "dependencies": {
-    "@delays/database": "*",
+    "@airways/database": "*",
     "dotenv": "^16.0.0",
     "leaflet": "^1.9.4",
     "lucide-svelte": "^0.344.0",

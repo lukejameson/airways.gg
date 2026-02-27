@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-import type { airports } from '@delays/database/schema';
+import type { airports } from '@airways/database/schema';
 
 export type AirportInfo = {
   iataCode: string;

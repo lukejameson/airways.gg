@@ -1,6 +1,6 @@
 import { connect } from 'puppeteer-real-browser';
 import { XMLParser } from 'fast-xml-parser';
-import { db, flights as flightsTable, flightDelays, flightTimes, flightNotes, scraperLogs } from '@delays/database';
+import { db, flights as flightsTable, flightDelays, flightTimes, flightNotes, scraperLogs } from '@airways/database';
 import { eq } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
-# delays.gg
+# airways.gg
 
-Flight delay prediction platform for Guernsey's Aurigny airline.
+Flight tracking platform for Guernsey's Aurigny airline.
 
 ## Overview
 
@@ -19,7 +19,7 @@ Shows live arrivals/departures with ML-powered delay predictions based on weathe
 ## Project Structure
 
 ```
-delays.gg/
+airways.gg/
 ├── apps/
 │   ├── web/                    # SvelteKit frontend
 │   ├── aurigny-scraper/        # Live flight scraper (anti-detection)

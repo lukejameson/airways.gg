@@ -1,6 +1,6 @@
 {
-  "name": "delays.gg",
-  "short_name": "delays.gg",
+  "name": "airways.gg",
+  "short_name": "airways.gg",
   "description": "Guernsey Airport flight delay predictions",
   "start_url": "/",
   "display": "standalone",

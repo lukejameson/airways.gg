@@ -1,7 +1,7 @@
 {
-  "name": "@delays/weather-service",
+  "name": "@airways/weather-service",
   "version": "1.0.0",
-  "description": "OpenMeteo weather fetcher for delays.gg",
+  "description": "OpenMeteo weather fetcher for airways.gg",
   "type": "commonjs",
   "scripts": {
     "build": "tsc",
@@ -9,7 +9,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@delays/database": "*",
+    "@airways/database": "*",
     "dotenv": "^16.0.0",
     "geo-tz": "^8.1.5",
     "suncalc": "^1.9.0"

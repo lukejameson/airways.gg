@@ -24,7 +24,7 @@ if (envPath) {
 }
 
 import { scrapeOnce, scrapeMultipleDates, guernseyDateStr } from './scraper';
-import { db, scraperLogs, flights, flightTimes } from '@delays/database';
+import { db, scraperLogs, flights, flightTimes } from '@airways/database';
 import { eq, and, not, inArray, asc, desc, count } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------

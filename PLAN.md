@@ -1,4 +1,4 @@
-# delays.gg - Build Spec
+# airways.gg - Build Spec
 
 ## What It Does
 Flight delay prediction platform for Guernsey's Aurigny airline. Shows live arrivals/departures with ML-powered delay predictions based on weather data and 5+ years of historical flight performance. Mobile-first live departure board for locals and tourists (hundreds of daily users).

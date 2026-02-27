@@ -16,7 +16,7 @@
 </script>
 
 <svelte:head>
-  <title>Login — delays.gg</title>
+  <title>Login — airways.gg</title>
   <meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
@@ -24,7 +24,7 @@
   <div class="w-full max-w-sm">
     <div class="mb-8 text-center">
       <a href="/" class="inline-flex items-center gap-2 font-bold text-2xl mb-4">
-        <span>delays.gg</span>
+        <span>airways.gg</span>
       </a>
       <h1 class="text-2xl font-semibold tracking-tight">Sign in</h1>
       <p class="text-sm text-muted-foreground mt-1">Enter your credentials to access your account</p>

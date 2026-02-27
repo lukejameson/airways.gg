@@ -90,14 +90,14 @@
   });
 
   // SEO
-  const seoTitle = $derived(`${flight.flightNumber} · ${flight.departureAirport} → ${flight.arrivalAirport} — delays.gg`);
+  const seoTitle = $derived(`${flight.flightNumber} · ${flight.departureAirport} → ${flight.arrivalAirport} — airways.gg`);
   const seoDate = $derived(
     flight.scheduledDeparture
       ? new Date(flight.scheduledDeparture).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
       : ''
   );
   const seoDescription = $derived(
-    `${flight.flightNumber} from ${flight.departureAirport} to ${flight.arrivalAirport}${seoDate ? ` on ${seoDate}` : ''}${formattedDelay ? ` · Delayed ${formattedDelay}` : ''}. Track live flight status and delay predictions on delays.gg.`
+    `${flight.flightNumber} from ${flight.departureAirport} to ${flight.arrivalAirport}${seoDate ? ` on ${seoDate}` : ''}${formattedDelay ? ` · Delayed ${formattedDelay}` : ''}. Track live flight status and delay predictions on airways.gg.`
   );
   const seoCanonical = $derived(`${data.siteUrl}/flights/${flight.id}`);
 
@@ -377,7 +377,7 @@
 
   async function shareFlight() {
     const shareData = {
-      title: `${flight.flightNumber} — delays.gg`,
+      title: `${flight.flightNumber} — airways.gg`,
       text: `Track ${flight.flightNumber} from ${airportName(flight.departureAirport)} to ${airportName(flight.arrivalAirport)}`,
       url: window.location.href,
     };

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { flights, delayPredictions } from '@delays/database';
+  import type { flights, delayPredictions } from '@airways/database';
   import { airportName } from '$lib/airports';
   import Icon from './Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';

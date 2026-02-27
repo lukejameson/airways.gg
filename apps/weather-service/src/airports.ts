@@ -1,4 +1,4 @@
-import { db, airports } from '@delays/database';
+import { db, airports } from '@airways/database';
 import { inArray, sql } from 'drizzle-orm';
 
 const OURAIRPORTS_URL = 'https://raw.githubusercontent.com/davidmegginson/ourairports-data/main/airports.csv';

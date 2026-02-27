@@ -1,4 +1,4 @@
-import { db, weatherData, flights, airportDaylight, airports } from '@delays/database';
+import { db, weatherData, flights, airportDaylight, airports } from '@airways/database';
 import { sql, eq, inArray } from 'drizzle-orm';
 import { getIcaoMapping } from './airports';
 import SunCalc from 'suncalc';

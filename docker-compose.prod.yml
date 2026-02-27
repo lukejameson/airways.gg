@@ -23,11 +23,11 @@ services:
       - PUBLIC_UMAMI_URL=${PUBLIC_UMAMI_URL}
     labels:
       - 'traefik.enable=true'
-      - 'traefik.http.routers.delaysgg-prod.rule=Host(`${DOMAIN}`)'
-      - 'traefik.http.routers.delaysgg-prod.entrypoints=websecure'
-      - 'traefik.http.routers.delaysgg-prod.tls=true'
-      - 'traefik.http.routers.delaysgg-prod.tls.certresolver=letsencrypt'
-      - 'traefik.http.services.delaysgg-prod.loadbalancer.server.port=3000'
+      - 'traefik.http.routers.airwaysgg-prod.rule=Host(`${DOMAIN}`)'
+      - 'traefik.http.routers.airwaysgg-prod.entrypoints=websecure'
+      - 'traefik.http.routers.airwaysgg-prod.tls=true'
+      - 'traefik.http.routers.airwaysgg-prod.tls.certresolver=letsencrypt'
+      - 'traefik.http.services.airwaysgg-prod.loadbalancer.server.port=3000'
     depends_on:
       - ml-service
     networks:

@@ -3,7 +3,7 @@ import type { LayoutServerLoad } from './$types';
 import { db, airports } from '$lib/server/db';
 
 export const load: LayoutServerLoad = async ({ locals }) => {
-  const domain = env.DOMAIN || 'delays.gg';
+  const domain = env.DOMAIN || 'airways.gg';
   
   const airportRows = await db
     .select({

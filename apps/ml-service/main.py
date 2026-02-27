@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import os
 
-app = FastAPI(title="delays.gg ML Service")
+app = FastAPI(title="airways.gg ML Service")
 
 class PredictionRequest(BaseModel):
     flight_id: int

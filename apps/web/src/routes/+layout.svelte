@@ -24,13 +24,13 @@
   <link rel="canonical" href={siteUrl} />
 
   <!-- Open Graph defaults -->
-  <meta property="og:site_name" content="delays.gg" />
+  <meta property="og:site_name" content="airways.gg" />
   <meta property="og:type" content="website" />
   <meta property="og:url" content={siteUrl} />
   <meta property="og:image" content="{siteUrl}/android-chrome-512x512.png" />
   <meta property="og:image:width" content="512" />
   <meta property="og:image:height" content="512" />
-  <meta property="og:image:alt" content="delays.gg logo" />
+  <meta property="og:image:alt" content="airways.gg logo" />
 
   <!-- Twitter / X Card defaults -->
   <meta name="twitter:card" content="summary" />
@@ -53,7 +53,7 @@
   <header class="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
     <div class="container flex h-14 items-center">
       <a href="/" class="mr-6 flex items-center space-x-2">
-        <span class="font-bold text-xl">delays.gg</span>
+        <span class="font-bold text-xl">airways.gg</span>
       </a>
 
       <nav class="flex flex-1 items-center space-x-6 text-sm font-medium">
@@ -85,7 +85,7 @@
   <footer class="border-t py-6 md:py-0">
     <div class="container flex flex-col items-center justify-between gap-4 md:h-14 md:flex-row">
       <p class="text-sm text-muted-foreground">
-        &copy; {new Date().getFullYear()} delays.gg &mdash; Flight delay predictions for Guernsey
+        &copy; {new Date().getFullYear()} airways.gg &mdash; Flight tracking for Guernsey
       </p>
     </div>
   </footer>

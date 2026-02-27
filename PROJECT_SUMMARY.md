@@ -1,4 +1,4 @@
-# delays.gg — Project Summary
+# airways.gg — Project Summary
 
 A public flight tracking and delay prediction platform focused exclusively on **Guernsey Airport (GCI)** and **Aurigny Air Services**.
 

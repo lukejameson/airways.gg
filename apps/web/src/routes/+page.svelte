@@ -185,18 +185,18 @@
 
 <svelte:head>
   {#if isViewingTomorrow}
-    <title>delays.gg — Tomorrow's Flights (Guernsey)</title>
+    <title>airways.gg — Tomorrow's Flights (Guernsey)</title>
     <meta name="description" content="Tomorrow's departures and arrivals for Guernsey Airport (GCI) with AI-powered delay predictions." />
-    <meta property="og:title" content="delays.gg — Tomorrow's Flights" />
+    <meta property="og:title" content="airways.gg — Tomorrow's Flights" />
     <meta property="og:description" content="Tomorrow's departures and arrivals for Guernsey Airport (GCI) with AI-powered delay predictions." />
-    <meta name="twitter:title" content="delays.gg — Tomorrow's Flights" />
+    <meta name="twitter:title" content="airways.gg — Tomorrow's Flights" />
     <meta name="twitter:description" content="Tomorrow's departures and arrivals for Guernsey Airport (GCI) with AI-powered delay predictions." />
   {:else}
-    <title>delays.gg — Live Flight Board</title>
+    <title>airways.gg — Live Flight Board</title>
     <meta name="description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
-    <meta property="og:title" content="delays.gg — Live Flight Board" />
+    <meta property="og:title" content="airways.gg — Live Flight Board" />
     <meta property="og:description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
-    <meta name="twitter:title" content="delays.gg — Live Flight Board" />
+    <meta name="twitter:title" content="airways.gg — Live Flight Board" />
     <meta name="twitter:description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
   {/if}
   <link rel="canonical" href={data.siteUrl} />

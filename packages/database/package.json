@@ -1,7 +1,7 @@
 {
-  "name": "@delays/database",
+  "name": "@airways/database",
   "version": "1.0.0",
-  "description": "Database schema and connection for delays.gg",
+  "description": "Database schema and connection for airways.gg",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

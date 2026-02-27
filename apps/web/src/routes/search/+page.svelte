@@ -29,7 +29,7 @@
 </script>
 
 <svelte:head>
-  <title>{hasSearch ? `"${data.query || data.date}" — Search · delays.gg` : 'Search Flights — delays.gg'}</title>
+  <title>{hasSearch ? `"${data.query || data.date}" — Search · airways.gg` : 'Search Flights — airways.gg'}</title>
   <meta name="description" content="Search Guernsey Airport flights by flight number, airline, or airport code. Find live status and delay predictions for any Aurigny or connecting flight." />
   <link rel="canonical" href="{data.siteUrl}/search" />
   <!-- Don't index search result pages — only the bare /search UI -->
@@ -37,11 +37,11 @@
     <meta name="robots" content="noindex, follow" />
   {/if}
 
-  <meta property="og:title" content="Search Flights — delays.gg" />
+  <meta property="og:title" content="Search Flights — airways.gg" />
   <meta property="og:description" content="Search Guernsey Airport flights by flight number, airline, or airport code." />
   <meta property="og:url" content="{data.siteUrl}/search" />
 
-  <meta name="twitter:title" content="Search Flights — delays.gg" />
+  <meta name="twitter:title" content="Search Flights — airways.gg" />
   <meta name="twitter:description" content="Search Guernsey Airport flights by flight number, airline, or airport code." />
 </svelte:head>
 

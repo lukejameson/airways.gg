@@ -1,4 +1,4 @@
-import { db, flights, aircraftPositions, airports } from '@delays/database';
+import { db, flights, aircraftPositions, airports } from '@airways/database';
 import { and, gte, lte, or, eq, desc, isNotNull, not, inArray } from 'drizzle-orm';
 
 const FR24_BASE = 'https://fr24api.flightradar24.com';
