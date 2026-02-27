@@ -134,6 +134,8 @@ export const flightNotes = pgTable('flight_notes', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (table) => [
   index('flight_notes_flight_id_idx').on(table.flightId),
+  // Natural dedup key — prevents re-inserting the same note on every scrape cycle
+  uniqueIndex('flight_notes_unique_idx').on(table.flightId, table.timestamp),
 ]);
 
 export const flightStatusHistory = pgTable('flight_status_history', {

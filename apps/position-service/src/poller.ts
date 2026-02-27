@@ -172,27 +172,32 @@ function deriveStatusFromFR24(
   return null;
 }
 
-// Airport coordinates cache — populated from DB on first use
+// Airport coordinates cache — refreshed once per day (service may run across midnight)
 let airportCoordsCache: Map<string, [number, number]> | null = null;
+let airportCoordsCacheDate = ''; // YYYY-MM-DD UTC date the cache was last populated
 
 async function getAirportCoords(iataCodes: string[]): Promise<Map<string, [number, number]>> {
-  if (!airportCoordsCache) {
-    // Load all airport coords from DB once
+  const todayUtc = new Date().toISOString().split('T')[0];
+  if (!airportCoordsCache || airportCoordsCacheDate !== todayUtc) {
+    // (Re-)load all airport coords from DB once per UTC day
     const rows = await db
       .select({ iataCode: airports.iataCode, icaoCode: airports.icaoCode, latitude: airports.latitude, longitude: airports.longitude })
       .from(airports);
-    airportCoordsCache = new Map();
+    const cache = new Map<string, [number, number]>();
     for (const row of rows) {
       if (row.latitude != null && row.longitude != null) {
-        airportCoordsCache.set(row.iataCode, [row.latitude, row.longitude]);
-        if (row.icaoCode) airportCoordsCache.set(row.icaoCode, [row.latitude, row.longitude]);
+        cache.set(row.iataCode, [row.latitude, row.longitude]);
+        if (row.icaoCode) cache.set(row.icaoCode, [row.latitude, row.longitude]);
       }
     }
-    console.log(`[Position] Loaded ${airportCoordsCache.size} airport coordinate entries from DB`);
+    airportCoordsCache = cache;
+    airportCoordsCacheDate = todayUtc;
+    console.log(`[Position] Loaded ${cache.size} airport coordinate entries from DB`);
   }
+  const cache = airportCoordsCache;
   const result = new Map<string, [number, number]>();
   for (const code of iataCodes) {
-    const coords = airportCoordsCache.get(code);
+    const coords = cache.get(code);
     if (coords) result.set(code, coords);
   }
   return result;
@@ -417,10 +422,12 @@ export async function pollPositions(): Promise<number> {
     const ownDbMap = await inferPositionsFromOwnDb(regsNeedingInfer);
     console.log(`[Position] Own-DB inferred ${ownDbMap.size}/${regsNeedingInfer.length} aircraft`);
 
-    // Mark all queried registrations as done
+    // Mark all queried registrations as done — also store without hyphens so
+    // lookups work regardless of whether the stored reg uses G-PBOT or GPBOT format.
+    // Use /g flag to replace ALL hyphens (string literal arg only removes the first).
     for (const reg of regsNeedingInfer) {
       lastInferTimes.set(reg, nowMs);
-      lastInferTimes.set(reg.replace('-', ''), nowMs);
+      lastInferTimes.set(reg.replace(/-/g, ''), nowMs);
     }
 
     // Collect all airport codes we need coords for

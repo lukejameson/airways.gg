@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /login
+Disallow: /api/
+
+Sitemap: https://airways.gg/sitemap.xml

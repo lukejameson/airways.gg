@@ -222,6 +222,7 @@ export const load: PageServerLoad = async ({ url }) => {
       weather: null, 
       weatherMap: {},
       daylightMap: {},
+      lastUpdated: now,
       displayDate: displayDateStr,
       todayStr,
       tomorrowStr,

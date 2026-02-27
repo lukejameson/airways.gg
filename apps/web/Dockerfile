@@ -25,6 +25,10 @@ RUN npm run build
 WORKDIR /app/apps/web
 RUN npm run build
 
+# Prune devDependencies before copying to the production image
+WORKDIR /app
+RUN npm prune --production
+
 # Production stage
 FROM node:20-alpine
 
@@ -39,4 +43,5 @@ COPY --from=builder /app/packages/database ./packages/database
 
 EXPOSE 3000
 ENV NODE_ENV=production
-CMD ["sh", "-c", "cd /app/packages/database && npx drizzle-kit migrate || true && cd /app && node --import ./preload-env.js build"]
+# Run migrations (fail fast on error — do not use || true) then start the app
+CMD ["sh", "-c", "cd /app/packages/database && npx drizzle-kit migrate && cd /app && node --import ./preload-env.js build"]

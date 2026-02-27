@@ -43,13 +43,15 @@ async function main() {
   await fetchAllWeather();
 
   // Schedule full weather refresh (baseline for all airports)
-  setInterval(async () => {
-    await fetchAllWeather();
+  setInterval(() => {
+    fetchAllWeather().catch(err => console.error('[Weather] Full refresh failed:', err));
   }, INTERVAL_MS);
 
   // Schedule frequent checks for upcoming flights to refresh weather 15 min before departure/arrival
-  setInterval(async () => {
-    await fetchWeatherForUpcomingFlights();
+  setInterval(() => {
+    fetchWeatherForUpcomingFlights().catch(err =>
+      console.error('[Weather] Upcoming-flights refresh failed:', err),
+    );
   }, UPCOMING_CHECK_INTERVAL_MS);
 }
 

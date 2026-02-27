@@ -25,7 +25,7 @@ if (envPath) {
 
 import { scrapeOnce, scrapeMultipleDates, guernseyDateStr } from './scraper';
 import { db, scraperLogs, flights, flightTimes } from '@airways/database';
-import { eq, and, not, inArray, asc, desc, count } from 'drizzle-orm';
+import { eq, and, not, inArray, asc, desc, count, max } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -287,26 +287,35 @@ async function getActiveFlightsToday() {
 }
 
 /**
- * Looks up the estimated departure/arrival time for a flight from flight_times.
+ * Batch-fetches estimated departure/arrival times for multiple flights in one query.
  * Aurigny publishes EstimatedBlockOff (departure) and EstimatedBlockOn (arrival).
+ * Returns a Map keyed by flightId.
  */
-async function getEstimatedTimes(flightId: number): Promise<{ estDep?: Date; estArr?: Date }> {
+async function getEstimatedTimesBatch(
+  flightIds: number[],
+): Promise<Map<number, { estDep?: Date; estArr?: Date }>> {
+  const result = new Map<number, { estDep?: Date; estArr?: Date }>();
+  if (flightIds.length === 0) return result;
   try {
     const rows = await db
-      .select({ timeType: flightTimes.timeType, timeValue: flightTimes.timeValue })
+      .select({ flightId: flightTimes.flightId, timeType: flightTimes.timeType, timeValue: flightTimes.timeValue })
       .from(flightTimes)
       .where(
         and(
-          eq(flightTimes.flightId, flightId),
+          inArray(flightTimes.flightId, flightIds),
           inArray(flightTimes.timeType, ['EstimatedBlockOff', 'EstimatedBlockOn']),
         ),
       );
-    const estDep = rows.find(r => r.timeType === 'EstimatedBlockOff')?.timeValue ?? undefined;
-    const estArr = rows.find(r => r.timeType === 'EstimatedBlockOn')?.timeValue ?? undefined;
-    return { estDep: estDep ? new Date(estDep) : undefined, estArr: estArr ? new Date(estArr) : undefined };
+    for (const row of rows) {
+      const entry = result.get(row.flightId) ?? {};
+      if (row.timeType === 'EstimatedBlockOff') entry.estDep = new Date(row.timeValue);
+      if (row.timeType === 'EstimatedBlockOn') entry.estArr = new Date(row.timeValue);
+      result.set(row.flightId, entry);
+    }
   } catch {
-    return {};
+    // Return empty map on error — caller falls back to scheduled times
   }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -369,8 +378,11 @@ async function computeNextInterval(): Promise<{ ms: number; jitterMs: number; re
   let soonestEventMs = Infinity;
   let soonestFlight = '';
 
+  // Batch-fetch all estimated times in a single query instead of N per-flight queries
+  const estimatedTimesMap = await getEstimatedTimesBatch(activeFlights.map(f => f.id));
+
   for (const f of activeFlights) {
-    const { estDep, estArr } = await getEstimatedTimes(f.id);
+    const { estDep, estArr } = estimatedTimesMap.get(f.id) ?? {};
     let nextEventMs: number | null = null;
 
     if (!f.actualDeparture) {
@@ -455,6 +467,28 @@ async function shouldSleep(): Promise<{ sleep: boolean; reason: string }> {
 
   const activeFlights = await getActiveFlightsToday();
   if (activeFlights.length === 0) {
+    // All flights appear terminal — but only trust this if the data is fresh.
+    // If updatedAt on today's flights is older than 2 hours, the statuses may
+    // be stale (e.g. container restarted with old DB data from a previous day).
+    // In that case, keep scraping to get fresh statuses before sleeping.
+    try {
+      const [{ lastUpdate }] = await db
+        .select({ lastUpdate: max(flights.updatedAt) })
+        .from(flights)
+        .where(eq(flights.flightDate, today));
+
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      if (!lastUpdate || new Date(lastUpdate) < twoHoursAgo) {
+        return {
+          sleep: false,
+          reason: `All flights appear terminal but data is stale (last update: ${lastUpdate ?? 'never'}) — scraping to refresh`,
+        };
+      }
+    } catch {
+      // On DB error, don't sleep — safer to keep scraping
+      return { sleep: false, reason: 'Could not verify data freshness — staying active' };
+    }
+
     return {
       sleep: true,
       reason: `All ${totalToday} flights for ${today} are in terminal status`,
@@ -755,7 +789,10 @@ async function runBackgroundPrefetch(): Promise<void> {
  * and schedules a timeout for it. If a live scrape fires within PREFETCH_BUNDLE_WINDOW_MINS
  * of the slot, it will bundle tomorrow's data into that scrape instead of running standalone.
  */
-let slotRetryCount = 0;
+// slotRetryCount is intentionally scoped outside the recursive function so
+// retry state persists across recursive invocations of schedulePrefetchSlot.
+// It is private to this module and only touched by schedulePrefetchSlot.
+let _slotRetryCount = 0;
 
 async function schedulePrefetchSlot(): Promise<void> {
   const SLOT_HOURS = [0, 6, 12, 18]; // GY local hours
@@ -795,9 +832,9 @@ async function schedulePrefetchSlot(): Promise<void> {
     timers.prefetchSlotTimeout = null;
     
     // Check if we've exceeded max retries
-    if (slotRetryCount >= MAX_SLOT_RETRIES) {
+    if (_slotRetryCount >= MAX_SLOT_RETRIES) {
       console.error(`[Aurigny] Max slot retries (${MAX_SLOT_RETRIES}) exceeded, skipping this slot`);
-      slotRetryCount = 0;
+      _slotRetryCount = 0;
       await schedulePrefetchSlot();
       return;
     }
@@ -807,20 +844,20 @@ async function schedulePrefetchSlot(): Promise<void> {
       if (!prefetchState.claimed) {
         console.log('[Aurigny] Prefetch slot fired (not bundled with live scrape) — running standalone');
         await runBackgroundPrefetch();
-        slotRetryCount = 0; // Reset on success
+        _slotRetryCount = 0; // Reset on success
       } else {
         console.log('[Aurigny] Prefetch slot fired (already bundled with live scrape)');
-        slotRetryCount = 0; // Reset on success
+        _slotRetryCount = 0; // Reset on success
       }
 
       // Reschedule the next slot
       await schedulePrefetchSlot();
     } catch (err) {
-      slotRetryCount++;
-      console.error(`[Aurigny] Error in prefetch slot timeout (attempt ${slotRetryCount}/${MAX_SLOT_RETRIES}):`, err);
+      _slotRetryCount++;
+      console.error(`[Aurigny] Error in prefetch slot timeout (attempt ${_slotRetryCount}/${MAX_SLOT_RETRIES}):`, err);
       
       // Exponential backoff before retrying
-      const backoffMs = getBackoffDelay(slotRetryCount);
+      const backoffMs = getBackoffDelay(_slotRetryCount);
       console.log(`[Aurigny] Retrying slot scheduling in ${Math.round(backoffMs / 1000)}s`);
       
       setTimeout(async () => {
@@ -876,7 +913,9 @@ async function main() {
         console.log('[Aurigny] Running delayed startup prefetch to load tomorrow\'s schedule...');
         const today = guernseyDateStr();
         const tomorrow = guernseyTomorrowStr();
-        const result = await scrapeMultipleDates([today, tomorrow], 'aurigny_live');
+        // Use 'aurigny_prefetch' so msSinceLastScrape (which queries 'aurigny_live')
+        // doesn't see this as a recent live scrape and skip the initial live poll.
+        const result = await scrapeMultipleDates([today, tomorrow], 'aurigny_prefetch');
         if (result.success) {
           console.log(`[Aurigny] Delayed startup prefetch complete: ${result.count} flights upserted`);
           recordSuccess();

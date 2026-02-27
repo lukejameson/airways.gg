@@ -22,6 +22,10 @@ RUN npm run build
 WORKDIR /app/apps/aurigny-scraper
 RUN npm run build
 
+# Prune devDependencies before copying to the production image
+WORKDIR /app
+RUN npm prune --production
+
 # Runtime stage
 FROM node:20-slim
 

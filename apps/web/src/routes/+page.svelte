@@ -64,11 +64,12 @@
     showCompleted = $page.url.searchParams.get('completed') === '1';
   });
 
-  // Simulate loading state
+  // Simulate loading state — resolves as soon as server data arrives,
+  // even when there are zero flights (avoids permanent skeleton)
   $effect(() => {
-    if (data.flights.length > 0) {
-      isLoading = false;
-    }
+    // Touch data.flights to create the reactive dependency
+    void data.flights;
+    isLoading = false;
   });
 
   function setTab(tab: 'departures' | 'arrivals') {
@@ -131,13 +132,13 @@
   let activeFilters = $state<string[]>([]);
   let recentlyViewed = $state<Array<{id: number; flightNumber: string; departureAirport: string; arrivalAirport: string; scheduledDeparture: string; viewedAt: string}>>([]);
 
-  const now = new Date();
-  const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
-
   const filteredFlights = $derived.by(() => {
     let flights = visibleFlights;
 
     if (activeFilters.includes('next-hour')) {
+      // Recompute "now" on each derivation so the filter never goes stale
+      const now = new Date();
+      const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
       flights = flights.filter((f: (typeof data.flights)[0]) => {
         const depTime = new Date(f.scheduledDeparture);
         return depTime >= now && depTime <= oneHourFromNow;

@@ -117,7 +117,10 @@ function randomDelay(min: number, max: number): Promise<void> {
 async function simulateHumanBehavior(page: any): Promise<void> {
   const scrollCount = Math.floor(Math.random() * 3) + 1;
   for (let i = 0; i < scrollCount; i++) {
-    await page.evaluate(new Function('amount', 'window.scrollBy(0, amount)') as (a: number) => void, Math.floor(Math.random() * 300) + 100);
+    // Use an arrow function — avoids new Function() / eval equivalence
+    // Cast to any so the Node TS compiler doesn't complain about `window`; this runs inside the browser.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await page.evaluate((amount: number) => (globalThis as any).window.scrollBy(0, amount), Math.floor(Math.random() * 300) + 100);
     await randomDelay(500, 1500);
   }
   for (let i = 0; i < Math.floor(Math.random() * 5) + 3; i++) {
@@ -195,8 +198,14 @@ function parseFlightXml(xmlData: string): ScrapedFlight[] {
         }
       }
 
+      const uniqueId = String(f.UniqueId || '');
+      if (!uniqueId) {
+        console.warn('[Aurigny] Skipping flight with missing UniqueId:', f.FlightNumber);
+        continue;
+      }
+
       parsed.push({
-        uniqueId: String(f.UniqueId || ''),
+        uniqueId,
         airlineCode: String(f.AirlineCode || ''),
         flightNumber: `${f.AirlineCode || ''}${f.FlightNumber || ''}`,
         departureAirport: String(f.DepartureAirportCode || ''),
@@ -285,7 +294,11 @@ async function upsertFlights(scrapedFlights: ScrapedFlight[]): Promise<number> {
           .onConflictDoNothing();
       }
       for (const n of flight.notes) {
-        await db.insert(flightNotes).values({ flightId, timestamp: n.timestamp, noteType: n.type, message: n.message });
+        // Use onConflictDoNothing — (flightId, timestamp) is a natural dedup key.
+        // Without this, every scrape cycle appended duplicate note rows.
+        await db.insert(flightNotes)
+          .values({ flightId, timestamp: n.timestamp, noteType: n.type, message: n.message })
+          .onConflictDoNothing();
       }
 
       count++;
@@ -379,19 +392,24 @@ async function runBrowserSession(
 
       let responseCount = 0;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      page.on('response', async (response: any) => {
+      const onResponse = async (response: any) => {
         try {
           responseCount++;
           const url: string = response.url();
           if (url.includes('/api/schedule') && response.status() === 200) {
             const body = await response.text();
-            if (body && body.length > 100 && !url.includes('arr_dep=arr')) {
+            // Only capture departures (not arrivals) and only once —
+            // subsequent in-page fetches also fire this listener, causing
+            // duplicate logs and wrong-date captures without the off() guard.
+            if (!primaryDeparturesData && body && body.length > 100 && !url.includes('arr_dep=arr')) {
               primaryDeparturesData = body;
+              page.off('response', onResponse); // stop listening — we have what we need
               console.log(`[Aurigny] Captured departures for ${primaryDate} (${body.length} bytes)`);
             }
           }
         } catch { /* ignore */ }
-      });
+      };
+      page.on('response', onResponse);
 
       console.log('[Aurigny] Loading page...');
       page.goto('https://www.aurigny.com/information/arrivals-departures', {
@@ -445,16 +463,22 @@ async function runBrowserSession(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const inPageFetch = async (date: string, arrDep: 'arr' | 'dep'): Promise<string | null> => {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const body = await page.evaluate(new Function('date', 'arrDep', `
-            return fetch('/api/schedule?airport=GCI&arr_dep=' + arrDep + '&date=' + date + '&recaptchaToken=none&recaptchaVerified=false', {
-              headers: {
-                'Accept': '*/*',
-                'Referer': 'https://www.aurigny.com/information/arrivals-departures',
-              },
-              credentials: 'include',
-            }).then(function(r) { return r.ok ? r.text() : null; }).catch(function() { return null; });
-          `) as (d: string, a: string) => Promise<string | null>, date, arrDep);
+          // Arrow function passed to page.evaluate — arguments are serialised by puppeteer,
+          // so date/arrDep are safe. Avoids new Function() / eval equivalence.
+          const body = await page.evaluate(
+            (d: string, a: string) =>
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (globalThis as any).fetch(
+                `/api/schedule?airport=GCI&arr_dep=${a}&date=${d}&recaptchaToken=none&recaptchaVerified=false`,
+                {
+                  headers: { 'Accept': '*/*', 'Referer': 'https://www.aurigny.com/information/arrivals-departures' },
+                  credentials: 'include',
+                },
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              ).then((r: any) => (r.ok ? r.text() : null)).catch(() => null) as Promise<string | null>,
+            date,
+            arrDep,
+          );
 
           if (body && body.length > 100) {
             console.log(`[Aurigny] Fetched ${arrDep === 'arr' ? 'arrivals' : 'departures'} for ${date} (${body.length} bytes)`);

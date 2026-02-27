@@ -21,6 +21,10 @@ RUN npm run build
 WORKDIR /app/apps/weather-service
 RUN npm run build
 
+# Prune devDependencies before copying to the production image
+WORKDIR /app
+RUN npm prune --production
+
 # Production stage
 FROM node:20-alpine
 

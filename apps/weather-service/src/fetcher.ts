@@ -89,7 +89,8 @@ function parseWeatherString(text: string): ParsedConditions {
 
 function getCloudCoverPercent(data: ParsedConditions): number {
   if (!data.cover || data.cover.length === 0) {
-    return data.visib === 10 ? 0 : 0;
+    // No cloud layer data parsed — assume clear (CAVOK or NSC were set)
+    return 0;
   }
   
   const layerCoverage: Record<string, number> = {
@@ -265,20 +266,23 @@ async function fetchAllTafs(airports: { code: string; icao: string }[]): Promise
     const endHour = parseInt(periodMatch[4]);
     let conditionsText = periodMatch[5];
 
-    // Handle month rollover
+    // Handle month rollover — use local variables so the outer currentYear/Month
+    // are never mutated (a previous bug caused all subsequent TAFs in the same
+    // response to use the wrong year once a single TAF triggered a year increment).
+    let tafYear = currentYear;
     let startMonth = currentMonth;
     let endMonth = currentMonth;
 
     if (startDay < currentDay && currentDay > 25) {
       startMonth = (currentMonth + 1) % 12;
-      if (startMonth === 0) currentYear++;
+      if (startMonth === 0) tafYear++;
     }
     if (endDay < startDay) {
       endMonth = (startMonth + 1) % 12;
     }
 
-    const startDate = new Date(Date.UTC(currentYear, startMonth, startDay, startHour));
-    const endDate = new Date(Date.UTC(currentYear, endMonth, endDay, endHour));
+    const startDate = new Date(Date.UTC(tafYear, startMonth, startDay, startHour));
+    const endDate = new Date(Date.UTC(tafYear, endMonth, endDay, endHour));
 
     // Check for BECMG (becoming) - gradual change during period
     const becmgMatch = tafText.match(/BECMG\s+(\d{2})(\d{2})\/(\d{2})(\d{2})\s+(.+)/);
@@ -316,15 +320,16 @@ async function fetchAllTafs(airports: { code: string; icao: string }[]): Promise
 }
 
 async function getAirportsFromFlights(): Promise<{ code: string; icao: string }[]> {
-  // Get today's and tomorrow's date ranges in UTC (flights are stored in UTC)
+  // Use flightDate (YYYY-MM-DD in Guernsey local time) rather than scheduledDeparture
+  // timestamp ranges. Querying by timestamp misses flights whose scheduledArrival
+  // crosses midnight UTC (e.g. a late departure arriving after 00:00 UTC the next day).
   const now = new Date();
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const tomorrow = new Date(today);
-  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-  const dayAfterTomorrow = new Date(tomorrow);
-  dayAfterTomorrow.setUTCDate(dayAfterTomorrow.getUTCDate() + 1);
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(now);
+  const tomorrowDate = new Date(now);
+  tomorrowDate.setUTCDate(tomorrowDate.getUTCDate() + 1);
+  const tomorrowStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(tomorrowDate);
 
-  // Query unique airports from today's AND tomorrow's flights
+  // Query unique airports from today's AND tomorrow's flights by Guernsey date
   const todaysFlights = await db
     .select({
       departureAirport: flights.departureAirport,
@@ -332,7 +337,7 @@ async function getAirportsFromFlights(): Promise<{ code: string; icao: string }[
     })
     .from(flights)
     .where(
-      sql`${flights.scheduledDeparture} >= ${today} AND ${flights.scheduledDeparture} < ${dayAfterTomorrow}`
+      sql`${flights.flightDate} IN (${todayStr}, ${tomorrowStr})`
     );
 
   // Collect unique airport codes
@@ -406,26 +411,16 @@ async function calculateAndStoreDaylight(airportLocations: AirportLocation[]): P
   }[] = [];
 
   for (const airport of airportLocations) {
-    // Calculate for today - getTimes returns times in local system time (Europe/London)
-    // We need to convert them to UTC for proper comparison with flight times
+    // SunCalc.getTimes() already returns standard JS Date objects (UTC-based).
+    // No conversion needed — do NOT apply getTimezoneOffset(); doing so was a
+    // double-conversion bug that shifted times by ±60 min during BST.
     const todayTimes = SunCalc.getTimes(today, airport.latitude, airport.longitude);
     const tomorrowTimes = SunCalc.getTimes(tomorrow, airport.latitude, airport.longitude);
 
-    // Convert local system time to UTC
-    // getTimezoneOffset() returns the offset in minutes between UTC and local time
-    // For Europe/London: GMT (winter) = 0, BST (summer) = -60
-    const timezoneOffsetMinutes = todayTimes.sunrise.getTimezoneOffset();
-
-    const convertToUtc = (localDate: Date): Date => {
-      // Add the offset to convert local time to UTC
-      // Example: 17:40 BST (local) with offset -60 -> 16:40 UTC
-      return new Date(localDate.getTime() + timezoneOffsetMinutes * 60000);
-    };
-
-    const todaySunriseUtc = convertToUtc(todayTimes.sunrise);
-    const todaySunsetUtc = convertToUtc(todayTimes.sunset);
-    const tomorrowSunriseUtc = convertToUtc(tomorrowTimes.sunrise);
-    const tomorrowSunsetUtc = convertToUtc(tomorrowTimes.sunset);
+    const todaySunriseUtc = todayTimes.sunrise;
+    const todaySunsetUtc = todayTimes.sunset;
+    const tomorrowSunriseUtc = tomorrowTimes.sunrise;
+    const tomorrowSunsetUtc = tomorrowTimes.sunset;
 
     daylightRows.push({
       airportCode: airport.code,

@@ -13,7 +13,18 @@ export function getDb(): DbClient {
   if (_db) return _db;
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is not set');
-  _db = drizzle(new Pool({ connectionString: url }), { schema });
+  _db = drizzle(
+    new Pool({
+      connectionString: url,
+      // Keep pool small per-service so 6 services don't exhaust PostgreSQL's
+      // default max_connections (typically 100). Each service gets up to 5
+      // connections; peak total = 30, leaving headroom for admin tools.
+      max: 5,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 5_000,
+    }),
+    { schema },
+  );
   return _db;
 }
 
