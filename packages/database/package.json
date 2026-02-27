@@ -1,6 +1,7 @@
 {
   "name": "@airways/database",
   "version": "1.0.0",
+  "type": "module",
   "description": "Database schema and connection for airways.gg",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -39,11 +39,10 @@ COPY --from=builder /app/apps/web/build ./build
 COPY --from=builder /app/apps/web/preload-env.js ./
 COPY --from=builder /app/apps/web/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
-# Copy the database package — we need the migrations folder and the ESM migrate
-# script. drizzle-orm is a production dep so the migrator runs without drizzle-kit.
-COPY --from=builder /app/packages/database/migrations ./packages/database/migrations
-COPY --from=builder /app/packages/database/migrate.js ./packages/database/migrate.js
-COPY --from=builder /app/packages/database/package*.json ./packages/database/
+# Copy the database package — dist/ is required at runtime by the SvelteKit build,
+# migrations/ + migrate.js are required for the startup migration runner.
+# We copy the whole package (post-prune) so all built artefacts are present.
+COPY --from=builder /app/packages/database ./packages/database
 
 EXPOSE 3000
 ENV NODE_ENV=production
