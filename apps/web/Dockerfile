@@ -34,14 +34,19 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy only the built SvelteKit output (adapter-node produces a self-contained build/)
+# Copy the built SvelteKit output (adapter-node produces a self-contained build/)
 COPY --from=builder /app/apps/web/build ./build
 COPY --from=builder /app/apps/web/preload-env.js ./
 COPY --from=builder /app/apps/web/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages/database ./packages/database
+# Copy the database package — we need the migrations folder and the ESM migrate
+# script. drizzle-orm is a production dep so the migrator runs without drizzle-kit.
+COPY --from=builder /app/packages/database/migrations ./packages/database/migrations
+COPY --from=builder /app/packages/database/migrate.js ./packages/database/migrate.js
+COPY --from=builder /app/packages/database/package*.json ./packages/database/
 
 EXPOSE 3000
 ENV NODE_ENV=production
-# Run migrations (fail fast on error — do not use || true) then start the app
-CMD ["sh", "-c", "cd /app/packages/database && npx drizzle-kit migrate && cd /app && node --import ./preload-env.js build"]
+# Run migrations via the programmatic migrator (no drizzle-kit needed at runtime),
+# then start the SvelteKit app.
+CMD ["sh", "-c", "node /app/packages/database/migrate.js && node --import ./preload-env.js build"]
