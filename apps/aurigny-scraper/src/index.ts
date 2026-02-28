@@ -504,6 +504,55 @@ async function shouldSleep(): Promise<{ sleep: boolean; reason: string }> {
 
 /** Computes when the scraper should wake up after entering sleep. */
 async function computeWakeTime(): Promise<{ wakeAt: Date; reason: string }> {
+  const now = new Date();
+  const today = guernseyDateStr();
+
+  // ── Step 1: check TODAY first ────────────────────────────────────────────
+  // This is the key fix: the old code always queried "tomorrow", which caused
+  // the midnight prefetch to push the wake time to the day after today,
+  // skipping the entire current operating day.
+  if (guernseyHour() < CUTOFF_HOUR) {
+    try {
+      const activeToday = await getActiveFlightsToday();
+      if (activeToday.length > 0) {
+        // Find the earliest upcoming scheduled departure among non-terminal flights
+        const upcoming = activeToday
+          .filter(f => f.scheduledDeparture != null)
+          .map(f => new Date(f.scheduledDeparture!).getTime())
+          .filter(t => t > now.getTime())
+          .sort((a, b) => a - b);
+
+        if (upcoming.length > 0) {
+          const wakeAt = new Date(upcoming[0] - WAKE_OFFSET_MINS * 60_000);
+          if (wakeAt > now) {
+            return {
+              wakeAt,
+              reason: `${WAKE_OFFSET_MINS}m before next flight on ${today} — waking at ${wakeAt.toISOString()}`,
+            };
+          }
+          // Wake time already passed but flights still active (e.g. scraper crashed
+          // mid-day and restarted). Wake immediately so live loop can track them.
+          return {
+            wakeAt: now,
+            reason: `Active flights on ${today} need tracking but wake time already passed — waking now`,
+          };
+        }
+
+        // Active (non-terminal) flights exist but all are past their scheduled
+        // departure — they're either airborne or just haven't landed yet.
+        // Wake immediately so the live loop can track arrivals.
+        return {
+          wakeAt: now,
+          reason: `Airborne/in-progress flights on ${today} need tracking — waking now`,
+        };
+      }
+    } catch (err) {
+      console.error('[Aurigny] Error querying today\'s flights for wake time:', err);
+      // Fall through to tomorrow logic on DB error
+    }
+  }
+
+  // ── Step 2: today is done (or past cutoff) — look at tomorrow ────────────
   const tomorrow = guernseyTomorrowStr();
   const totalTomorrow = await countFlightsForDate(tomorrow);
 
@@ -519,13 +568,13 @@ async function computeWakeTime(): Promise<{ wakeAt: Date; reason: string }> {
       if (firstFlight?.scheduledDeparture) {
         const firstDepMs = new Date(firstFlight.scheduledDeparture).getTime();
         const wakeAt = new Date(firstDepMs - WAKE_OFFSET_MINS * 60_000);
-        if (wakeAt > new Date()) {
+        if (wakeAt > now) {
           return {
             wakeAt,
             reason: `${WAKE_OFFSET_MINS}m before first flight on ${tomorrow} — waking at ${wakeAt.toISOString()}`,
           };
         }
-        // wakeAt is already past (edge case: we're computing this very close to first flight)
+        // wakeAt is already past (edge case: computing very close to first flight)
         // Fall through to fallback
       }
     } catch (err) {
@@ -533,7 +582,7 @@ async function computeWakeTime(): Promise<{ wakeAt: Date; reason: string }> {
     }
   }
 
-  // Fallback: 05:00 Guernsey local time tomorrow
+  // ── Step 3: Fallback — 05:00 Guernsey local time tomorrow ────────────────
   const fallback = nextGuernseyTime(5, 0);
   return {
     wakeAt: fallback,
@@ -748,13 +797,34 @@ async function runBackgroundPrefetch(): Promise<void> {
   // optimal wake time — reschedule if it differs by more than 5 minutes.
   if (timers.wakeTimeout !== null && scheduledWakeAtMs !== null) {
     const { wakeAt, reason } = await computeWakeTime();
+
+    // Safety net: if computeWakeTime says we should already be awake (wake time
+    // is now or in the past), cancel sleep immediately and start live scraping.
+    // This handles the case where a prefetch fires during what should be operating
+    // hours but the scraper is still sleeping (e.g. after a mid-day crash/restart).
+    if (wakeAt.getTime() <= Date.now()) {
+      console.log(`[Aurigny] Prefetch detected we should already be awake (wake=${wakeAt.toISOString()}) — cancelling sleep and starting live scraping`);
+      clearTimeout(timers.wakeTimeout);
+      timers.wakeTimeout = null;
+      scheduledWakeAtMs = null;
+      await logSchedulerEvent('wake', `Early wake triggered by prefetch — ${reason}`);
+      try {
+        await runScrape('Prefetch-triggered wake scrape');
+        await scheduleNextScrape();
+      } catch (err) {
+        console.error('[Aurigny] Error in prefetch-triggered wake:', err);
+        await scheduleNextScrape();
+      }
+      return;
+    }
+
     const diffMs = Math.abs(wakeAt.getTime() - scheduledWakeAtMs);
     if (diffMs > 5 * 60_000) {
-       console.log(`[Aurigny] Prefetch updated first-flight data — rescheduling wake from ${new Date(scheduledWakeAtMs).toISOString()} to ${wakeAt.toISOString()}`);
-       clearTimeout(timers.wakeTimeout);
-       scheduledWakeAtMs = wakeAt.getTime();
-       const sleepMs = Math.max(0, wakeAt.getTime() - Date.now());
-       console.log(`[Aurigny] Rescheduled wake timeout: will fire in ${Math.round(sleepMs / 1000)}s`);
+      console.log(`[Aurigny] Prefetch updated first-flight data — rescheduling wake from ${new Date(scheduledWakeAtMs).toISOString()} to ${wakeAt.toISOString()}`);
+      clearTimeout(timers.wakeTimeout);
+      scheduledWakeAtMs = wakeAt.getTime();
+      const sleepMs = Math.max(0, wakeAt.getTime() - Date.now());
+      console.log(`[Aurigny] Rescheduled wake timeout: will fire in ${Math.round(sleepMs / 1000)}s`);
       timers.wakeTimeout = setTimeout(async () => {
         try {
           timers.wakeTimeout = null;
@@ -766,12 +836,10 @@ async function runBackgroundPrefetch(): Promise<void> {
           console.error('[Aurigny] Error in rescheduled wake timeout callback:', err);
           timers.wakeTimeout = null;
           scheduledWakeAtMs = null;
-          // Reschedule to try again (with error handling)
           try {
             await scheduleNextScrape();
           } catch (err2) {
             console.error('[Aurigny] Fatal: Failed to reschedule after rescheduled wake error:', err2);
-            // Last resort: schedule a simple retry in 5 minutes
             setTimeout(() => scheduleNextScrape().catch(e => console.error('[Aurigny] Fatal retry failed:', e)), 5 * 60 * 1000);
           }
         }
