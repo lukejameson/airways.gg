@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { db, flights, delayPredictions, weatherData, scraperLogs, airportDaylight, flightTimes } from '$lib/server/db';
-import { and, gte, lte, inArray, or, eq, desc, count, not, sql } from 'drizzle-orm';
+import { and, gte, lte, inArray, or, eq, desc, count, not } from 'drizzle-orm';
 
 // Guernsey local timezone
 const GY_TZ = 'Europe/London';

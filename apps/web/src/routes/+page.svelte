@@ -5,7 +5,7 @@
   import { FlightBoard } from '$lib/components';
   import FlightCardSkeleton from '$lib/components/FlightCardSkeleton.svelte';
   import { airportName } from '$lib/airports';
-  import Icon from '$lib/components/Icon.svelte';
+  import Icon, { type IconName } from '$lib/components/Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
 
   let { data } = $props();
@@ -49,7 +49,7 @@
   });
 
   // Get appropriate weather icon for GCI based on current conditions
-  const gciWeatherIcon = $derived(
+  const gciWeatherIcon: IconName = $derived(
     data.weather ? getWeatherIconName(data.weather.weatherCode, gciIsDay) : 'cloud'
   );
 
@@ -223,7 +223,7 @@
           {#if data.weather}
             <span class="mx-1 opacity-40">·</span>
             <span class="inline-flex items-center gap-1.5">
-              <Icon name={gciWeatherIcon as any} size="20px" weather />
+              <Icon name={gciWeatherIcon} size="20px" weather />
               {#if data.weather.temperature != null}
                 <span class="font-medium">{Math.round(data.weather.temperature)}°C</span>
               {/if}

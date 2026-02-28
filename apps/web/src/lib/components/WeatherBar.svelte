@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Icon from './Icon.svelte';
+  import Icon, { type IconName } from './Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
 
   interface Weather {
@@ -39,15 +39,15 @@
   });
 
   // Get appropriate icon name based on weather code and time of day
-  const iconName = $derived(
-    weather ? getWeatherIconName(weather.weatherCode, isDay) : 'cloud' as const
+  const iconName: IconName = $derived(
+    weather ? getWeatherIconName(weather.weatherCode, isDay) : 'cloud'
   );
 </script>
 
 {#if weather}
   <div class="inline-flex items-center gap-2.5 text-sm">
     <span class="font-medium text-muted-foreground text-xs">{label}</span>
-    <Icon name={iconName as any} size="20px" weather class="flex-shrink-0" />
+    <Icon name={iconName} size="20px" weather class="flex-shrink-0" />
     {#if weather.temperature != null}
       <span class="font-semibold">{Math.round(weather.temperature)}°C</span>
     {/if}

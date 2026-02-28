@@ -1,11 +1,11 @@
 <script lang="ts">
-  import type { flights, delayPredictions } from '@airways/database';
+  import type { flights, delayPredictions, weatherData } from '@airways/database';
   import { airportName } from '$lib/airports';
-  import Icon from './Icon.svelte';
+  import Icon, { type IconName } from './Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
 
   type Flight = typeof flights.$inferSelect & {
-    prediction: (typeof delayPredictions.$inferSelect) | null;
+    prediction?: (typeof delayPredictions.$inferSelect) | null;
     estimatedDeparture?: string | null;
     estimatedArrival?: string | null;
   };
@@ -15,9 +15,11 @@
     sunset: Date;
   }
 
+  type WeatherRow = typeof weatherData.$inferSelect;
+
   interface Props {
     flight: Flight;
-    weatherMap?: Record<string, any>;
+    weatherMap?: Record<string, WeatherRow[]>;
     daylightMap?: Record<string, DaylightData[]>;
     returnTab?: string;
   }
@@ -34,7 +36,7 @@
     const weatherArray = weatherMap[airportCode];
     if (!weatherArray || weatherArray.length === 0) return null;
     
-    return weatherArray.reduce((closest: any, current: any) => {
+    return weatherArray.reduce((closest: WeatherRow, current: WeatherRow) => {
       const closestDiff = Math.abs(new Date(closest.timestamp).getTime() - targetTime.getTime());
       const currentDiff = Math.abs(new Date(current.timestamp).getTime() - targetTime.getTime());
       return currentDiff < closestDiff ? current : closest;
@@ -73,12 +75,12 @@
   }
 
   // Get weather icon name based on code, airport, and time
-  function getWeatherIcon(airportCode: string, targetTime: Date, weatherCode: number | null): string {
+  function getWeatherIcon(airportCode: string, targetTime: Date, weatherCode: number | null): IconName {
     const isDay = getIsDay(airportCode, targetTime);
     return getWeatherIconName(weatherCode, isDay);
   }
 
-  function fmtWeather(w: any): string {
+  function fmtWeather(w: WeatherRow): string {
     if (!w) return '';
     const parts: string[] = [];
     if (w.temperature != null) parts.push(`${Math.round(w.temperature)}°C`);
@@ -160,7 +162,8 @@
     return `${mins}m`;
   });
 
-  const isDelayed = $derived(calculatedStatus?.toLowerCase().includes('delayed'));
+  // Kept for potential future use (e.g. applying a CSS class to the card)
+  const _isDelayed = $derived(calculatedStatus?.toLowerCase().includes('delayed'));
 
   type BadgeTone = 'green' | 'yellow' | 'red' | 'blue' | 'gray';
   const tone = $derived.by((): BadgeTone => {
@@ -263,7 +266,7 @@
           <span class="text-xs text-muted-foreground flex items-center gap-1">
             <span class="font-medium">{airportName(flight.departureAirport)}</span>
             <span class="opacity-50">({flight.departureAirport})</span>
-            <Icon name={depWeatherIcon as any} size="16px" weather class="flex-shrink-0" />
+            <Icon name={depWeatherIcon} size="16px" weather class="flex-shrink-0" />
             <span>{fmtWeather(depWeather)}</span>
           </span>
         {/if}
@@ -274,7 +277,7 @@
           <span class="text-xs text-muted-foreground flex items-center gap-1">
             <span class="font-medium">{airportName(flight.arrivalAirport)}</span>
             <span class="opacity-50">({flight.arrivalAirport})</span>
-            <Icon name={arrWeatherIcon as any} size="16px" weather class="flex-shrink-0" />
+            <Icon name={arrWeatherIcon} size="16px" weather class="flex-shrink-0" />
             <span>{fmtWeather(arrWeather)}</span>
           </span>
         {/if}

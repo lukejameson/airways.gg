@@ -5,8 +5,15 @@
 
   let { data }: { data: PageData } = $props();
 
-  let queryInput = $state(data.query ?? '');
-  let dateInput = $state(data.date ?? '');
+  // Seed with empty string; $effect syncs from server data on mount and on every
+  // navigation update (browser back/forward) — avoids state_referenced_locally warning.
+  let queryInput = $state('');
+  let dateInput = $state('');
+
+  $effect(() => {
+    queryInput = data.query ?? '';
+    dateInput = data.date ?? '';
+  });
 
   function handleSubmit(e: SubmitEvent) {
     e.preventDefault();

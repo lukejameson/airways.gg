@@ -1,6 +1,6 @@
 <script lang="ts">
-	/** Icon name type definition */
-	type IconName =
+	/** Icon name type definition — exported so callers can type icon name props without casting */
+	export type IconName =
 		| 'circleExclamation'
 		| 'clock'
 		| 'chevronDown'

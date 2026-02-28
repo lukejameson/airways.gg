@@ -1,4 +1,5 @@
 import { connect } from 'puppeteer-real-browser';
+import type { Browser, Page, HTTPResponse } from 'rebrowser-puppeteer-core';
 import { XMLParser } from 'fast-xml-parser';
 import { db, flights as flightsTable, flightDelays, flightTimes, flightNotes, scraperLogs } from '@airways/database';
 import { eq } from 'drizzle-orm';
@@ -113,12 +114,10 @@ function randomDelay(min: number, max: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function simulateHumanBehavior(page: any): Promise<void> {
+async function simulateHumanBehavior(page: Page): Promise<void> {
   const scrollCount = Math.floor(Math.random() * 3) + 1;
   for (let i = 0; i < scrollCount; i++) {
-    // Use an arrow function — avoids new Function() / eval equivalence
-    // Cast to any so the Node TS compiler doesn't complain about `window`; this runs inside the browser.
+    // Arrow function runs inside the browser — `window` exists there but not in Node's TS scope
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await page.evaluate((amount: number) => (globalThis as any).window.scrollBy(0, amount), Math.floor(Math.random() * 300) + 100);
     await randomDelay(500, 1500);
@@ -331,8 +330,7 @@ async function runBrowserSession(
   maxRetries: number,
 ): Promise<{ success: boolean; count: number; error?: string }> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let browser: any = null;
+    let browser: Browser | null = null;
     try {
       console.log(`[Aurigny] Attempt ${attempt}/${maxRetries} — dates: ${dates.join(', ')}`);
       await randomDelay(3000, 8000);
@@ -391,8 +389,7 @@ async function runBrowserSession(
       let primaryDeparturesData: string | null = null;
 
       let responseCount = 0;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const onResponse = async (response: any) => {
+      const onResponse = async (response: HTTPResponse) => {
         try {
           responseCount++;
           const url: string = response.url();
@@ -460,22 +457,22 @@ async function runBrowserSession(
       // For the primary date: fetch arrivals in-page (departures already captured above).
       // For additional dates: fetch both departures and arrivals in-page.
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const inPageFetch = async (date: string, arrDep: 'arr' | 'dep'): Promise<string | null> => {
         try {
-          // Arrow function passed to page.evaluate — arguments are serialised by puppeteer,
-          // so date/arrDep are safe. Avoids new Function() / eval equivalence.
+          // Arrow function runs inside the browser via puppeteer serialisation.
+          // `globalThis as any` is required because Node's TS compiler doesn't know `fetch`/`Response`
+          // from the browser context — these types only exist at runtime inside the page.
           const body = await page.evaluate(
+            /* eslint-disable @typescript-eslint/no-explicit-any */
             (d: string, a: string) =>
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               (globalThis as any).fetch(
                 `/api/schedule?airport=GCI&arr_dep=${a}&date=${d}&recaptchaToken=none&recaptchaVerified=false`,
                 {
                   headers: { 'Accept': '*/*', 'Referer': 'https://www.aurigny.com/information/arrivals-departures' },
                   credentials: 'include',
                 },
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               ).then((r: any) => (r.ok ? r.text() : null)).catch(() => null) as Promise<string | null>,
+            /* eslint-enable @typescript-eslint/no-explicit-any */
             date,
             arrDep,
           );

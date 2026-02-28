@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { db, flights } from '$lib/server/db';
-import { or, ilike, eq, gte, lte, and } from 'drizzle-orm';
+import { or, ilike, gte, lte, and } from 'drizzle-orm';
 
 export const load: PageServerLoad = async ({ url }) => {
   const query = url.searchParams.get('q')?.trim() ?? '';

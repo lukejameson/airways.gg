@@ -1,5 +1,14 @@
 <script lang="ts">
   import FlightCard from './FlightCard.svelte';
+  import type { flights as flightsTable, weatherData as weatherDataTable, delayPredictions } from '@airways/database/schema';
+
+  type Flight = typeof flightsTable.$inferSelect & {
+    prediction?: (typeof delayPredictions.$inferSelect) | null;
+    estimatedDeparture?: string | null;
+    estimatedArrival?: string | null;
+  };
+
+  type WeatherRow = typeof weatherDataTable.$inferSelect;
 
   interface DaylightData {
     sunrise: Date;
@@ -7,8 +16,8 @@
   }
 
   interface Props {
-    flights: any[];
-    weatherMap?: Record<string, any>;
+    flights: Flight[];
+    weatherMap?: Record<string, WeatherRow[]>;
     daylightMap?: Record<string, DaylightData[]>;
     returnTab?: string;
   }

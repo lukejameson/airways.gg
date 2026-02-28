@@ -12,21 +12,21 @@
     arrAirport: string;
   }
 
-  let { lat, lon, heading, originIata, destIata, depAirport, arrAirport }: Props = $props();
+  let { lat, lon, heading, originIata: _originIata, destIata: _destIata, depAirport, arrAirport }: Props = $props();
 
 
 
   let mapEl: HTMLDivElement;
-  let mapInstance: any;
+  let mapInstance: import('leaflet').Map | undefined;
 
   onMount(async () => {
     // Dynamic import — Leaflet can't run during SSR
     const L = await import('leaflet');
     await import('leaflet/dist/leaflet.css');
 
-    // Fix default icon paths broken by bundlers
-    // @ts-ignore
-    delete L.Icon.Default.prototype._getIconUrl;
+    // Fix default icon paths broken by bundlers — internal Leaflet property not in types
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (L.Icon.Default.prototype as any)._getIconUrl;
     L.Icon.Default.mergeOptions({
       iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
       iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',

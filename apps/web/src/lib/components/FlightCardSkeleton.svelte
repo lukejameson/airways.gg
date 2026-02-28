@@ -6,7 +6,7 @@
   let { count = 5 }: Props = $props();
 </script>
 
-{#each Array(count) as _, i}
+{#each Array(count) as _}
   <div class="rounded-xl border border-border/50 bg-card/50 p-4 animate-pulse">
     <div class="flex items-center gap-4">
       <!-- Time skeleton -->

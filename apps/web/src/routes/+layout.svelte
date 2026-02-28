@@ -5,15 +5,17 @@
 
   let { data, children } = $props();
 
-  initAirports(data.airports as Record<string, AirportInfo>);
+  // Use $effect so initAirports re-runs if data ever updates (e.g. SvelteKit
+  // invalidation). Calling it directly captured only the initial value.
+  $effect(() => {
+    initAirports(data.airports as Record<string, AirportInfo>);
+  });
 
   const umamiWebsiteId = $derived(data.umamiWebsiteId);
   const umamiUrl = $derived(data.umamiUrl);
   const siteUrl = $derived(data.siteUrl);
   const buyMeACoffeeUrl = $derived(data.buyMeACoffeeUrl);
 
-  // Theme color for mobile browser UI
-  const themeColor = '#f0f5fb';
 </script>
 
 <svelte:head>

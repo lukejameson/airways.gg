@@ -103,8 +103,8 @@ export const load: PageServerLoad = async ({ params }) => {
       rotationFlights,
       times,
     };
-  } catch (err: any) {
-    if (err?.status === 404) throw err;
+  } catch (err: unknown) {
+    if (typeof err === 'object' && err !== null && 'status' in err && (err as { status: number }).status === 404) throw err;
     console.error('Error loading flight:', err);
     throw error(500, 'Failed to load flight details');
   }

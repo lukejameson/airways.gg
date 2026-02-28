@@ -4,6 +4,7 @@
   import { page } from '$app/stores';
   import { airportName, getAirportCoords, getAirportsForNearestSearch } from '$lib/airports';
   import Icon from '$lib/components/Icon.svelte';
+  import type { IconName } from '$lib/components/Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
 
   let { data }: { data: PageData } = $props();
@@ -28,8 +29,8 @@
   });
 
   // Get weather icons with day/night awareness
-  const depWeatherIcon = $derived(depWeather ? getWeatherIconName(depWeather.weatherCode, depIsDay) : 'cloud');
-  const arrWeatherIcon = $derived(arrWeather ? getWeatherIconName(arrWeather.weatherCode, arrIsDay) : 'cloud');
+  const depWeatherIcon: IconName = $derived(depWeather ? getWeatherIconName(depWeather.weatherCode, depIsDay) : 'cloud');
+  const arrWeatherIcon: IconName = $derived(arrWeather ? getWeatherIconName(arrWeather.weatherCode, arrIsDay) : 'cloud');
 
   // Time calculations (needed for status calculation)
   const isDeparture = $derived(flight.departureAirport === 'GCI');
@@ -103,7 +104,9 @@
 
   const hasPosition = $derived(!!position && position.lat != null && position.lon != null);
 
-  let FlightMapComponent: any = $state(null);
+  import type { Component } from 'svelte';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let FlightMapComponent: Component<any> | null = $state(null);
   let mapExpanded = $state(false);
   let rotationExpanded = $state(false);
   let rotationScrollEl: HTMLDivElement | undefined = $state();
@@ -299,16 +302,6 @@
     });
   }
 
-  function formatDate(date: string | Date | null | undefined): string {
-    if (!date) return '—';
-    return new Date(date).toLocaleDateString('en-GB', {
-      weekday: 'long',
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
-    });
-  }
-
   function shortDate(date: string | Date | null | undefined): string {
     if (!date) return '';
     return new Date(date).toLocaleDateString('en-GB', {
@@ -368,7 +361,7 @@
         viewedAt: new Date().toISOString(),
       };
       // Remove if already exists to move to front
-      const filtered = existing.filter((f: any) => f.id !== flight.id);
+      const filtered = (existing as { id: number }[]).filter(f => f.id !== flight.id);
       // Add to front, keep only last 5
       const updated = [flightInfo, ...filtered].slice(0, 5);
       localStorage.setItem(key, JSON.stringify(updated));
@@ -615,8 +608,7 @@
       <!-- Map — only shown when expanded -->
       {#if mapExpanded}
         {#if browser && FlightMapComponent}
-          <svelte:component
-            this={FlightMapComponent}
+          <FlightMapComponent
             lat={position.lat}
             lon={position.lon}
             heading={position.heading ?? 0}
@@ -863,11 +855,11 @@
   <!-- Weather: dep + arr side by side -->
   {#if depWeather || arrWeather}
     {@const dirs = ['N','NE','E','SE','S','SW','W','NW']}
-    {@const wRow = (w: any) => [
+    {@const wRow = (w: NonNullable<typeof depWeather>) => [
       w.temperature != null ? `${Math.round(w.temperature)}°C` : null,
       w.windSpeed != null ? `${Math.round(w.windSpeed)}mph ${w.windDirection != null ? dirs[Math.round(w.windDirection/45)%8] : ''}`.trim() : null,
       w.visibility != null ? `${Math.round(w.visibility*10)/10}km vis` : null,
-      w.precipitation > 0 ? `${Math.round(w.precipitation*10)/10}mm` : null,
+      w.precipitation != null && w.precipitation > 0 ? `${Math.round(w.precipitation*10)/10}mm` : null,
       w.cloudCover != null ? `${w.cloudCover}% cloud` : null,
     ].filter(Boolean).join(' · ')}
     <div class="grid gap-3 mb-6 {depWeather && arrWeather ? 'grid-cols-2' : 'grid-cols-1'}">
@@ -876,7 +868,7 @@
           <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
             {airportName(flight.departureAirport)} <span class="opacity-60">({flight.departureAirport})</span> · Departure weather
           </p>
-          <p class="text-2xl mb-1"><Icon name={depWeatherIcon as any} size="32px" weather /></p>
+          <p class="text-2xl mb-1"><Icon name={depWeatherIcon} size="32px" weather /></p>
           <p class="text-sm text-foreground">{wRow(depWeather)}</p>
         </div>
       {/if}
@@ -885,7 +877,7 @@
           <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
             {airportName(flight.arrivalAirport)} <span class="opacity-60">({flight.arrivalAirport})</span> · Arrival weather
           </p>
-          <p class="text-2xl mb-1"><Icon name={arrWeatherIcon as any} size="32px" weather /></p>
+          <p class="text-2xl mb-1"><Icon name={arrWeatherIcon} size="32px" weather /></p>
           <p class="text-sm text-foreground">{wRow(arrWeather)}</p>
         </div>
       {/if}
