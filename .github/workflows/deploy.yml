@@ -1,0 +1,270 @@
+name: CI / Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - test
+      - production
+  pull_request:
+    branches:
+      - main
+      - test
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Change detection
+# Each service is rebuilt only when its own source OR the shared database
+# package changes. This avoids rebuilding the heavy aurigny-scraper image
+# (Puppeteer + real Chrome) when only the web frontend changed, etc.
+#
+# NOTE: output key names must use underscores — hyphens are invalid in GitHub
+# Actions expression syntax (parsed as the minus operator).
+# ──────────────────────────────────────────────────────────────────────────────
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      web:               ${{ steps.changes.outputs.web }}
+      aurigny_scraper:   ${{ steps.changes.outputs.aurigny_scraper }}
+      guernsey_scraper:  ${{ steps.changes.outputs.guernsey_scraper }}
+      position_service:  ${{ steps.changes.outputs.position_service }}
+      weather_service:   ${{ steps.changes.outputs.weather_service }}
+      ml_service:        ${{ steps.changes.outputs.ml_service }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history required for accurate diff
+
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            web:
+              - 'apps/web/**'
+              - 'packages/database/**'
+              - 'package*.json'
+            aurigny_scraper:
+              - 'apps/aurigny-scraper/**'
+              - 'packages/database/**'
+              - 'package*.json'
+            guernsey_scraper:
+              - 'apps/guernsey-scraper/**'
+              - 'packages/database/**'
+              - 'package*.json'
+            position_service:
+              - 'apps/position-service/**'
+              - 'packages/database/**'
+              - 'package*.json'
+            weather_service:
+              - 'apps/weather-service/**'
+              - 'packages/database/**'
+              - 'package*.json'
+            ml_service:
+              - 'apps/ml-service/**'
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # CI — always runs on every PR and push to validate the codebase
+  # ────────────────────────────────────────────────────────────────────────────
+  ci:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build database package
+        run: npm run build --workspace=@airways/database
+
+      - name: Lint web app
+        run: npm run lint --workspace=@airways/web
+
+      - name: Type-check web app
+        run: npm run check --workspace=@airways/web
+
+      - name: Build web app
+        run: npm run build --workspace=@airways/web
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Deploy to DEV  (push to main)
+  # ────────────────────────────────────────────────────────────────────────────
+  deploy-dev:
+    needs: [ci, detect-changes]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Deploy changed services to dev
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_SSH_PORT }}
+          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
+          envs: CHANGED_WEB,CHANGED_AURIGNY_SCRAPER,CHANGED_GUERNSEY_SCRAPER,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
+          # Pass change flags as env vars into the SSH session via with.envs
+          # (appleboy/ssh-action reads these from the runner environment)
+          script: |
+            set -e
+            cd /opt/airways.gg-dev
+
+            git fetch origin
+            git checkout main
+            git pull origin main
+
+            COMPOSE="docker compose -f docker-compose.dev.yml --env-file .env.dev"
+
+            # Build only changed services
+            SERVICES=""
+            [ "$CHANGED_WEB"               = "true" ] && SERVICES="$SERVICES app"
+            [ "$CHANGED_AURIGNY_SCRAPER"   = "true" ] && SERVICES="$SERVICES aurigny-scraper"
+            [ "$CHANGED_GUERNSEY_SCRAPER"  = "true" ] && SERVICES="$SERVICES guernsey-scraper"
+            [ "$CHANGED_POSITION_SERVICE"  = "true" ] && SERVICES="$SERVICES position-service"
+            [ "$CHANGED_WEATHER_SERVICE"   = "true" ] && SERVICES="$SERVICES weather-service"
+            [ "$CHANGED_ML_SERVICE"        = "true" ] && SERVICES="$SERVICES ml-service"
+
+            if [ -z "$(echo $SERVICES | tr -d ' ')" ]; then
+              echo "No service changes detected — skipping rebuild."
+            else
+              echo "Building: $SERVICES"
+              $COMPOSE build --no-cache $SERVICES
+              # Restart only changed services — leaves unchanged containers running
+              $COMPOSE up -d --no-deps $SERVICES
+            fi
+
+            echo "Cleaning up Docker resources..."
+            docker image prune -af --filter "until=24h"
+            docker builder prune -af --filter "until=24h"
+            docker container prune -f
+            echo "Docker cleanup complete"
+            docker system df
+        env:
+          CHANGED_WEB:              ${{ needs.detect-changes.outputs.web }}
+          CHANGED_AURIGNY_SCRAPER:  ${{ needs.detect-changes.outputs.aurigny_scraper }}
+          CHANGED_GUERNSEY_SCRAPER: ${{ needs.detect-changes.outputs.guernsey_scraper }}
+          CHANGED_POSITION_SERVICE: ${{ needs.detect-changes.outputs.position_service }}
+          CHANGED_WEATHER_SERVICE:  ${{ needs.detect-changes.outputs.weather_service }}
+          CHANGED_ML_SERVICE:       ${{ needs.detect-changes.outputs.ml_service }}
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Deploy to TEST  (push to test)
+  # ────────────────────────────────────────────────────────────────────────────
+  deploy-test:
+    needs: [ci, detect-changes]
+    if: github.ref == 'refs/heads/test' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: test
+    steps:
+      - name: Deploy changed services to test
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_SSH_PORT }}
+          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
+          envs: CHANGED_WEB,CHANGED_AURIGNY_SCRAPER,CHANGED_GUERNSEY_SCRAPER,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
+          script: |
+            set -e
+            cd /opt/airways.gg-test
+
+            git fetch origin
+            git checkout test
+            git pull origin test
+
+            COMPOSE="docker compose -f docker-compose.test.yml --env-file .env.test"
+
+            SERVICES=""
+            [ "$CHANGED_WEB"               = "true" ] && SERVICES="$SERVICES app"
+            [ "$CHANGED_AURIGNY_SCRAPER"   = "true" ] && SERVICES="$SERVICES aurigny-scraper"
+            [ "$CHANGED_GUERNSEY_SCRAPER"  = "true" ] && SERVICES="$SERVICES guernsey-scraper"
+            [ "$CHANGED_POSITION_SERVICE"  = "true" ] && SERVICES="$SERVICES position-service"
+            [ "$CHANGED_WEATHER_SERVICE"   = "true" ] && SERVICES="$SERVICES weather-service"
+            [ "$CHANGED_ML_SERVICE"        = "true" ] && SERVICES="$SERVICES ml-service"
+
+            if [ -z "$(echo $SERVICES | tr -d ' ')" ]; then
+              echo "No service changes detected — skipping rebuild."
+            else
+              echo "Building: $SERVICES"
+              $COMPOSE build --no-cache $SERVICES
+              $COMPOSE up -d --no-deps $SERVICES
+            fi
+
+            echo "Cleaning up Docker resources..."
+            docker image prune -af --filter "until=24h"
+            docker builder prune -af --filter "until=24h"
+            docker container prune -f
+            echo "Docker cleanup complete"
+            docker system df
+        env:
+          CHANGED_WEB:              ${{ needs.detect-changes.outputs.web }}
+          CHANGED_AURIGNY_SCRAPER:  ${{ needs.detect-changes.outputs.aurigny_scraper }}
+          CHANGED_GUERNSEY_SCRAPER: ${{ needs.detect-changes.outputs.guernsey_scraper }}
+          CHANGED_POSITION_SERVICE: ${{ needs.detect-changes.outputs.position_service }}
+          CHANGED_WEATHER_SERVICE:  ${{ needs.detect-changes.outputs.weather_service }}
+          CHANGED_ML_SERVICE:       ${{ needs.detect-changes.outputs.ml_service }}
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Deploy to PRODUCTION  (push to production)
+  # ────────────────────────────────────────────────────────────────────────────
+  deploy-production:
+    needs: [ci, detect-changes]
+    if: github.ref == 'refs/heads/production' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy changed services to production
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_SSH_PORT }}
+          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
+          envs: CHANGED_WEB,CHANGED_AURIGNY_SCRAPER,CHANGED_GUERNSEY_SCRAPER,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
+          script: |
+            set -e
+            cd /opt/airways.gg
+
+            git fetch origin
+            git checkout production
+            git pull origin production
+
+            COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
+
+            SERVICES=""
+            [ "$CHANGED_WEB"               = "true" ] && SERVICES="$SERVICES app"
+            [ "$CHANGED_AURIGNY_SCRAPER"   = "true" ] && SERVICES="$SERVICES aurigny-scraper"
+            [ "$CHANGED_GUERNSEY_SCRAPER"  = "true" ] && SERVICES="$SERVICES guernsey-scraper"
+            [ "$CHANGED_POSITION_SERVICE"  = "true" ] && SERVICES="$SERVICES position-service"
+            [ "$CHANGED_WEATHER_SERVICE"   = "true" ] && SERVICES="$SERVICES weather-service"
+            [ "$CHANGED_ML_SERVICE"        = "true" ] && SERVICES="$SERVICES ml-service"
+
+            if [ -z "$(echo $SERVICES | tr -d ' ')" ]; then
+              echo "No service changes detected — skipping rebuild."
+            else
+              echo "Building: $SERVICES"
+              $COMPOSE build --no-cache $SERVICES
+              $COMPOSE up -d --no-deps $SERVICES
+            fi
+
+            echo "Cleaning up Docker resources..."
+            docker image prune -af --filter "until=24h"
+            docker builder prune -af --filter "until=24h"
+            docker container prune -f
+            echo "Docker cleanup complete"
+            docker system df
+        env:
+          CHANGED_WEB:              ${{ needs.detect-changes.outputs.web }}
+          CHANGED_AURIGNY_SCRAPER:  ${{ needs.detect-changes.outputs.aurigny_scraper }}
+          CHANGED_GUERNSEY_SCRAPER: ${{ needs.detect-changes.outputs.guernsey_scraper }}
+          CHANGED_POSITION_SERVICE: ${{ needs.detect-changes.outputs.position_service }}
+          CHANGED_WEATHER_SERVICE:  ${{ needs.detect-changes.outputs.weather_service }}
+          CHANGED_ML_SERVICE:       ${{ needs.detect-changes.outputs.ml_service }}

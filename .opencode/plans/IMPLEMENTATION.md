@@ -1,4 +1,4 @@
-# delays.gg - Implementation Tracker
+# airways.gg - Implementation Tracker
 
 ## Phase 1: Foundation & Database
 - [ ] Database schema (Drizzle ORM)
