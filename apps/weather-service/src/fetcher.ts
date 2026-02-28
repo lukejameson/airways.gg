@@ -395,10 +395,12 @@ async function calculateAndStoreDaylight(airportLocations: AirportLocation[]): P
   // Get current UTC time
   const now = new Date();
 
-  // Create dates for today and tomorrow (for suncalc, we use dates at midnight UTC)
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const tomorrow = new Date(today);
-  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  // Use solar noon (12:00 UTC) rather than midnight when calling SunCalc.
+  // Passing midnight UTC causes SunCalc to return times for the previous calendar
+  // day — the library interprets the date at the local solar position, so noon is
+  // the safest anchor point to guarantee the correct calendar day is used.
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12, 0, 0));
+  const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 12, 0, 0));
 
   // Format date to YYYY-MM-DD string for the date column
   const formatDate = (d: Date): string => d.toISOString().split('T')[0];

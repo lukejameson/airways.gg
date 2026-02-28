@@ -16,16 +16,18 @@
   const depWeather = $derived(weatherMap?.[flight.departureAirport] ?? null);
   const arrWeather = $derived(weatherMap?.[flight.arrivalAirport] ?? null);
 
-  // Determine if it's daytime at departure and arrival airports
+  // Determine if it's currently daytime at departure and arrival airports.
+  // Use the current wall-clock time — the weather panel shows current conditions,
+  // so the icon should reflect right now, not the flight's scheduled time.
   const depIsDay = $derived.by(() => {
     const daylight = daylightMap?.[flight.departureAirport]?.[0];
     if (!daylight) return true;
-    return isDaytime(new Date(daylight.sunrise), new Date(daylight.sunset), new Date(flight.scheduledDeparture));
+    return isDaytime(new Date(daylight.sunrise), new Date(daylight.sunset), new Date());
   });
   const arrIsDay = $derived.by(() => {
     const daylight = daylightMap?.[flight.arrivalAirport]?.[0];
     if (!daylight) return true;
-    return isDaytime(new Date(daylight.sunrise), new Date(daylight.sunset), new Date(flight.scheduledArrival));
+    return isDaytime(new Date(daylight.sunrise), new Date(daylight.sunset), new Date());
   });
 
   // Get weather icons with day/night awareness
