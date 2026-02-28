@@ -69,7 +69,6 @@ services:
       # Circuit breaker settings
       - SCRAPER_CIRCUIT_BREAKER_THRESHOLD=${SCRAPER_CIRCUIT_BREAKER_THRESHOLD:-5}
       - SCRAPER_CIRCUIT_BREAKER_RESET_MS=${SCRAPER_CIRCUIT_BREAKER_RESET_MS:-60000}
-      - SCRAPER_INTERVAL_MS=${SCRAPER_INTERVAL_MS:-300000}
     networks:
       - web
     restart: always

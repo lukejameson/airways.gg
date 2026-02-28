@@ -97,6 +97,11 @@
     return s === 'landed' || s === 'completed' || f.canceled === true;
   };
 
+  // An airborne departure has left GCI — hide it from the departures tab
+  // (the plane is gone) but keep it visible in arrivals (it's en route).
+  const isAirborneFromGCI = (f: (typeof data.flights)[0]) =>
+    f.departureAirport === 'GCI' && f.status?.toLowerCase().includes('airborne');
+
   const departures = $derived(
     data.flights.filter((f: (typeof data.flights)[0]) => f.departureAirport === 'GCI'),
   );
@@ -108,6 +113,11 @@
   const visibleFlights = $derived.by(() => {
     let flights = activeFlights;
     if (!showCompleted) flights = flights.filter((f: (typeof data.flights)[0]) => !isCompleted(f));
+    // Hide airborne GCI departures from the departures tab — the plane has already left.
+    // They remain visible in the arrivals tab so inbound tracking still works.
+    if (activeTab === 'departures') {
+      flights = flights.filter((f: (typeof data.flights)[0]) => !isAirborneFromGCI(f));
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       flights = flights.filter((f: (typeof data.flights)[0]) => {

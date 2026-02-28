@@ -61,22 +61,18 @@
     }, null);
   }
 
-  // Determine if it's daytime for a given airport and time
-  function getIsDay(airportCode: string, targetTime: Date): boolean {
-    const daylight = findDaylight(airportCode, targetTime);
+  // Determine if it's currently daytime at a given airport.
+  // Uses the current wall-clock time, not the flight's scheduled time — the
+  // weather strip shows current conditions, so the icon should reflect right now.
+  function getIsDay(airportCode: string): boolean {
+    const daylight = findDaylight(airportCode, new Date());
     if (!daylight) return true; // Default to day if no daylight data
-    
-    // Ensure all dates are proper Date objects (they come as strings from JSON)
-    const sunrise = new Date(daylight.sunrise);
-    const sunset = new Date(daylight.sunset);
-    const time = new Date(targetTime);
-    
-    return isDaytime(sunrise, sunset, time);
+    return isDaytime(new Date(daylight.sunrise), new Date(daylight.sunset), new Date());
   }
 
-  // Get weather icon name based on code, airport, and time
-  function getWeatherIcon(airportCode: string, targetTime: Date, weatherCode: number | null): IconName {
-    const isDay = getIsDay(airportCode, targetTime);
+  // Get weather icon name based on code and current time of day at the airport
+  function getWeatherIcon(airportCode: string, weatherCode: number | null): IconName {
+    const isDay = getIsDay(airportCode);
     return getWeatherIconName(weatherCode, isDay);
   }
 
@@ -180,12 +176,12 @@
   const arrWeather = $derived(findClosestWeather(flight.arrivalAirport, flight.scheduledArrival));
   const hasWeather = $derived(!!depWeather || !!arrWeather);
 
-  // Get weather icons with day/night awareness
+  // Get weather icons — always reflect the current time of day, not flight time
   const depWeatherIcon = $derived(
-    depWeather ? getWeatherIcon(flight.departureAirport, flight.scheduledDeparture, depWeather.weatherCode) : 'cloud'
+    depWeather ? getWeatherIcon(flight.departureAirport, depWeather.weatherCode) : 'cloud'
   );
   const arrWeatherIcon = $derived(
-    arrWeather ? getWeatherIcon(flight.arrivalAirport, flight.scheduledArrival, arrWeather.weatherCode) : 'cloud'
+    arrWeather ? getWeatherIcon(flight.arrivalAirport, arrWeather.weatherCode) : 'cloud'
   );
 </script>
 
