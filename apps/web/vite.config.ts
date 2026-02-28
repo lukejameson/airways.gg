@@ -12,11 +12,10 @@ config({ path: resolve(process.cwd(), '../../.env') });
 export default defineConfig({
   plugins: [
     sveltekit(),
-    // Generate pre-compressed .gz and .br files for all JS/CSS assets.
-    // The server/proxy must be configured to serve these with the correct
-    // Content-Encoding header (e.g. nginx gzip_static / brotli_static).
-    compression({ algorithm: 'gzip', ext: '.gz' }),
-    compression({ algorithm: 'brotliCompress', ext: '.br' }),
+    // Pre-compress all JS/CSS assets (threshold: 1B = compress everything).
+    // adapter-node serves .br/.gz automatically when Accept-Encoding matches.
+    compression({ algorithm: 'gzip', ext: '.gz', threshold: 1 }),
+    compression({ algorithm: 'brotliCompress', ext: '.br', threshold: 1 }),
   ],
   build: {
     rollupOptions: {
@@ -27,6 +26,13 @@ export default defineConfig({
         id.startsWith('@airways/database/') ||
         id === 'pg' ||
         id.startsWith('drizzle-orm'),
+      output: {
+        // Keep Leaflet in its own named lazy chunk — it's already dynamically
+        // imported and this prevents it from leaking into eagerly-loaded bundles.
+        manualChunks(id) {
+          if (id.includes('leaflet')) return 'leaflet';
+        },
+      },
     },
   },
   ssr: {

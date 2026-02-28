@@ -29,14 +29,14 @@
   <meta property="og:site_name" content="airways.gg" />
   <meta property="og:type" content="website" />
   <meta property="og:url" content={siteUrl} />
-  <meta property="og:image" content="{siteUrl}/android-chrome-512x512.png" />
+  <meta property="og:image" content="{siteUrl}/android-chrome-512x512.webp" />
   <meta property="og:image:width" content="512" />
   <meta property="og:image:height" content="512" />
   <meta property="og:image:alt" content="airways.gg logo" />
 
   <!-- Twitter / X Card defaults -->
   <meta name="twitter:card" content="summary" />
-  <meta name="twitter:image" content="{siteUrl}/android-chrome-512x512.png" />
+  <meta name="twitter:image" content="{siteUrl}/android-chrome-512x512.webp" />
 
   {#if umamiWebsiteId && umamiUrl}
     <script

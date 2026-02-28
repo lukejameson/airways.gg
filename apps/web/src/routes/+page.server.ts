@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { db, flights, delayPredictions, weatherData, scraperLogs, airportDaylight, flightTimes } from '$lib/server/db';
+import { db, flights, weatherData, scraperLogs, airportDaylight, flightTimes } from '$lib/server/db';
 import { and, gte, lte, inArray, or, eq, desc, count, not } from 'drizzle-orm';
 
 // Guernsey local timezone
@@ -82,31 +82,34 @@ export const load: PageServerLoad = async ({ url }) => {
   }
 
   try {
-    // Query flights by flightDate instead of timestamp ranges
+    // Select only the columns the client actually needs — omitting rawXml, uniqueId,
+    // aircraftRegistration, airlineCode, createdAt, updatedAt cuts inline payload size.
     const displayFlights = await db
-      .select()
+      .select({
+        id: flights.id,
+        flightNumber: flights.flightNumber,
+        departureAirport: flights.departureAirport,
+        arrivalAirport: flights.arrivalAirport,
+        scheduledDeparture: flights.scheduledDeparture,
+        scheduledArrival: flights.scheduledArrival,
+        actualDeparture: flights.actualDeparture,
+        actualArrival: flights.actualArrival,
+        status: flights.status,
+        canceled: flights.canceled,
+        aircraftType: flights.aircraftType,
+        delayMinutes: flights.delayMinutes,
+        flightDate: flights.flightDate,
+      })
       .from(flights)
       .where(eq(flights.flightDate, displayDateStr))
       .orderBy(flights.scheduledDeparture);
-
-    // Predictions
-    const predMap = new Map<number, typeof import('$lib/server/db').delayPredictions.$inferSelect>();
-    if (displayFlights.length > 0) {
-      const flightIds = displayFlights.map(f => f.id);
-      const predictions = await db
-        .select()
-        .from(delayPredictions)
-        .where(and(inArray(delayPredictions.flightId, flightIds), gte(delayPredictions.expiresAt, now)))
-        .orderBy(delayPredictions.createdAt);
-      for (const p of predictions) predMap.set(p.flightId, p);
-    }
 
     // Estimated times (EstimatedBlockOff for departures, EstimatedBlockOn for arrivals)
     const estimatedTimesMap = new Map<number, { estimatedDeparture?: string; estimatedArrival?: string }>();
     if (displayFlights.length > 0) {
       const flightIds = displayFlights.map(f => f.id);
       const estimatedTimes = await db
-        .select()
+        .select({ flightId: flightTimes.flightId, timeType: flightTimes.timeType, timeValue: flightTimes.timeValue })
         .from(flightTimes)
         .where(
           and(
@@ -125,9 +128,8 @@ export const load: PageServerLoad = async ({ url }) => {
       }
     }
 
-    const flightsWithPredictions = displayFlights.map(f => ({
+    const flightsForDisplay = displayFlights.map(f => ({
       ...f,
-      prediction: predMap.get(f.id) ?? null,
       estimatedDeparture: estimatedTimesMap.get(f.id)?.estimatedDeparture ?? null,
       estimatedArrival: estimatedTimesMap.get(f.id)?.estimatedArrival ?? null,
     }));
@@ -137,15 +139,23 @@ export const load: PageServerLoad = async ({ url }) => {
       displayFlights.flatMap(f => [f.departureAirport, f.arrivalAirport])
     )];
 
-    // Fetch weather for display date + 2 days ahead (for forecasts)
+    // Fetch weather for display date + 2 days ahead (for forecasts).
+    // Only select columns used by the client (temperature, windSpeed, windDirection, weatherCode, timestamp, airportCode).
     const weatherStartDate = new Date(displayDateStr + 'T00:00:00Z');
     const weatherEndDate = new Date(weatherStartDate);
     weatherEndDate.setUTCDate(weatherEndDate.getUTCDate() + 2);
     
-    let weatherMap: Record<string, typeof weatherData.$inferSelect[]> = {};
+    let weatherMap: Record<string, { airportCode: string; timestamp: Date; temperature: number | null; windSpeed: number | null; windDirection: number | null; weatherCode: number | null }[]> = {};
     if (airportCodes.length > 0) {
       const rows = await db
-        .select()
+        .select({
+          airportCode: weatherData.airportCode,
+          timestamp: weatherData.timestamp,
+          temperature: weatherData.temperature,
+          windSpeed: weatherData.windSpeed,
+          windDirection: weatherData.windDirection,
+          weatherCode: weatherData.weatherCode,
+        })
         .from(weatherData)
         .where(
           and(
@@ -156,18 +166,22 @@ export const load: PageServerLoad = async ({ url }) => {
         )
         .orderBy(weatherData.timestamp);
 
-      // Group by airport code
       for (const row of rows) {
         if (!weatherMap[row.airportCode]) weatherMap[row.airportCode] = [];
         weatherMap[row.airportCode].push(row);
       }
     }
 
-    // Fetch daylight data for today and tomorrow for all airports
-    let daylightMap: Record<string, typeof airportDaylight.$inferSelect[]> = {};
+    // Fetch daylight data — only sunrise/sunset/airportCode needed
+    let daylightMap: Record<string, { airportCode: string; date: string; sunrise: Date; sunset: Date }[]> = {};
     if (airportCodes.length > 0) {
       const daylightRows = await db
-        .select()
+        .select({
+          airportCode: airportDaylight.airportCode,
+          date: airportDaylight.date,
+          sunrise: airportDaylight.sunrise,
+          sunset: airportDaylight.sunset,
+        })
         .from(airportDaylight)
         .where(
           and(
@@ -179,7 +193,6 @@ export const load: PageServerLoad = async ({ url }) => {
           ),
         );
 
-      // Group by airport code
       for (const row of daylightRows) {
         if (!daylightMap[row.airportCode]) daylightMap[row.airportCode] = [];
         daylightMap[row.airportCode].push(row);
@@ -187,7 +200,7 @@ export const load: PageServerLoad = async ({ url }) => {
     }
 
     // Current GCI weather for the header - find the record closest to now
-    let currentGciWeather: typeof weatherData.$inferSelect | null = null;
+    let currentGciWeather: { airportCode: string; timestamp: Date; temperature: number | null; windSpeed: number | null; windDirection: number | null; weatherCode: number | null } | null = null;
     if (weatherMap['GCI'] && weatherMap['GCI'].length > 0) {
       currentGciWeather = weatherMap['GCI'].reduce((closest, current) => {
         const closestDiff = Math.abs(new Date(closest.timestamp).getTime() - now.getTime());
@@ -205,7 +218,7 @@ export const load: PageServerLoad = async ({ url }) => {
       .limit(1);
 
     return {
-      flights: flightsWithPredictions,
+      flights: flightsForDisplay,
       weather: currentGciWeather,              // current GCI weather for the header
       weatherMap,                              // all airports for per-flight display
       daylightMap,                             // sunrise/sunset data for airports
