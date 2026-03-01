@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { env as publicEnv } from '$env/dynamic/public';
 import type { LayoutServerLoad } from './$types';
 import { db, airports } from '$lib/server/db';
 
@@ -23,9 +24,9 @@ export const load: LayoutServerLoad = async (_) => {
 
   return {
     siteUrl: `https://${domain}`,
-    buyMeACoffeeUrl: env.PUBLIC_BUY_ME_A_COFFEE_URL || null,
-    umamiWebsiteId: env.PUBLIC_UMAMI_WEBSITE_ID || null,
-    umamiUrl: env.PUBLIC_UMAMI_URL || null,
+    buyMeACoffeeUrl: publicEnv.PUBLIC_BUY_ME_A_COFFEE_URL || null,
+    umamiWebsiteId: publicEnv.PUBLIC_UMAMI_WEBSITE_ID || null,
+    umamiUrl: publicEnv.PUBLIC_UMAMI_URL || null,
     airports: airportsMap,
   };
 };
