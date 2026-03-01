@@ -138,6 +138,15 @@
   });
   const completedCount = $derived(activeFlights.filter((f: (typeof data.flights)[0]) => isCompleted(f)).length);
 
+  // Tab badge counts — must match the same filters applied in visibleFlights
+  // (excluding completed and, for departures, airborne-from-GCI flights).
+  const departuresRemainingCount = $derived(
+    departures.filter((f: (typeof data.flights)[0]) => !isCompleted(f) && !isAirborneFromGCI(f)).length
+  );
+  const arrivalsRemainingCount = $derived(
+    arrivals.filter((f: (typeof data.flights)[0]) => !isCompleted(f)).length
+  );
+
   // Quick filters state
   let activeFilters = $state<string[]>([]);
   let recentlyViewed = $state<Array<{id: number; flightNumber: string; departureAirport: string; arrivalAirport: string; scheduledDeparture: string; viewedAt: string}>>([]);
@@ -413,7 +422,7 @@
         <span class="hidden sm:inline">Departures</span>
         <span class="sm:hidden">Dep</span>
         <span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-xs tabular-nums">
-          {departures.filter((f) => !isCompleted(f)).length}
+          {departuresRemainingCount}
         </span>
       </button>
       <button
@@ -426,7 +435,7 @@
         <span class="hidden sm:inline">Arrivals</span>
         <span class="sm:hidden">Arr</span>
         <span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-xs tabular-nums">
-          {arrivals.filter((f) => !isCompleted(f)).length}
+          {arrivalsRemainingCount}
         </span>
       </button>
     </div>
