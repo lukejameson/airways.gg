@@ -5,8 +5,10 @@
 
   let { data, children } = $props();
 
-  // Use $effect so initAirports re-runs if data ever updates (e.g. SvelteKit
-  // invalidation). Calling it directly captured only the initial value.
+  // Call synchronously so the store is populated before the first render,
+  // preventing the IATA code fallback flash on initial load.
+  // $effect re-runs on subsequent data invalidations (e.g. navigation).
+  initAirports(data.airports as Record<string, AirportInfo>);
   $effect(() => {
     initAirports(data.airports as Record<string, AirportInfo>);
   });
