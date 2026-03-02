@@ -491,14 +491,6 @@
             </svg>
             <span class="hidden sm:inline">{showCompleted ? 'Hide' : 'Show'} done</span>
           </button>
-          {#if activeFilters.length > 0}
-            <button
-              onclick={clearFilters}
-              class="min-h-[36px] px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Clear
-            </button>
-          {/if}
         </div>
       {/if}
     {/if}
