@@ -1,12 +1,12 @@
 {
   "name": "@airways/guernsey-scraper",
   "version": "1.0.0",
-  "description": "Guernsey Airport historical flight data scraper",
+  "description": "Guernsey Airport flight data scraper (live + historical backfill)",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc && node dist/index.js"
+    "dev": "tsc && SCRAPER_MODE=live SCRAPER_INTERVAL_TODAY_MINS=2 SCRAPER_INTERVAL_TOMORROW_MINS=30 node dist/index.js"
   },
   "dependencies": {
     "@airways/database": "*",

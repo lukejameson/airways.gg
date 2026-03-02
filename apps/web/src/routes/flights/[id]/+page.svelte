@@ -58,10 +58,10 @@
   // Calculate our own status when external source is unreliable
   // If we have delay minutes or the actual/estimated time differs from scheduled by > 15 min
   const calculatedStatus = $derived.by(() => {
-    // If flight is already landed/airborne/cancelled, trust that status
+    // If flight is already landed/airborne/boarding/cancelled, trust that status
     const currentStatus = flight.status?.toLowerCase() ?? '';
-    if (currentStatus.includes('landed') || currentStatus.includes('completed') || 
-        currentStatus.includes('airborne') || currentStatus.includes('cancel')) {
+    if (currentStatus.includes('landed') || currentStatus.includes('completed') ||
+        currentStatus.includes('airborne') || currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
       return flight.status;
     }
     
@@ -126,10 +126,15 @@
 
   function rotationStatusTone(status: string | null): string {
     const s = status?.toLowerCase() ?? '';
-    if (s.includes('landed') || s.includes('completed')) return 'blue';
-    if (s.includes('airborne')) return 'green';
-    if (s.includes('delayed')) return 'yellow';
+    if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
+        s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'yellow';
     if (s.includes('cancel')) return 'red';
+    if (s.includes('diverted') || s.includes('diverting')) return 'orange';
+    if (s.includes('landed') || s.includes('completed')) return 'blue';
+    if (s.includes('airborne') || s.includes('holding')) return 'green';
+    if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
+        s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
+        s.includes('door and gate') || s.includes('wait in lounge')) return 'purple';
     return 'gray';
   }
 
@@ -288,6 +293,14 @@
 
   const isEstimate = $derived(!actualTime && !!estimatedTime);
 
+  // True when the flight is pre-departure: hasn't taken off and not in a terminal/airborne state.
+  // Used to show a meaningful "on the ground at departure airport" fallback when no position is tracked.
+  const isPreDeparture = $derived(
+    !flight.actualDeparture &&
+    !['airborne', 'taxiing', 'landed', 'completed', 'cancelled', 'canceled']
+      .some(s => flight.status?.toLowerCase().includes(s))
+  );
+
   function formatTime(date: string | Date | null | undefined): string {
     if (!date) return '--:--';
     return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -315,19 +328,31 @@
 
   function getStatusColor(status: string | null | undefined): string {
     const s = status?.toLowerCase() || '';
-    if (s.includes('on time')) return 'text-green-600';
-    if (s.includes('delayed')) return 'text-yellow-600';
-    if (s.includes('cancelled')) return 'text-red-600';
-    if (s.includes('landed') || s.includes('airborne') || s.includes('completed')) return 'text-blue-600';
+    if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
+        s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'text-yellow-600';
+    if (s.includes('cancelled') || s.includes('canceled')) return 'text-red-600';
+    if (s.includes('diverted') || s.includes('diverting')) return 'text-orange-600';
+    if (s.includes('landed') || s.includes('airborne') || s.includes('completed') || s.includes('holding')) return 'text-blue-600';
+    if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
+        s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
+        s.includes('door and gate') || s.includes('wait in lounge')) return 'text-purple-600';
+    if (s.includes('on time') || s === 'scheduled') return 'text-green-600';
+    if (s.includes('pax') || s.includes('passengers')) return 'text-green-600';
     return 'text-muted-foreground';
   }
 
   function getStatusDotColor(status: string | null | undefined): string {
     const s = status?.toLowerCase() || '';
-    if (s.includes('on time')) return 'bg-green-500';
-    if (s.includes('delayed')) return 'bg-yellow-500';
-    if (s.includes('cancelled')) return 'bg-red-500';
-    if (s.includes('landed') || s.includes('airborne') || s.includes('completed')) return 'bg-blue-500';
+    if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
+        s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'bg-yellow-500';
+    if (s.includes('cancelled') || s.includes('canceled')) return 'bg-red-500';
+    if (s.includes('diverted') || s.includes('diverting')) return 'bg-orange-500';
+    if (s.includes('landed') || s.includes('airborne') || s.includes('completed') || s.includes('holding')) return 'bg-blue-500';
+    if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
+        s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
+        s.includes('door and gate') || s.includes('wait in lounge')) return 'bg-purple-500';
+    if (s.includes('on time') || s === 'scheduled') return 'bg-green-500';
+    if (s.includes('pax') || s.includes('passengers')) return 'bg-green-500';
     return 'bg-gray-400';
   }
 
@@ -647,9 +672,26 @@
           </div>
         </div>
       {:else}
-        <p class="text-sm text-muted-foreground">
-          Aircraft not currently tracked by Flightradar24. It may be at {airportName(flight.departureAirport)} ({flight.departureAirport}), {airportName(flight.arrivalAirport)} ({flight.arrivalAirport}), or en route to/from base airport. Live tracking will appear once the aircraft transmits position data.
-        </p>
+        {#if isPreDeparture}
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
+                <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+                <circle cx="12" cy="10" r="3"/>
+              </svg>
+            </div>
+            <div>
+              <p class="font-semibold text-foreground">
+                On the ground at {airportName(flight.departureAirport)} <span class="opacity-50 font-normal">({flight.departureAirport})</span>
+              </p>
+              <p class="text-xs text-muted-foreground mt-0.5">Pre-departure — live tracking starts when airborne</p>
+            </div>
+          </div>
+        {:else}
+          <p class="text-sm text-muted-foreground">
+            Aircraft not currently tracked by Flightradar24. It may be at {airportName(flight.departureAirport)} ({flight.departureAirport}), {airportName(flight.arrivalAirport)} ({flight.arrivalAirport}), or en route to/from base airport. Live tracking will appear once the aircraft transmits position data.
+          </p>
+        {/if}
       {/if}
     </div>
   {/if}
@@ -762,6 +804,10 @@
                         <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">{rf.status}</span>
                       {:else if tone === 'red'}
                         <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">{rf.status}</span>
+                      {:else if tone === 'purple'}
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700">{rf.status}</span>
+                      {:else if tone === 'orange'}
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">{rf.status}</span>
                       {:else}
                         <span class="text-muted-foreground text-xs">{rf.status ?? 'Scheduled'}</span>
                       {/if}
@@ -799,6 +845,10 @@
                       <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">{rf.status}</span>
                     {:else if tone === 'red'}
                       <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">{rf.status}</span>
+                    {:else if tone === 'purple'}
+                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700">{rf.status}</span>
+                    {:else if tone === 'orange'}
+                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">{rf.status}</span>
                     {:else}
                       <span class="text-muted-foreground text-xs">{rf.status ?? 'Scheduled'}</span>
                     {/if}

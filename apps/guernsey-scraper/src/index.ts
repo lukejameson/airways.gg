@@ -22,16 +22,30 @@ if (envPath) {
   console.warn('[Guernsey] Warning: .env file not found, relying on environment variables');
 }
 
-import { runBackfill, linkOrphanedStatusHistory } from './scraper';
+import { runBackfill, linkOrphanedStatusHistory, deduplicateFlights } from './scraper';
+import { runLiveMode } from './live';
 
 async function main() {
   const mode = process.env.SCRAPER_MODE || 'backfill';
+
+  if (mode === 'live') {
+    await runLiveMode();
+    return; // loop runs indefinitely via setTimeout
+  }
 
   if (mode === 'link-only') {
     // Fix existing orphaned flight_status_history rows without re-scraping
     console.log('[Guernsey] Running link-only mode...');
     await linkOrphanedStatusHistory();
     console.log('[Guernsey] Linking completed. Exiting...');
+    process.exit(0);
+  }
+
+  if (mode === 'dedup') {
+    // Remove duplicate flights created by both aurigny and guernsey scrapers
+    console.log('[Guernsey] Running dedup mode...');
+    await deduplicateFlights();
+    console.log('[Guernsey] Dedup completed. Exiting...');
     process.exit(0);
   }
 
@@ -48,6 +62,11 @@ async function main() {
   console.log('[Guernsey] Backfill completed. Exiting...');
   process.exit(0);
 }
+
+process.on('uncaughtException', (err) => {
+  console.error('[Guernsey] Uncaught exception:', err);
+  process.exit(1);
+});
 
 main().catch(err => {
   console.error('[Guernsey] Fatal error:', err);

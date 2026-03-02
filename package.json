@@ -8,11 +8,11 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently --names \"web,aurigny,weather,position\" --prefix-colors \"cyan,yellow,green,magenta\" \"npm run dev:web\" \"npm run dev:aurigny\" \"npm run dev:weather\" \"npm run dev:position\"",
+    "dev": "concurrently --names \"web,guernsey,weather,position,adsb\" --prefix-colors \"cyan,yellow,green,magenta,blue\" \"npm run dev:web\" \"npm run dev:guernsey\" \"npm run dev:weather\" \"npm run dev:position\" \"npm run dev:adsb\"",
     "dev:web": "npm run dev --workspace=@airways/web",
-    "dev:aurigny": "npm run dev --workspace=@airways/aurigny-scraper",
     "dev:weather": "npm run dev --workspace=@airways/weather-service",
     "dev:position": "npm run dev --workspace=@airways/position-service",
+    "dev:adsb": "npm run dev --workspace=@airways/adsb-service",
     "dev:guernsey": "npm run dev --workspace=@airways/guernsey-scraper",
     "build": "npm run build --workspace=@airways/web",
     "lint": "npm run lint --workspace=@airways/web",
@@ -23,7 +23,6 @@
     "db:migrate": "npm run db:migrate --workspace=@airways/database",
     "db:push": "npm run db:push --workspace=@airways/database",
     "db:studio": "npm run db:studio --workspace=@airways/database",
-    "scraper:aurigny": "npm run dev --workspace=@airways/aurigny-scraper",
     "scraper:guernsey": "npm run dev --workspace=@airways/guernsey-scraper",
     "docker:dev:up": "docker compose -f docker-compose.dev.yml --env-file .env.dev up -d",
     "docker:dev:down": "docker compose -f docker-compose.dev.yml --env-file .env.dev down",

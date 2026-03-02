@@ -93,8 +93,14 @@
   }
 
   const isCompleted = (f: (typeof data.flights)[0]) => {
+    if (f.canceled === true) return true;
     const s = f.status?.toLowerCase() ?? '';
-    return s === 'landed' || s === 'completed' || f.canceled === true;
+    if (s.includes('landed') || s.includes('completed') || s.includes('diverted')) return true;
+    // Has a recorded actual arrival time — definitely on the ground
+    if (f.actualArrival) return true;
+    // Scheduled arrival was > 45 min ago — almost certainly landed even without a status update
+    if (new Date(f.scheduledArrival).getTime() < Date.now() - 45 * 60_000) return true;
+    return false;
   };
 
   // An airborne departure has left GCI — hide it from the departures tab

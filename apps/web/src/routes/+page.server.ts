@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { db, flights, weatherData, scraperLogs, airportDaylight, flightTimes } from '$lib/server/db';
-import { and, gte, lte, inArray, or, eq, desc, count, not } from 'drizzle-orm';
+import { and, gte, lte, inArray, or, eq, desc, count, not, sql } from 'drizzle-orm';
 
 // Guernsey local timezone
 const GY_TZ = 'Europe/London';
@@ -32,7 +32,7 @@ async function countFlightsForDate(dateStr: string): Promise<number> {
 
 /** Get all active (non-terminal) flights for a given date */
 async function getActiveFlightsForDate(dateStr: string) {
-  const TERMINAL_STATUSES = ['Landed', 'Cancelled'];
+  const TERMINAL_STATUSES = ['Landed', 'Cancelled', 'Completed'];
   try {
     return await db
       .select()
@@ -41,7 +41,9 @@ async function getActiveFlightsForDate(dateStr: string) {
         and(
           eq(flights.flightDate, dateStr),
           eq(flights.canceled, false),
-          not(inArray(flights.status, TERMINAL_STATUSES))
+          not(inArray(flights.status, TERMINAL_STATUSES)),
+          // Diverted flights are also terminal but have variable text
+          sql`LOWER(${flights.status}) NOT LIKE 'diverted%'`
         )
       );
   } catch {

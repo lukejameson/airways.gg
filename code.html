@@ -1,0 +1,271 @@
+<html lang="en" class=" idc0_343 eoibtczl"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verification Required</title>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async="" defer=""></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #fed302 0%, #fed302 100%);
+      min-height: 100vh;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      padding: 20px;
+    }
+    @media (min-width: 768px) {
+      body {
+        display: flex;
+      }
+    }
+    .card {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+      padding: 40px;
+      max-width: 500px;
+      width: 100%;
+      position: relative;
+      margin-top: 100px;
+    }
+    .logo {
+      align-self: baseline;
+      max-width: 150px;
+      height: auto;
+    }
+    h1 { margin: 0 0 8px; color: #1a202c; font-size: 24px; }
+    p { color: #718096; margin: 0 0 24px; }
+    .step { display: none; }
+    .step.active { display: block; }
+    label { display: block; color: #4a5568; font-weight: 500; margin-bottom: 8px; }
+    input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.2s;
+    }
+    input:focus { outline: none; border-color: #667eea; }
+    input.otp-input {
+      text-align: center;
+      letter-spacing: 8px;
+      font-size: 24px;
+      font-weight: bold;
+    }
+    button {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #007fff 0%, #007fff 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 16px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102,126,234,0.4); }
+    button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .error { color: #e53e3e; font-size: 14px; margin-top: 8px; display: none; }
+    .error.show { display: block; }
+    .info { color: #4a5568; font-size: 14px; margin-top: 8px; display: none; }
+    .info.show { display: block; }
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+    div.call_center {
+      margin-top: 40px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .resend { text-align: center; margin-top: 16px; }
+    .resend a { color: #667eea; text-decoration: none; font-size: 14px; cursor: pointer; }
+    .resend a:hover { text-decoration: underline; }
+    .cf-turnstile { margin: 16px 0; }
+  </style>
+</head>
+<body>
+  <img src="https://www.aurigny.com/_nuxt/img/aurigny-logo.88bd2df.svg" alt="Aurigny" class="logo">
+
+  <div class="card">
+    <div id="step1" class="step active" otp="otp">
+      <h1>Verification Required</h1>
+      <p>For security purposes, you will need a one-time PIN code to proceed. Please enter your email address below.</p>
+      <p>Check your spam or junk folder if you do not see the message in your inbox.</p>
+      <form id="emailForm">
+        <label for="email">Email Address</label>
+        <input type="email" id="email" name="email" required="" placeholder="you@example.com" autocomplete="email">
+        <div id="emailError" class="error"></div>
+        <div id="emailInfo" class="info"></div>
+        <button type="submit" id="emailBtn">Send Code</button>
+
+        <!-- Turnstile widget -->
+
+  <div class="cf-turnstile" data-sitekey="0x4AAAAAACi8z0JQ8vvs5-J0" data-callback="onTurnstileSuccess" data-theme="light"><div><input type="hidden" name="cf-turnstile-response" id="cf-chl-widget-fscru_response" value="0.7NwEXzcaMhCGV6JCsQdG0rthXSEIcLsolhUlQ7ruaHE0PeHRH_SN0WB2xL02aQ8G5MEvWS5RrHKQgf2Xkg3OMHarQIiyEDSqpENzqBy5agu4S-ebnMW07vNhjjHlKVaxbB6nC4N_KxdvaC-q_ly_1d7GpF4xmx5oZBa0Oav257YBEXsu2dCaKZAcaJaGgLl-g67Wzq-5jtzZtXG71yuVs_iqqZ7Yx7Oo_IINlLufoiNTkusF5dGcQimseNpCK3MYQDMJCI8QtR7AGrPKNlgVlfns5NzM-hBiq9x3KuQgVpA-51PL6A-FeJ3y0X0ScLke9Cuvdm5LG7Rju-EmbilV4HOB2TLnN2UPJqUJAzU8hAl-Jojx_gbAltIR4bSr1r8IKVWG2hiOVt6ECgHdM07xlHA9HU2rrNuayXBKps4k41RXpVSrVSg3NGodYqIK85BZ7rFmaDlFvwO6Q7RdETqxCh39T9-yIJezwqYuca-EMY28-dM8tVSJp1mWzIeEIsQIETX2EGstlpTiqVf_CmfSEWlz0HPsdray3PlVjCWv-nTvCq38qGlZxom_XdIL_GPJ8PZjUEij8Rv2z_K7iFFsAlB8JfIbfCj7-56GNrK6FpEWKG2hZ7hF8OXHNDHK-2UwGdCKRvttC4kHt93voks31py300n2aM9GBG4LwrUA3By67wypYrUxFuyMsj8uRDagAyQeqhzJ3rnVRif3gX50GvhlVfFM_J5UNNKFVMMru7LUwGlTBbPuVVCXhPqBqzO3OXIrVky82ZsTW1UFJRnG-Q27Q3bLZKYx1x4H4QA1M5u0Cb4CwzSS-ktlHLwFi0y9K4opzC5deoGe_6VdUYKLXlYqfJCClj6QyEay1Yb3zX_tycIk_cISiBqLftRXJSzk.gzLsigh6It9HiychTgH53w.a6103a56d84866672d7c622b12d895371cd98013f95f057678e06b457ea40f4c"></div></div>
+
+      </form>
+      <div class="call_center">
+        <p>Alternatively, you can download our App from the respective stores, or for further assistance, for bookings and general queries please contact our Contact Centre:</p>
+        <p>Whatsapp: <a href="https://wa.me/447436422214" target="_blank" rel="noopener noreferrer">+44 7436 422214</a> (office hours 08:00 - 20:00)</p>
+        <p>Phone: <a href="tel:+44 1481 267267" target="_blank" rel="noopener noreferrer">+44 1481 267267</a> (office hours 08:00 - 17:00)</p>
+        <p>Or email : <a href="mailto:res@aurigny.com" target="_blank" rel="noopener noreferrer">res@aurigny.com</a></p>
+      </div>
+    </div>
+
+    <div id="step2" class="step" otp="otp">
+      <h1>Enter Code</h1>
+      <p>We sent a 6-digit code to <strong id="sentTo"></strong></p>
+      <p>Check your spam or junk folder if you do not see the message in your inbox.</p>
+      <form id="otpForm">
+        <label for="otp">Verification Code</label>
+        <input type="text" id="otp" name="otp" class="otp-input" maxlength="6" pattern="[0-9]{6}" required="" placeholder="000000" autocomplete="one-time-code" inputmode="numeric">
+        <div id="otpError" class="error"></div>
+        <button type="submit" id="otpBtn">Verify</button>
+      </form>
+      <div class="resend">
+        <a id="resendLink">Didn't receive it? Send again</a>
+      </div>
+      <div class="call_center">
+        <p>Alternatively, you can download our App from the respective stores, or for further assistance, for bookings and general queries please contact our Contact Centre:</p>
+        <p>Whatsapp: <a href="https://wa.me/447436422214" target="_blank" rel="noopener noreferrer">+44 7436 422214</a> (office hours 08:00 - 20:00)</p>
+        <p>Phone: <a href="tel:+44 1481 267267" target="_blank" rel="noopener noreferrer">+44 1481 267267</a> (office hours 08:00 - 17:00)</p>
+        <p>Or email : <a href="mailto:res@aurigny.com" target="_blank" rel="noopener noreferrer">res@aurigny.com</a></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const returnUrl = '/infor';
+    let sessionId = '';
+    let userEmail = '';
+    let turnstileToken = '';
+
+    // Turnstile callback
+    function onTurnstileSuccess(token) {
+      turnstileToken = token;
+    }
+
+    document.getElementById('emailForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('emailBtn');
+      const errorEl = document.getElementById('emailError');
+      userEmail = document.getElementById('email').value;
+
+      // Check Turnstile completed (only if enabled)
+      const turnstileEnabled = true;
+      if (turnstileEnabled && !turnstileToken) {
+        errorEl.textContent = 'Please complete the security check';
+        errorEl.classList.add('show');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>Sending...';
+      errorEl.classList.remove('show');
+      document.getElementById('emailInfo').classList.remove('show');
+
+      try {
+        const res = await fetch('/aurigny-otp2-handler/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: userEmail, returnUrl: returnUrl, 'cf-turnstile-response': turnstileToken })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          sessionId = data.sessionId;
+          document.getElementById('sentTo').textContent = userEmail;
+          document.getElementById('step1').classList.remove('active');
+          document.getElementById('step2').classList.add('active');
+          document.getElementById('otp').focus();
+        } else {
+          errorEl.textContent = data.error || 'Failed to send code';
+          errorEl.classList.add('show');
+          // Reset Turnstile on failure
+          if (typeof turnstile !== 'undefined') {
+            turnstile.reset();
+            turnstileToken = '';
+          }
+        }
+      } catch (err) {
+        errorEl.textContent = 'Network error. Please try again.';
+        errorEl.classList.add('show');
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Send Code';
+    };
+
+    document.getElementById('otpForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('otpBtn');
+      const errorEl = document.getElementById('otpError');
+      const otp = document.getElementById('otp').value;
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>Verifying...';
+      errorEl.classList.remove('show');
+
+      try {
+        const res = await fetch('/aurigny-otp2-handler/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, otp })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          window.location.href = data.returnUrl;
+        } else {
+          errorEl.textContent = data.error || 'Invalid code';
+          errorEl.classList.add('show');
+          document.getElementById('otp').value = '';
+          document.getElementById('otp').focus();
+        }
+      } catch (err) {
+        errorEl.textContent = 'Network error. Please try again.';
+        errorEl.classList.add('show');
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Verify';
+    };
+
+
+    document.getElementById('resendLink').onclick = async (e) => {
+      e.preventDefault();
+
+      // Reset Turnstile and go back to step 1
+      if (typeof turnstile !== 'undefined') {
+        turnstile.reset();
+        turnstileToken = '';
+      }
+
+      // Show step 1 (with Turnstile), hide step 2
+      document.getElementById('step2').classList.remove('active');
+      document.getElementById('step1').classList.add('active');
+
+      // Pre-fill the email so user doesn't have to retype
+      document.getElementById('email').value = userEmail;
+
+      // Optional: Show a message
+      document.getElementById('emailInfo').textContent = 'Please complete verification to resend code';
+      document.getElementById('emailInfo').classList.add('show');
+    };
+
+    document.getElementById('otp').oninput = (e) => {
+      e.target.value = e.target.value.replace(/[^0-9]/g, '');
+    };
+  </script>
+
+</body></html>
