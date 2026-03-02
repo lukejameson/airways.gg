@@ -404,7 +404,7 @@
   </div>
 
   <!-- Tabs + Filters Row -->
-  <div class="flex flex-wrap items-center gap-x-1 gap-y-2 border-b border-border pb-2 mb-4">
+  <div class="flex items-center justify-between border-b border-border pb-2 mb-4">
     <!-- Tabs -->
     <div class="flex">
       <button
@@ -434,9 +434,6 @@
         </span>
       </button>
     </div>
-
-    <!-- Spacer -->
-    <div class="flex-1"></div>
 
     <!-- Filters -->
     {#if !searchQuery}

@@ -86,11 +86,29 @@
     {@render children()}
   </main>
 
-  <footer class="border-t py-6 md:py-0">
-    <div class="container flex flex-col items-center justify-between gap-4 md:h-14 md:flex-row">
+  <footer class="border-t py-5">
+    <div class="container flex items-center justify-between gap-4">
       <p class="text-sm text-muted-foreground">
-        &copy; {new Date().getFullYear()} airways.gg &mdash; Flight tracking for Guernsey
+        &copy; {new Date().getFullYear()} airways.gg<span class="hidden sm:inline"> &mdash; Sister site to <a href="https://roads.gg" target="_blank" rel="noopener noreferrer" class="underline underline-offset-4 hover:text-foreground transition-colors">roads.gg</a>. Built by <a href="https://lukejameson.co.uk" target="_blank" rel="noopener noreferrer" class="underline underline-offset-4 hover:text-foreground transition-colors">Luke Jameson</a></span>.
       </p>
+      <div class="flex items-center gap-4 text-sm text-muted-foreground">
+        <span class="sm:hidden">
+          <a href="https://roads.gg" target="_blank" rel="noopener noreferrer" class="hover:text-foreground transition-colors">roads.gg</a>
+          &middot;
+          <a href="https://lukejameson.co.uk" target="_blank" rel="noopener noreferrer" class="hover:text-foreground transition-colors">Portfolio</a>
+        </span>
+        <a
+          href="https://www.facebook.com/profile.php?id=61588602583247"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Follow airways.gg on Facebook"
+          class="hover:text-foreground transition-colors"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.533-4.697 1.313 0 2.686.236 2.686.236v2.971h-1.513c-1.491 0-1.956.93-1.956 1.883v2.27h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
+          </svg>
+        </a>
+      </div>
     </div>
   </footer>
 </div>
