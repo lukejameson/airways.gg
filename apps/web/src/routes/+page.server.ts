@@ -49,6 +49,40 @@ async function getActiveFlightsForDate(dateStr: string) {
   }
 }
 
+const FLIGHT_COLUMNS = {
+  id: flights.id,
+  flightNumber: flights.flightNumber,
+  departureAirport: flights.departureAirport,
+  arrivalAirport: flights.arrivalAirport,
+  scheduledDeparture: flights.scheduledDeparture,
+  scheduledArrival: flights.scheduledArrival,
+  actualDeparture: flights.actualDeparture,
+  actualArrival: flights.actualArrival,
+  status: flights.status,
+  canceled: flights.canceled,
+  aircraftType: flights.aircraftType,
+  delayMinutes: flights.delayMinutes,
+  flightDate: flights.flightDate,
+};
+
+async function fetchDisplayFlights(dateStr: string) {
+  return db
+    .select(FLIGHT_COLUMNS)
+    .from(flights)
+    .where(eq(flights.flightDate, dateStr))
+    .orderBy(flights.scheduledDeparture);
+}
+
+async function fetchLastScrape() {
+  const [row] = await db
+    .select({ completedAt: scraperLogs.completedAt })
+    .from(scraperLogs)
+    .where(eq(scraperLogs.status, 'success'))
+    .orderBy(desc(scraperLogs.completedAt))
+    .limit(1);
+  return row;
+}
+
 export const load: PageServerLoad = async ({ url }) => {
   const now = new Date();
   const todayStr = toGuernseyDateStr(now);
@@ -59,73 +93,110 @@ export const load: PageServerLoad = async ({ url }) => {
   let displayDateStr = todayStr;
   let autoAdvanced = false;
 
-  if (dateParam && (dateParam === todayStr || dateParam === tomorrowStr)) {
-    // Valid explicit date
-    displayDateStr = dateParam;
-  } else if (!dateParam) {
-    // No explicit date — check for auto-advance
-    const todayFlightCount = await countFlightsForDate(todayStr);
-    
-    if (todayFlightCount > 0) {
-      // Today has flights — check if all are terminal
-      const activeFlightsToday = await getActiveFlightsForDate(todayStr);
-      
-      if (activeFlightsToday.length === 0) {
-        // All flights are terminal — check if tomorrow has flights
-        const tomorrowFlightCount = await countFlightsForDate(tomorrowStr);
-        if (tomorrowFlightCount > 0) {
-          displayDateStr = tomorrowStr;
-          autoAdvanced = true;
-        }
-      }
-    }
-  }
-
   try {
-    // Select only the columns the client actually needs — omitting rawXml, uniqueId,
-    // aircraftRegistration, airlineCode, createdAt, updatedAt cuts inline payload size.
-    const displayFlights = await db
-      .select({
-        id: flights.id,
-        flightNumber: flights.flightNumber,
-        departureAirport: flights.departureAirport,
-        arrivalAirport: flights.arrivalAirport,
-        scheduledDeparture: flights.scheduledDeparture,
-        scheduledArrival: flights.scheduledArrival,
-        actualDeparture: flights.actualDeparture,
-        actualArrival: flights.actualArrival,
-        status: flights.status,
-        canceled: flights.canceled,
-        aircraftType: flights.aircraftType,
-        delayMinutes: flights.delayMinutes,
-        flightDate: flights.flightDate,
-      })
-      .from(flights)
-      .where(eq(flights.flightDate, displayDateStr))
-      .orderBy(flights.scheduledDeparture);
+    let displayFlights: Awaited<ReturnType<typeof fetchDisplayFlights>>;
+    let lastScrape: Awaited<ReturnType<typeof fetchLastScrape>>;
 
-    // Estimated times (EstimatedBlockOff for departures, EstimatedBlockOn for arrivals)
-    const estimatedTimesMap = new Map<number, { estimatedDeparture?: string; estimatedArrival?: string }>();
-    if (displayFlights.length > 0) {
-      const flightIds = displayFlights.map(f => f.id);
-      const estimatedTimes = await db
-        .select({ flightId: flightTimes.flightId, timeType: flightTimes.timeType, timeValue: flightTimes.timeValue })
-        .from(flightTimes)
-        .where(
-          and(
-            inArray(flightTimes.flightId, flightIds),
-            inArray(flightTimes.timeType, ['EstimatedBlockOff', 'EstimatedBlockOn'])
-          )
-        );
-      for (const t of estimatedTimes) {
-        const existing = estimatedTimesMap.get(t.flightId) ?? {};
-        if (t.timeType === 'EstimatedBlockOff') {
-          existing.estimatedDeparture = t.timeValue.toISOString();
-        } else if (t.timeType === 'EstimatedBlockOn') {
-          existing.estimatedArrival = t.timeValue.toISOString();
-        }
-        estimatedTimesMap.set(t.flightId, existing);
+    if (dateParam && (dateParam === todayStr || dateParam === tomorrowStr)) {
+      // dateParam shortcut: fetch displayFlights + scraperLogs in parallel (no wave 1 needed)
+      displayDateStr = dateParam;
+      [displayFlights, lastScrape] = await Promise.all([
+        fetchDisplayFlights(displayDateStr),
+        fetchLastScrape(),
+      ]);
+    } else {
+      // Wave 1: fire all auto-advance queries + scraperLogs in parallel
+      const [todayFlightCount, activeFlightsToday, tomorrowFlightCount, lastScrapeResult] = await Promise.all([
+        countFlightsForDate(todayStr),
+        getActiveFlightsForDate(todayStr),
+        countFlightsForDate(tomorrowStr),
+        fetchLastScrape(),
+      ]);
+      lastScrape = lastScrapeResult;
+
+      // Compute displayDateStr from wave 1 results (zero extra DB trips)
+      if (todayFlightCount > 0 && activeFlightsToday.length === 0 && tomorrowFlightCount > 0) {
+        displayDateStr = tomorrowStr;
+        autoAdvanced = true;
       }
+
+      // Wave 2: fetch display flights for determined date
+      displayFlights = await fetchDisplayFlights(displayDateStr);
+    }
+
+    // Wave 3: parallel queries that depend on displayFlights
+    const flightIds = displayFlights.map(f => f.id);
+    const airportCodes = [...new Set(
+      displayFlights.flatMap(f => [f.departureAirport, f.arrivalAirport])
+    )];
+
+    const weatherStartDate = new Date(displayDateStr + 'T00:00:00Z');
+    const weatherEndDate = new Date(weatherStartDate);
+    weatherEndDate.setUTCDate(weatherEndDate.getUTCDate() + 2);
+
+    const [estimatedTimesRows, weatherRows, daylightRows] = await Promise.all([
+      flightIds.length > 0
+        ? db
+            .select({ flightId: flightTimes.flightId, timeType: flightTimes.timeType, timeValue: flightTimes.timeValue })
+            .from(flightTimes)
+            .where(
+              and(
+                inArray(flightTimes.flightId, flightIds),
+                inArray(flightTimes.timeType, ['EstimatedBlockOff', 'EstimatedBlockOn'])
+              )
+            )
+        : Promise.resolve([]),
+      airportCodes.length > 0
+        ? db
+            .select({
+              airportCode: weatherData.airportCode,
+              timestamp: weatherData.timestamp,
+              temperature: weatherData.temperature,
+              windSpeed: weatherData.windSpeed,
+              windDirection: weatherData.windDirection,
+              weatherCode: weatherData.weatherCode,
+            })
+            .from(weatherData)
+            .where(
+              and(
+                inArray(weatherData.airportCode, airportCodes),
+                gte(weatherData.timestamp, weatherStartDate),
+                lte(weatherData.timestamp, weatherEndDate),
+              ),
+            )
+            .orderBy(weatherData.timestamp)
+        : Promise.resolve([]),
+      airportCodes.length > 0
+        ? db
+            .select({
+              airportCode: airportDaylight.airportCode,
+              date: airportDaylight.date,
+              sunrise: airportDaylight.sunrise,
+              sunset: airportDaylight.sunset,
+            })
+            .from(airportDaylight)
+            .where(
+              and(
+                inArray(airportDaylight.airportCode, airportCodes),
+                or(
+                  eq(airportDaylight.date, todayStr),
+                  eq(airportDaylight.date, tomorrowStr)
+                )
+              ),
+            )
+        : Promise.resolve([]),
+    ]);
+
+    // Build estimatedTimesMap
+    const estimatedTimesMap = new Map<number, { estimatedDeparture?: string; estimatedArrival?: string }>();
+    for (const t of estimatedTimesRows) {
+      const existing = estimatedTimesMap.get(t.flightId) ?? {};
+      if (t.timeType === 'EstimatedBlockOff') {
+        existing.estimatedDeparture = t.timeValue.toISOString();
+      } else if (t.timeType === 'EstimatedBlockOn') {
+        existing.estimatedArrival = t.timeValue.toISOString();
+      }
+      estimatedTimesMap.set(t.flightId, existing);
     }
 
     const flightsForDisplay = displayFlights.map(f => ({
@@ -134,72 +205,21 @@ export const load: PageServerLoad = async ({ url }) => {
       estimatedArrival: estimatedTimesMap.get(f.id)?.estimatedArrival ?? null,
     }));
 
-    // Collect all unique airports across display flights
-    const airportCodes = [...new Set(
-      displayFlights.flatMap(f => [f.departureAirport, f.arrivalAirport])
-    )];
-
-    // Fetch weather for display date + 2 days ahead (for forecasts).
-    // Only select columns used by the client (temperature, windSpeed, windDirection, weatherCode, timestamp, airportCode).
-    const weatherStartDate = new Date(displayDateStr + 'T00:00:00Z');
-    const weatherEndDate = new Date(weatherStartDate);
-    weatherEndDate.setUTCDate(weatherEndDate.getUTCDate() + 2);
-    
-    let weatherMap: Record<string, { airportCode: string; timestamp: Date; temperature: number | null; windSpeed: number | null; windDirection: number | null; weatherCode: number | null }[]> = {};
-    if (airportCodes.length > 0) {
-      const rows = await db
-        .select({
-          airportCode: weatherData.airportCode,
-          timestamp: weatherData.timestamp,
-          temperature: weatherData.temperature,
-          windSpeed: weatherData.windSpeed,
-          windDirection: weatherData.windDirection,
-          weatherCode: weatherData.weatherCode,
-        })
-        .from(weatherData)
-        .where(
-          and(
-            inArray(weatherData.airportCode, airportCodes),
-            gte(weatherData.timestamp, weatherStartDate),
-            lte(weatherData.timestamp, weatherEndDate),
-          ),
-        )
-        .orderBy(weatherData.timestamp);
-
-      for (const row of rows) {
-        if (!weatherMap[row.airportCode]) weatherMap[row.airportCode] = [];
-        weatherMap[row.airportCode].push(row);
-      }
+    // Build weatherMap
+    const weatherMap: Record<string, { airportCode: string; timestamp: Date; temperature: number | null; windSpeed: number | null; windDirection: number | null; weatherCode: number | null }[]> = {};
+    for (const row of weatherRows) {
+      if (!weatherMap[row.airportCode]) weatherMap[row.airportCode] = [];
+      weatherMap[row.airportCode].push(row);
     }
 
-    // Fetch daylight data — only sunrise/sunset/airportCode needed
-    let daylightMap: Record<string, { airportCode: string; date: string; sunrise: Date; sunset: Date }[]> = {};
-    if (airportCodes.length > 0) {
-      const daylightRows = await db
-        .select({
-          airportCode: airportDaylight.airportCode,
-          date: airportDaylight.date,
-          sunrise: airportDaylight.sunrise,
-          sunset: airportDaylight.sunset,
-        })
-        .from(airportDaylight)
-        .where(
-          and(
-            inArray(airportDaylight.airportCode, airportCodes),
-            or(
-              eq(airportDaylight.date, todayStr),
-              eq(airportDaylight.date, tomorrowStr)
-            )
-          ),
-        );
-
-      for (const row of daylightRows) {
-        if (!daylightMap[row.airportCode]) daylightMap[row.airportCode] = [];
-        daylightMap[row.airportCode].push(row);
-      }
+    // Build daylightMap
+    const daylightMap: Record<string, { airportCode: string; date: string; sunrise: Date; sunset: Date }[]> = {};
+    for (const row of daylightRows) {
+      if (!daylightMap[row.airportCode]) daylightMap[row.airportCode] = [];
+      daylightMap[row.airportCode].push(row);
     }
 
-    // Current GCI weather for the header - find the record closest to now
+    // Current GCI weather for the header — find the record closest to now
     let currentGciWeather: { airportCode: string; timestamp: Date; temperature: number | null; windSpeed: number | null; windDirection: number | null; weatherCode: number | null } | null = null;
     if (weatherMap['GCI'] && weatherMap['GCI'].length > 0) {
       currentGciWeather = weatherMap['GCI'].reduce((closest, current) => {
@@ -208,14 +228,6 @@ export const load: PageServerLoad = async ({ url }) => {
         return currentDiff < closestDiff ? current : closest;
       });
     }
-
-    // Get last successful scrape time
-    const [lastScrape] = await db
-      .select({ completedAt: scraperLogs.completedAt })
-      .from(scraperLogs)
-      .where(eq(scraperLogs.status, 'success'))
-      .orderBy(desc(scraperLogs.completedAt))
-      .limit(1);
 
     return {
       flights: flightsForDisplay,
@@ -230,9 +242,9 @@ export const load: PageServerLoad = async ({ url }) => {
     };
   } catch (err) {
     console.error('Error loading flights:', err);
-    return { 
-      flights: [], 
-      weather: null, 
+    return {
+      flights: [],
+      weather: null,
       weatherMap: {},
       daylightMap: {},
       lastUpdated: now,

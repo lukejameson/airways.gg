@@ -2,6 +2,12 @@ import type { Handle, HandleServerError } from '@sveltejs/kit';
 
 export const handle: Handle = async ({ event, resolve }) => {
   const response = await resolve(event);
+  if (
+    event.request.method === 'GET' &&
+    (response.headers.get('content-type') ?? '').includes('text/html')
+  ) {
+    response.headers.set('Cache-Control', 'public, max-age=0, s-maxage=30, stale-while-revalidate=60');
+  }
   return response;
 };
 
