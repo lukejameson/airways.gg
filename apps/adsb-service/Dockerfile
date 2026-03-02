@@ -1,5 +1,4 @@
 # Build from monorepo root context (docker-compose sets context: .)
-# No TypeScript build step — dist/ contains pre-compiled JS
 FROM node:20-alpine AS builder
 
 WORKDIR /app
@@ -16,7 +15,11 @@ RUN npm install
 COPY packages/database/ ./packages/database/
 COPY apps/adsb-service/ ./apps/adsb-service/
 
+# Build database package first, then adsb-service
 WORKDIR /app/packages/database
+RUN npm run build
+
+WORKDIR /app/apps/adsb-service
 RUN npm run build
 
 # Prune devDependencies before copying to the production image
