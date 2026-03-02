@@ -22,6 +22,8 @@ export {
   sessions,
   departures,
   arrivals,
+  pushSubscriptions,
+  notificationWatermark,
   userRoleEnum,
   scraperServiceEnum,
   scraperStatusEnum,

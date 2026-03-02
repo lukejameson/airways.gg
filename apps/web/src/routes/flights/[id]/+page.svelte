@@ -6,6 +6,7 @@
   import Icon from '$lib/components/Icon.svelte';
   import type { IconName } from '$lib/components/Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
+  import NotifyButton from '$lib/components/NotifyButton.svelte';
 
   let { data }: { data: PageData } = $props();
   
@@ -414,17 +415,20 @@
 </svelte:head>
 
 <div class="container py-4 sm:py-6 max-w-3xl">
-  <!-- Top row: Back + Share -->
+  <!-- Top row: Back + Notify + Share -->
   <div class="flex items-center justify-between mb-4">
-    <a 
+    <a
       href="/{returnTab ? `?tab=${returnTab}` : ''}"
       class="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
     >
       ← Back
     </a>
-    
-    <button
-      onclick={shareFlight}
+
+    <div class="flex items-center gap-1">
+      <NotifyButton flightId={flight.id} flightCode={flight.flightNumber} flightDate={flight.flightDate} />
+
+      <button
+        onclick={shareFlight}
       class="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors rounded-md px-2 py-1"
       aria-label="Share this flight"
     >
@@ -440,6 +444,7 @@
         Share
       {/if}
     </button>
+    </div>
   </div>
 
   <!-- Flight Info Header -->

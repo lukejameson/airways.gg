@@ -21,6 +21,7 @@ services:
       - PUBLIC_BUY_ME_A_COFFEE_URL=${PUBLIC_BUY_ME_A_COFFEE_URL}
       - PUBLIC_UMAMI_WEBSITE_ID=${PUBLIC_UMAMI_WEBSITE_ID}
       - PUBLIC_UMAMI_URL=${PUBLIC_UMAMI_URL}
+      - PUBLIC_VAPID_PUBLIC_KEY=${PUBLIC_VAPID_PUBLIC_KEY}
     labels:
       - 'traefik.enable=true'
       - 'traefik.http.routers.airwaysgg-dev.rule=Host(`${DOMAIN}`)'
@@ -30,6 +31,21 @@ services:
       - 'traefik.http.services.airwaysgg-dev.loadbalancer.server.port=3000'
     depends_on:
       - ml-service
+    networks:
+      - web
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: apps/notification-service/Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
+      - VAPID_SUBJECT=${VAPID_SUBJECT}
+      - NOTIFY_POLL_INTERVAL_MS=${NOTIFY_POLL_INTERVAL_MS:-15000}
+      - NODE_ENV=production
     networks:
       - web
     restart: unless-stopped

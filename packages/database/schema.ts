@@ -280,3 +280,24 @@ export const mlModelMetrics = pgTable('ml_model_metrics', {
   uniqueIndex('ml_model_metrics_version_idx').on(table.modelVersion),
   index('ml_model_metrics_trained_at_idx').on(table.trainedAt),
 ]);
+
+export const pushSubscriptions = pgTable('push_subscriptions', {
+  id: serial('id').primaryKey(),
+  endpoint: text('endpoint').notNull(),
+  subscription: jsonb('subscription').notNull(),
+  flightId: integer('flight_id').notNull().references(() => flights.id, { onDelete: 'cascade' }),
+  flightCode: varchar('flight_code', { length: 20 }).notNull(),
+  flightDate: date('flight_date').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  lastNotifiedAt: timestamp('last_notified_at'),
+}, (table) => [
+  uniqueIndex('push_subscriptions_endpoint_flight_idx').on(table.endpoint, table.flightId),
+  index('push_subscriptions_flight_id_idx').on(table.flightId),
+  index('push_subscriptions_flight_date_idx').on(table.flightDate),
+]);
+
+export const notificationWatermark = pgTable('notification_watermark', {
+  id: serial('id').primaryKey(),
+  lastProcessedId: integer('last_processed_id').notNull().default(0),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
