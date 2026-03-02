@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { db, flights, weatherData, scraperLogs, airportDaylight, flightTimes } from '$lib/server/db';
-import { and, gte, lte, inArray, or, eq, desc, count, not } from 'drizzle-orm';
+import { and, gte, lte, inArray, or, eq, desc, asc, count, not } from 'drizzle-orm';
 
 // Guernsey local timezone
 const GY_TZ = 'Europe/London';
@@ -186,6 +186,7 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
                 )
               ),
             )
+            .orderBy(asc(airportDaylight.date))
         : Promise.resolve([]),
     ]);
 

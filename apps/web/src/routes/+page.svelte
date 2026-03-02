@@ -42,7 +42,9 @@
 
   // Determine if it's currently daytime at GCI for weather icon selection
   const gciIsDay = $derived.by(() => {
-    const gciDaylight = (data.daylightMap as Record<string, { sunrise: Date; sunset: Date }[] | undefined>)?.['GCI']?.[0];
+    const entries = (data.daylightMap as Record<string, { date: string; sunrise: Date; sunset: Date }[] | undefined>)?.['GCI'];
+    // Always use today's entry; fall back to first entry if today's is absent
+    const gciDaylight = entries?.find(e => e.date === data.todayStr) ?? entries?.[0];
     if (!gciDaylight) return true; // Default to day
     const now = new Date();
     return isDaytime(new Date(gciDaylight.sunrise), new Date(gciDaylight.sunset), now);
