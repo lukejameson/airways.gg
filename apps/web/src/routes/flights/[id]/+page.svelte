@@ -366,7 +366,10 @@
       const filtered = (existing as { id: number }[]).filter(f => f.id !== flight.id);
       // Add to front, keep only last 5
       const updated = [flightInfo, ...filtered].slice(0, 5);
-      localStorage.setItem(key, JSON.stringify(updated));
+      const serialized = JSON.stringify(updated);
+      localStorage.setItem(key, serialized);
+      // Mirror to cookie so the server can render the section in SSR (prevents pop-in)
+      document.cookie = `rv=${encodeURIComponent(serialized)}; max-age=${30 * 24 * 60 * 60}; path=/; SameSite=Lax; Secure`;
     }
   });
 

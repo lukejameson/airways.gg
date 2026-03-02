@@ -149,7 +149,10 @@
 
   // Quick filters state
   let activeFilters = $state<string[]>([]);
-  let recentlyViewed = $state<Array<{id: number; flightNumber: string; departureAirport: string; arrivalAirport: string; scheduledDeparture: string; viewedAt: string}>>([]);
+
+  // Seeded from the server (which reads the 'rv' cookie) so the section is present
+  // in the initial SSR HTML — no pop-in or layout shift on page load.
+  let recentlyViewed = $state(data.recentlyViewed);
 
   const filteredFlights = $derived.by(() => {
     let flights = visibleFlights;
@@ -186,16 +189,6 @@
   }
 
   onMount(() => {
-    // Load recently viewed from localStorage
-    try {
-      const stored = localStorage.getItem('recentlyViewedFlights');
-      if (stored) {
-        recentlyViewed = JSON.parse(stored);
-      }
-    } catch {
-      // ignore localStorage errors
-    }
-
     const interval = setInterval(async () => {
       await invalidateAll();
     }, 5 * 60 * 1000);
@@ -355,7 +348,7 @@
       <div class="flex items-center justify-between mb-2">
         <h2 class="text-sm font-medium text-muted-foreground">Recently viewed</h2>
         <button
-          onclick={() => { recentlyViewed = []; localStorage.removeItem('recentlyViewedFlights'); }}
+          onclick={() => { recentlyViewed = []; localStorage.removeItem('recentlyViewedFlights'); document.cookie = 'rv=; max-age=0; path=/; SameSite=Lax; Secure'; }}
           class="text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           Clear
@@ -444,67 +437,84 @@
     <div class="flex-1"></div>
 
     <!-- Filters -->
-     {#if !searchQuery && !isLoading}
-       <div class="flex items-center gap-1.5">
-         {#if !isViewingTomorrow}
-           <button
-             onclick={() => toggleFilter('next-hour')}
-             class="min-h-[36px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-full border transition-colors
-               {activeFilters.includes('next-hour')
-                 ? 'bg-primary text-primary-foreground border-primary'
-                 : 'bg-background text-muted-foreground border-border hover:border-muted-foreground'}"
-           >
-             <span class="hidden sm:inline">Next hour</span>
-             <span class="sm:hidden">1hr</span>
-           </button>
-         {/if}
-        <button
-          onclick={() => toggleFilter('delayed')}
-          class="min-h-[36px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-full border transition-colors
-            {activeFilters.includes('delayed')
-              ? 'bg-amber-500 text-white border-amber-500'
-              : 'bg-background text-muted-foreground border-border hover:border-muted-foreground'}"
-        >
-          Delayed
-        </button>
-        <button
-          onclick={toggleCompleted}
-          disabled={completedCount === 0}
-          class="min-h-[36px] px-2.5 py-1.5 flex items-center gap-1.5 rounded-full border transition-colors text-xs font-medium
-            {showCompleted
-              ? 'bg-muted text-foreground border-muted-foreground/50'
-              : completedCount > 0
-                ? 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border-border'
-                : 'text-muted-foreground/30 cursor-not-allowed border-border'}"
-          aria-label="{showCompleted ? 'Hide completed flights' : 'Show completed flights'} ({completedCount})"
-          title="{showCompleted ? 'Hide' : 'Show'} {completedCount} completed"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            {#if showCompleted}
-              <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>
-            {:else}
-              <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/>
-            {/if}
-          </svg>
-          <span class="hidden sm:inline">{showCompleted ? 'Hide' : 'Show'} done</span>
-        </button>
-        {#if activeFilters.length > 0}
+    {#if !searchQuery}
+      {#if isLoading}
+        <!-- Skeleton filter pills — reserve exact space so tabs row doesn't shift on load.
+             Widths approximate the real buttons: Next hour, Delayed, Show/hide done. -->
+        <div class="flex items-center gap-1.5">
+          {#if !isViewingTomorrow}
+            <div class="h-9 w-10 sm:w-[5.5rem] bg-muted rounded-full animate-pulse"></div>
+          {/if}
+          <div class="h-9 w-[3.75rem] bg-muted rounded-full animate-pulse"></div>
+          <div class="h-9 w-9 bg-muted rounded-full animate-pulse"></div>
+        </div>
+      {:else}
+        <div class="flex items-center gap-1.5">
+          {#if !isViewingTomorrow}
+            <button
+              onclick={() => toggleFilter('next-hour')}
+              class="min-h-[36px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-full border transition-colors
+                {activeFilters.includes('next-hour')
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-background text-muted-foreground border-border hover:border-muted-foreground'}"
+            >
+              <span class="hidden sm:inline">Next hour</span>
+              <span class="sm:hidden">1hr</span>
+            </button>
+          {/if}
           <button
-            onclick={clearFilters}
-            class="min-h-[36px] px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            onclick={() => toggleFilter('delayed')}
+            class="min-h-[36px] px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-full border transition-colors
+              {activeFilters.includes('delayed')
+                ? 'bg-amber-500 text-white border-amber-500'
+                : 'bg-background text-muted-foreground border-border hover:border-muted-foreground'}"
           >
-            Clear
+            Delayed
           </button>
-        {/if}
-      </div>
+          <button
+            onclick={toggleCompleted}
+            disabled={completedCount === 0}
+            class="min-h-[36px] px-2.5 py-1.5 flex items-center gap-1.5 rounded-full border transition-colors text-xs font-medium
+              {showCompleted
+                ? 'bg-muted text-foreground border-muted-foreground/50'
+                : completedCount > 0
+                  ? 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border-border'
+                  : 'text-muted-foreground/30 cursor-not-allowed border-border'}"
+            aria-label="{showCompleted ? 'Hide completed flights' : 'Show completed flights'} ({completedCount})"
+            title="{showCompleted ? 'Hide' : 'Show'} {completedCount} completed"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              {#if showCompleted}
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>
+              {:else}
+                <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/>
+              {/if}
+            </svg>
+            <span class="hidden sm:inline">{showCompleted ? 'Hide' : 'Show'} done</span>
+          </button>
+          {#if activeFilters.length > 0}
+            <button
+              onclick={clearFilters}
+              class="min-h-[36px] px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Clear
+            </button>
+          {/if}
+        </div>
+      {/if}
     {/if}
   </div>
 
   <!-- Board -->
   {#if isLoading}
-    <div class="space-y-3">
+    <!-- gap-1.5 matches FlightBoard's flex flex-col gap-1.5 exactly -->
+    <div class="flex flex-col gap-1.5">
       <FlightCardSkeleton count={6} />
     </div>
+    <!-- Match FlightBoard's flight count paragraph: mt-3 text-center text-xs -->
+    <p class="mt-3 text-center text-xs">
+      <span class="inline-block h-3 w-16 bg-muted rounded animate-pulse"></span>
+    </p>
   {:else}
     <FlightBoard flights={filteredFlights} weatherMap={data.weatherMap} daylightMap={data.daylightMap} returnTab={activeTab} />
   {/if}

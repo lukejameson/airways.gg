@@ -83,7 +83,9 @@ async function fetchLastScrape() {
   return row;
 }
 
-export const load: PageServerLoad = async ({ url }) => {
+type RecentFlight = { id: number; flightNumber: string; departureAirport: string; arrivalAirport: string; scheduledDeparture: string; viewedAt: string };
+
+export const load: PageServerLoad = async ({ url, cookies }) => {
   const now = new Date();
   const todayStr = toGuernseyDateStr(now);
   const tomorrowStr = addDaysToDateStr(todayStr, 1);
@@ -229,6 +231,13 @@ export const load: PageServerLoad = async ({ url }) => {
       });
     }
 
+    // Read recently-viewed from cookie so SSR can render the section without a pop-in
+    let recentlyViewed: RecentFlight[] = [];
+    try {
+      const rv = cookies.get('rv');
+      if (rv) recentlyViewed = JSON.parse(rv); // cookies.get() already decodes via decodeURIComponent
+    } catch { /* malformed cookie — ignore */ }
+
     return {
       flights: flightsForDisplay,
       weather: currentGciWeather,              // current GCI weather for the header
@@ -239,6 +248,7 @@ export const load: PageServerLoad = async ({ url }) => {
       todayStr,                                // Today's date
       tomorrowStr,                             // Tomorrow's date
       autoAdvanced,                            // Whether we auto-advanced to tomorrow
+      recentlyViewed,
     };
   } catch (err) {
     console.error('Error loading flights:', err);
@@ -252,6 +262,7 @@ export const load: PageServerLoad = async ({ url }) => {
       todayStr,
       tomorrowStr,
       autoAdvanced,
+      recentlyViewed: [],
     };
   }
 };
