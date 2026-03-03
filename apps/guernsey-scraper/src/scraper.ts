@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
-import { db, flights, flightStatusHistory, scraperLogs } from '@airways/database';
-import { eq, and, isNull } from 'drizzle-orm';
+import { db, flights, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus } from '@airways/database';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 
 interface StatusUpdate {
   flightCode: string;
@@ -10,7 +10,6 @@ interface StatusUpdate {
 }
 
 interface ScrapedFlight {
-  airline: string;
   location: string;
   codes: string[]; // may be multiple for codeshare flights e.g. "GR670, LM670"
   scheduledTime: Date;
@@ -20,6 +19,28 @@ interface ScrapedFlight {
 }
 
 const BASE_URL = process.env.GUERNSEY_AIRPORT_URL || 'https://www.airport.gg';
+
+// Known typical flight times in minutes for routes from/to GCI.
+// Used to estimate scheduledDeparture/scheduledArrival when only one end is known.
+const ROUTE_FLIGHT_MINUTES: Record<string, number> = {
+  ACI: 10,
+  JER: 15,
+  LGW: 55,
+  LCY: 55,
+  MAN: 60,
+  BRS: 40,
+  SOU: 30,
+  EXT: 40,
+  BHX: 65,
+  CDG: 45,
+  EMA: 65,
+  DUB: 60,
+  EDI: 75,
+};
+
+function routeFlightMinutes(iata: string): number {
+  return ROUTE_FLIGHT_MINUTES[iata] ?? 60;
+}
 
 // Map Guernsey Airport location display names → IATA codes
 const LOCATION_TO_IATA: Record<string, string> = {
@@ -56,9 +77,12 @@ function locationToIata(location: string): string {
 }
 
 // Derive airline code from the primary flight code (first two non-numeric chars)
+// Skybus (SI) and Blue Islands AT6 series (AT) are codeshares under Aurigny (GR)
 function airlineCode(flightCode: string): string {
   const match = flightCode.match(/^([A-Z]{2})/);
-  return match ? match[1] : 'XX';
+  const code = match ? match[1] : 'XX';
+  if (code === 'SI' || code === 'AT') return 'GR';
+  return code;
 }
 
 async function fetchDayHtml(date: Date): Promise<string> {
@@ -100,7 +124,6 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
       const cells = $(row).find('td').toArray();
       if (cells.length < 5) return;
 
-      const airline = $(cells[0]).find('span').first().text().trim() || $(cells[0]).text().trim() || 'Unknown';
       const timeStr = $(cells[1]).text().trim();
       const [hh, mm] = timeStr.split(':').map(Number);
 
@@ -156,7 +179,7 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
         }
       });
 
-      results.push({ airline, location, codes, scheduledTime, flightDate, type, statusUpdates });
+      results.push({ location, codes, scheduledTime, flightDate, type, statusUpdates });
     } catch (err) {
       console.error('[Guernsey] Error parsing row:', err);
     }
@@ -166,16 +189,100 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
 }
 
 /**
- * Derive final status from status updates.
- * Picks the most meaningful terminal status from the update list.
+ * Extract hours and minutes from a time string.
+ * Handles both "HH:MM" (e.g. "12:10") and "HHMM" (e.g. "1210") formats,
+ * since airport.gg inconsistently uses both.
  */
-function deriveStatus(updates: StatusUpdate[]): string | null {
+function parseHHMM(text: string): { hh: number; mm: number } | null {
+  // Try colon-separated first: "12:10", "9:05"
+  const colonMatch = text.match(/(\d{1,2}):(\d{2})/);
+  if (colonMatch) return { hh: parseInt(colonMatch[1]), mm: parseInt(colonMatch[2]) };
+  // Try 4-digit no-colon: "1210", "0905" — only match standalone 4-digit groups
+  // to avoid matching dates or other numbers
+  const noColonMatch = text.match(/(?<!\d)(\d{2})(\d{2})(?!\d)/);
+  if (noColonMatch) {
+    const hh = parseInt(noColonMatch[1]);
+    const mm = parseInt(noColonMatch[2]);
+    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) return { hh, mm };
+  }
+  return null;
+}
+
+/**
+ * Parse an HH:MM or HHMM time from a status message and return it as a Date
+ * on the same day as the reference date, or null if no time found.
+ */
+function parseTimeFromMessage(message: string, referenceDate: Date): Date | null {
+  const parsed = parseHHMM(message);
+  if (!parsed) return null;
+  const t = new Date(referenceDate);
+  t.setHours(parsed.hh, parsed.mm, 0, 0);
+  return t;
+}
+
+/**
+ * Derive a normalised status string from status updates.
+ * Maps raw airport.gg messages to a normalised vocabulary:
+ * Scheduled, On Time, Boarding, Delayed, Airborne, Landed, Cancelled.
+ *
+ * Priority: scan ALL updates for terminal statuses first (landed/airborne/cancelled),
+ * then derive from the most recent update.
+ *
+ * For "Approx HH:MM" messages, compares the time against scheduledTime to determine
+ * whether the flight is actually delayed, on time, or early.
+ */
+function deriveStatus(updates: StatusUpdate[], scheduledTime: Date): string | null {
   if (updates.length === 0) return null;
+
+  // Scan all updates for terminal/important statuses (latest wins)
+  for (const u of [...updates].reverse()) {
+    const msg = u.statusMessage.toLowerCase();
+    if (msg.includes('landed') || msg.includes('voyagereported')) return 'Landed';
+    if (msg.includes('airborne')) return 'Airborne';
+    // Preserve diversion details — the raw message carries the destination
+    if (msg.includes('diverted')) return u.statusMessage;
+    if (msg.includes('diverting')) return u.statusMessage;
+  }
+
+  // Now check the latest update for non-terminal statuses
   const last = updates[updates.length - 1].statusMessage.toLowerCase();
-  if (last.includes('landed')) return 'Landed';
-  if (last.includes('airborne')) return 'Airborne';
-  if (last.includes('cancelled') || last.includes('canceled')) return 'Cancelled';
-  if (last.includes('voyagereported')) return 'Landed';
+  if (last.includes('cancelled') || last.includes('canceled') || last.includes('flight cancelled')) return 'Cancelled';
+
+  // For "Approx HH:MM" without an explicit "delayed" keyword, compare the time
+  // to the scheduled time — it might be on time or even early.
+  if (last.includes('approx') && !last.includes('delayed')) {
+    const approxTime = parseTimeFromMessage(updates[updates.length - 1].statusMessage, scheduledTime);
+    if (approxTime) {
+      const diffMs = approxTime.getTime() - scheduledTime.getTime();
+      const diffMins = Math.round(diffMs / 60_000);
+      // Allow a 5-minute tolerance — anything within 5 mins of scheduled is "on time"
+      if (diffMins <= 5) return 'Scheduled';
+      return 'Delayed';
+    }
+    // No time in the message — fall through to generic delay handling
+  }
+
+  // Delay indicators: "Flight Delayed", "Delayed To HH:MM", "Expected at HH:MM",
+  // "New ETD HH:MM", "Next Info HH:MM", "Indefinite Delay", "Boarding Expected HH:MM"
+  if (last.includes('delayed') || last.includes('expected at') ||
+      last.includes('new etd') || last.includes('next info') || last.includes('indefini') ||
+      last.includes('boarding expected')) return 'Delayed';
+  // Check-in phase — distinct from Boarding (passengers aren't at the gate yet)
+  if (last.includes('check in open') || last.includes('check-in open') ||
+      last.includes('go to departure')) return 'Check-In Open';
+  // Boarding-related: "Final Call", "Go To Door/Gate", "Door and Gate Closed",
+  // "Wait In Lounge"
+  if (last.includes('final call') || last.includes('go to door') || last.includes('go to gate') ||
+      last.includes('gate closed') || last.includes('door and gate') ||
+      last.includes('wait in lounge')) return 'Boarding';
+  if (last.includes('check in suspended') || last.includes('check in closes') ||
+      last.includes('check-in closes') || last.includes('check in opens')) return 'Delayed';
+  if (last.includes('holding overhead') || last.includes('holding in')) return 'Airborne';
+  if (last.includes('on time')) return 'Scheduled';
+  if (last.includes('pax on') || last.includes('pax from') || last.includes('passengers on') ||
+      last.includes('passengers from')) return 'Scheduled';
+
+  // Return the raw message for anything truly unknown
   return updates[updates.length - 1].statusMessage;
 }
 
@@ -185,10 +292,10 @@ function deriveStatus(updates: StatusUpdate[]): string | null {
 function extractActualTime(updates: StatusUpdate[], keyword: string): Date | null {
   for (const u of [...updates].reverse()) {
     if (u.statusMessage.toLowerCase().includes(keyword.toLowerCase())) {
-      const match = u.statusMessage.match(/(\d{1,2}):(\d{2})/);
-      if (match) {
+      const parsed = parseHHMM(u.statusMessage);
+      if (parsed) {
         const t = new Date(u.statusTimestamp);
-        t.setHours(parseInt(match[1]), parseInt(match[2]), 0, 0);
+        t.setHours(parsed.hh, parsed.mm, 0, 0);
         return t;
       }
     }
@@ -196,10 +303,83 @@ function extractActualTime(updates: StatusUpdate[], keyword: string): Date | nul
   return null;
 }
 
+/** Returns true if any status message indicates the flight was cancelled. */
+function extractCanceled(updates: StatusUpdate[]): boolean {
+  return updates.some(u => {
+    const msg = u.statusMessage.toLowerCase();
+    return msg.includes('cancelled') || msg.includes('canceled');
+  });
+}
+
+/**
+ * Scans status updates in reverse for time-bearing messages:
+ *   - "Delayed To HH:MM"
+ *   - "Approx HH:MM" (estimated arrival/departure time from the airport board)
+ *
+ * Returns the delay in minutes relative to scheduledTime (can be 0 for on-time,
+ * negative values are clamped to 0), or null if no time-bearing message found.
+ */
+function extractDelayMinutes(updates: StatusUpdate[], scheduledTime: Date): number | null {
+  for (const u of [...updates].reverse()) {
+    const msg = u.statusMessage.toLowerCase();
+    // Match any time-bearing delay message: "Delayed To HH:MM", "Approx HH:MM",
+    // "New ETD HH:MM", "Expected at HH:MM", "Delayed until HH:MM", "Boarding Expected HH:MM"
+    if (msg.includes('delayed to') || msg.startsWith('approx') || msg.includes('new etd') ||
+        msg.includes('expected at') || msg.includes('delayed until') || msg.includes('boarding expected') ||
+        msg.includes('flight delayed to approx')) {
+      const parsed = parseHHMM(u.statusMessage);
+      if (parsed) {
+        const estimatedTime = new Date(scheduledTime);
+        estimatedTime.setHours(parsed.hh, parsed.mm, 0, 0);
+        const diffMs = estimatedTime.getTime() - scheduledTime.getTime();
+        const diffMins = Math.round(diffMs / 60_000);
+        // Within 5 minutes of scheduled is considered on-time (not delayed)
+        if (diffMins <= 5) return 0;
+        return diffMins;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract estimated time from "Delayed To HH:MM" or "Approx HH:MM" messages.
+ * Returns the absolute estimated time for use in flightTimes (EstimatedBlockOff/On).
+ * Returns the time even if it's earlier than scheduled (early arrival/departure).
+ */
+function extractEstimatedTime(updates: StatusUpdate[], scheduledTime: Date): Date | null {
+  for (const u of [...updates].reverse()) {
+    const msg = u.statusMessage.toLowerCase();
+    // Match any time-bearing delay/estimate message
+    if (msg.includes('delayed to') || msg.startsWith('approx') || msg.includes('new etd') ||
+        msg.includes('expected at') || msg.includes('delayed until') || msg.includes('boarding expected') ||
+        msg.includes('flight delayed to approx')) {
+      const parsed = parseHHMM(u.statusMessage);
+      if (parsed) {
+        const estimated = new Date(scheduledTime);
+        estimated.setHours(parsed.hh, parsed.mm, 0, 0);
+        return estimated;
+      }
+    }
+  }
+  return null;
+}
+
+/** Inserts or updates a flightTimes row keyed on (flightId, timeType). */
+async function upsertFlightTime(flightId: number, timeType: string, timeValue: Date): Promise<void> {
+  await db
+    .insert(flightTimes)
+    .values({ flightId, timeType, timeValue })
+    .onConflictDoUpdate({
+      target: [flightTimes.flightId, flightTimes.timeType],
+      set: { timeValue },
+    });
+}
+
 /**
  * Upsert a flight into the flights table and return its id.
  * Uses flight_number + flight_date as the natural key for historical data
- * (we don't have Aurigny's unique_id for historical flights).
+ * (historical flights use flightNumber_date format for unique_id).
  */
 async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null> {
   // Use the primary (first) flight code — codeshares share the same flight record
@@ -209,10 +389,20 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
   const departureAirport = scrapedFlight.type === 'departures' ? 'GCI' : otherIata;
   const arrivalAirport   = scrapedFlight.type === 'departures' ? otherIata : 'GCI';
 
-  // Scheduled arrival: we only have scheduled departure time from the site.
-  // Estimate +1h for arrival (we'll get real times from status updates).
-  const scheduledDeparture = scrapedFlight.scheduledTime;
-  const scheduledArrival   = new Date(scheduledDeparture.getTime() + 60 * 60 * 1000);
+  // airport.gg shows the relevant endpoint time:
+  //   departures → scheduled departure time from GCI
+  //   arrivals   → scheduled arrival time at GCI
+  // Use route-specific flight duration to estimate the other end.
+  const flightMins = routeFlightMinutes(otherIata);
+  let scheduledDeparture: Date;
+  let scheduledArrival: Date;
+  if (scrapedFlight.type === 'departures') {
+    scheduledDeparture = scrapedFlight.scheduledTime;
+    scheduledArrival   = new Date(scheduledDeparture.getTime() + flightMins * 60_000);
+  } else {
+    scheduledArrival   = scrapedFlight.scheduledTime;
+    scheduledDeparture = new Date(scheduledArrival.getTime() - flightMins * 60_000);
+  }
 
   const actualDeparture = scrapedFlight.type === 'departures'
     ? extractActualTime(scrapedFlight.statusUpdates, 'Airborne')
@@ -221,24 +411,67 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
     ? extractActualTime(scrapedFlight.statusUpdates, 'Landed')
     : null;
 
-  const status = deriveStatus(scrapedFlight.statusUpdates);
+  const status = deriveStatus(scrapedFlight.statusUpdates, scrapedFlight.scheduledTime);
+  const canceled = extractCanceled(scrapedFlight.statusUpdates);
+  // For departures, "Delayed To HH:MM" / "Approx HH:MM" refers to the new departure time.
+  // For arrivals, it refers to the new arrival time.
+  const delayBaseTime = scrapedFlight.type === 'departures' ? scheduledDeparture : scheduledArrival;
+  const delayMinutes = extractDelayMinutes(scrapedFlight.statusUpdates, delayBaseTime);
+  const estimatedTime = extractEstimatedTime(scrapedFlight.statusUpdates, delayBaseTime);
 
-  // unique_id for historical flights: "<flightNumber>_<flightDate>"
-  // Aurigny scraper uses its own unique_id format — these won't clash since
-  // Aurigny's format is derived from their internal XML UniqueId field.
-  const uniqueId = `${primaryCode}_${scrapedFlight.flightDate}`;
-
-  // Build the conflict update set — only include fields we actually have values for
-  const updateSet: Record<string, unknown> = {};
-  if (actualDeparture) updateSet.actualDeparture = actualDeparture;
-  if (actualArrival)   updateSet.actualArrival   = actualArrival;
-  if (status)          updateSet.status          = status;
+  // Build the update set — only include fields that have data to avoid
+  // overwriting richer data from other scrapers with nulls.
+  const updateSet: Record<string, unknown> = {
+    updatedAt: new Date(),
+  };
+  if (actualDeparture)        updateSet.actualDeparture = actualDeparture;
+  if (actualArrival)          updateSet.actualArrival   = actualArrival;
+  if (status)                 updateSet.status          = status;
+  if (canceled)               updateSet.canceled        = canceled;
+  if (delayMinutes !== null)  updateSet.delayMinutes    = delayMinutes;
 
   try {
-    let result: { id: number }[];
+    // First check if a flight already exists for this flight_number + flight_date.
+    // This catches records created by other scrapers (e.g. numeric unique_ids from fr24)
+    // and avoids creating duplicates.
+    const existing = await db
+      .select({ id: flights.id, status: flights.status })
+      .from(flights)
+      .where(
+        and(
+          eq(flights.flightNumber, primaryCode),
+          eq(flights.flightDate, scrapedFlight.flightDate),
+        ),
+      )
+      .limit(1);
 
-    if (Object.keys(updateSet).length > 0) {
-      result = await db
+    let flightId: number | null;
+
+    if (existing.length > 0) {
+      // Safety net: don't downgrade status (e.g. stale re-parse overwriting Landed)
+      // Exception: allow "Delayed" → "Scheduled" when the approx time shows the flight
+      // is actually on-time (corrects earlier mis-classification)
+      const isDelayedCorrection = existing[0].status === 'Delayed' && status === 'Scheduled';
+      if (status && !isDelayedCorrection && !canUpgradeStatus(existing[0].status, status)) {
+        delete updateSet.status;
+      }
+      // When correcting from Delayed to Scheduled, also clear stale delayMinutes
+      if (isDelayedCorrection && delayMinutes === 0) {
+        updateSet.delayMinutes = 0;
+      }
+
+      // Update the existing record (may have been created by another scraper or a previous guernsey scrape)
+      flightId = existing[0].id;
+      if (Object.keys(updateSet).length > 1) { // > 1 because updatedAt is always present
+        await db
+          .update(flights)
+          .set(updateSet)
+          .where(eq(flights.id, flightId));
+      }
+    } else {
+      // No existing record — insert a new one with guernsey unique_id
+      const uniqueId = `${primaryCode}_${scrapedFlight.flightDate}`;
+      const result = await db
         .insert(flights)
         .values({
           uniqueId,
@@ -248,42 +481,26 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
           arrivalAirport,
           scheduledDeparture,
           scheduledArrival,
-          actualDeparture: actualDeparture ?? undefined,
-          actualArrival:   actualArrival ?? undefined,
-          status:          status ?? undefined,
-          flightDate:      scrapedFlight.flightDate,
+          actualDeparture:  actualDeparture ?? undefined,
+          actualArrival:    actualArrival ?? undefined,
+          status:           status ?? undefined,
+          canceled,
+          delayMinutes:     delayMinutes ?? undefined,
+          flightDate:       scrapedFlight.flightDate,
         })
         .onConflictDoUpdate({ target: flights.uniqueId, set: updateSet as any })
         .returning({ id: flights.id });
-    } else {
-      // No actual times/status yet — insert if new, skip if already exists
-      result = await db
-        .insert(flights)
-        .values({
-          uniqueId,
-          flightNumber: primaryCode,
-          airlineCode: airlineCode(primaryCode),
-          departureAirport,
-          arrivalAirport,
-          scheduledDeparture,
-          scheduledArrival,
-          flightDate: scrapedFlight.flightDate,
-        })
-        .onConflictDoNothing()
-        .returning({ id: flights.id });
-
-      // If onConflictDoNothing fired (row already existed), fetch its id
-      if (result.length === 0) {
-        const existing = await db
-          .select({ id: flights.id })
-          .from(flights)
-          .where(eq(flights.uniqueId, uniqueId))
-          .limit(1);
-        result = existing;
-      }
+      flightId = result[0]?.id ?? null;
     }
 
-    return result[0]?.id ?? null;
+    // Write estimated time to flightTimes so the web app can display it.
+    // Departures use EstimatedBlockOff (pushback time), arrivals use EstimatedBlockOn (landing time).
+    if (flightId !== null && estimatedTime !== null) {
+      const timeType = scrapedFlight.type === 'departures' ? 'EstimatedBlockOff' : 'EstimatedBlockOn';
+      await upsertFlightTime(flightId, timeType, estimatedTime);
+    }
+
+    return flightId;
   } catch (err) {
     console.error(`[Guernsey] Error upserting flight ${primaryCode} on ${scrapedFlight.flightDate}:`, err);
     return null;
@@ -363,6 +580,79 @@ export async function linkOrphanedStatusHistory(): Promise<number> {
   return linked;
 }
 
+/**
+ * One-shot deduplication: when multiple scrapers created rows for the same
+ * flight_number + flight_date (e.g. numeric unique_id from fr24 and
+ * flightNumber_date unique_id from guernsey), keep the numeric-id record
+ * (typically richer data) and delete the guernsey duplicate.
+ * Also repoints any flight_status_history rows.
+ */
+export async function deduplicateFlights(): Promise<number> {
+  console.log('[Guernsey] Deduplicating flights (overlapping scraper records)...');
+
+  // Find guernsey records (unique_id contains '_') that have a matching
+  // numeric-id record for the same flight_number + flight_date
+  const guernseyRecords = await db
+    .select({
+      id: flights.id,
+      flightNumber: flights.flightNumber,
+      flightDate: flights.flightDate,
+    })
+    .from(flights)
+    .where(sql`position('_' in ${flights.uniqueId}) > 0`);
+
+  if (guernseyRecords.length === 0) {
+    console.log('[Guernsey] No guernsey-format records found');
+    return 0;
+  }
+
+  // For each guernsey record, check if a numeric-id record exists
+  const dupes: { guernseyId: number; keepId: number }[] = [];
+  for (const g of guernseyRecords) {
+    const numericMatch = await db
+      .select({ id: flights.id })
+      .from(flights)
+      .where(
+        and(
+          eq(flights.flightNumber, g.flightNumber),
+          eq(flights.flightDate, g.flightDate),
+          sql`position('_' in ${flights.uniqueId}) = 0`,
+        ),
+      )
+      .limit(1);
+
+    if (numericMatch.length > 0) {
+      dupes.push({ guernseyId: g.id, keepId: numericMatch[0].id });
+    }
+  }
+
+  if (dupes.length === 0) {
+    console.log('[Guernsey] No duplicates found');
+    return 0;
+  }
+
+  console.log(`[Guernsey] Found ${dupes.length} duplicate pairs`);
+
+  let deleted = 0;
+  for (const { guernseyId: guernsey_id, keepId: keep_id } of dupes) {
+    // Repoint status history from guernsey record to the kept record
+    await db
+      .update(flightStatusHistory)
+      .set({ flightId: keep_id })
+      .where(eq(flightStatusHistory.flightId, guernsey_id));
+
+    // Delete guernsey flight_times (can't just update — may conflict on unique constraint)
+    await db.delete(flightTimes).where(eq(flightTimes.flightId, guernsey_id));
+
+    // Delete the guernsey duplicate flight
+    await db.delete(flights).where(eq(flights.id, guernsey_id));
+    deleted++;
+  }
+
+  console.log(`[Guernsey] Deleted ${deleted} duplicate guernsey records`);
+  return deleted;
+}
+
 async function scrapeDateRange(
   startDate: Date,
   endDate: Date,
@@ -422,6 +712,28 @@ async function scrapeDateRange(
   }
 
   return { totalFlights, totalUpdates };
+}
+
+/**
+ * Scrape all arrivals and departures for a single date.
+ * Used by live mode to poll today (and optionally tomorrow).
+ */
+export async function scrapeDayFlights(date: Date): Promise<{ flights: number; updates: number }> {
+  const html = await fetchDayHtml(date);
+  let totalFlights = 0;
+  let totalUpdates = 0;
+
+  for (const type of ['arrivals', 'departures'] as const) {
+    const scrapedFlights = parseFlightHtml(html, date, type);
+    totalFlights += scrapedFlights.length;
+
+    for (const flight of scrapedFlights) {
+      const flightId = await upsertFlight(flight);
+      totalUpdates += await saveStatusUpdates(flight.statusUpdates, flightId);
+    }
+  }
+
+  return { flights: totalFlights, updates: totalUpdates };
 }
 
 export async function runBackfill(

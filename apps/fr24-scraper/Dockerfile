@@ -1,5 +1,5 @@
 # Build from monorepo root context
-# docker-compose.yml: context: . / dockerfile: apps/aurigny-scraper/Dockerfile
+# docker-compose.yml: context: . / dockerfile: apps/fr24-scraper/Dockerfile
 
 FROM node:20-slim AS builder
 
@@ -8,18 +8,18 @@ WORKDIR /app
 # Copy workspace manifests
 COPY package*.json ./
 COPY packages/database/package*.json ./packages/database/
-COPY apps/aurigny-scraper/package*.json ./apps/aurigny-scraper/
+COPY apps/fr24-scraper/package*.json ./apps/fr24-scraper/
 
 # Install dependencies - puppeteer-real-browser will download its patched Chrome
 RUN npm install
 
 COPY packages/database/ ./packages/database/
-COPY apps/aurigny-scraper/ ./apps/aurigny-scraper/
+COPY apps/fr24-scraper/ ./apps/fr24-scraper/
 
 WORKDIR /app/packages/database
 RUN npm run build
 
-WORKDIR /app/apps/aurigny-scraper
+WORKDIR /app/apps/fr24-scraper
 RUN npm run build
 
 # Prune devDependencies before copying to the production image
@@ -75,8 +75,8 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-COPY --from=builder /app/apps/aurigny-scraper/dist ./dist
-COPY --from=builder /app/apps/aurigny-scraper/package*.json ./
+COPY --from=builder /app/apps/fr24-scraper/dist ./dist
+COPY --from=builder /app/apps/fr24-scraper/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/database ./packages/database
 
@@ -88,7 +88,7 @@ RUN groupadd -r scraper && useradd -r -g scraper -m -d /home/scraper scraper \
     && usermod -aG video scraper \
     && chmod 1777 /tmp
 
-COPY apps/aurigny-scraper/docker-entrypoint.sh /usr/local/bin/
+COPY apps/fr24-scraper/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Copy puppeteer's downloaded Chrome from builder's cache to a shared location

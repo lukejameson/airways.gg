@@ -37,7 +37,7 @@
 
 <svelte:head>
   <title>{hasSearch ? `"${data.query || data.date}" — Search · airways.gg` : 'Search Flights — airways.gg'}</title>
-  <meta name="description" content="Search Guernsey Airport flights by flight number, airline, or airport code. Find live status and delay predictions for any Aurigny or connecting flight." />
+  <meta name="description" content="Search Guernsey Airport flights by flight number, airline, or airport code. Find live status and delay predictions for Aurigny, Blue Islands, and other flights." />
   <link rel="canonical" href="{data.siteUrl}/search" />
   <!-- Don't index search result pages — only the bare /search UI -->
   {#if hasSearch}

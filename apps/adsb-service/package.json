@@ -1,21 +1,21 @@
 {
-  "name": "@airways/weather-service",
+  "name": "@airways/adsb-service",
   "version": "1.0.0",
-  "description": "OpenMeteo weather fetcher for airways.gg",
+  "description": "ADS-B registration and airborne status lookup for airways.gg",
   "type": "commonjs",
+  "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "dev": "tsc && node dist/index.js",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js"
   },
   "dependencies": {
     "@airways/database": "*",
     "dotenv": "^16.0.0",
-    "suncalc": "^1.9.0"
+    "drizzle-orm": "^0.45.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/suncalc": "^1.9.2",
     "typescript": "^5.3.0"
   }
 }

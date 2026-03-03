@@ -14,8 +14,7 @@ on:
 # ──────────────────────────────────────────────────────────────────────────────
 # Change detection
 # Each service is rebuilt only when its own source OR the shared database
-# package changes. This avoids rebuilding the heavy aurigny-scraper image
-# (Puppeteer + real Chrome) when only the web frontend changed, etc.
+# package changes. This keeps builds fast by only rebuilding what changed.
 #
 # NOTE: output key names must use underscores — hyphens are invalid in GitHub
 # Actions expression syntax (parsed as the minus operator).
@@ -25,8 +24,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       web:               ${{ steps.changes.outputs.web }}
-      aurigny_scraper:   ${{ steps.changes.outputs.aurigny_scraper }}
       guernsey_scraper:  ${{ steps.changes.outputs.guernsey_scraper }}
+      fr24_scraper:      ${{ steps.changes.outputs.fr24_scraper }}
+      adsb_service:      ${{ steps.changes.outputs.adsb_service }}
       position_service:  ${{ steps.changes.outputs.position_service }}
       weather_service:   ${{ steps.changes.outputs.weather_service }}
       ml_service:        ${{ steps.changes.outputs.ml_service }}
@@ -43,12 +43,16 @@ jobs:
               - 'apps/web/**'
               - 'packages/database/**'
               - 'package*.json'
-            aurigny_scraper:
-              - 'apps/aurigny-scraper/**'
-              - 'packages/database/**'
-              - 'package*.json'
             guernsey_scraper:
               - 'apps/guernsey-scraper/**'
+              - 'packages/database/**'
+              - 'package*.json'
+            fr24_scraper:
+              - 'apps/fr24-scraper/**'
+              - 'packages/database/**'
+              - 'package*.json'
+            adsb_service:
+              - 'apps/adsb-service/**'
               - 'packages/database/**'
               - 'package*.json'
             position_service:
@@ -108,7 +112,7 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_SSH_PORT }}
           passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
-          envs: CHANGED_WEB,CHANGED_AURIGNY_SCRAPER,CHANGED_GUERNSEY_SCRAPER,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
+          envs: CHANGED_WEB,CHANGED_GUERNSEY_SCRAPER,CHANGED_FR24_SCRAPER,CHANGED_ADSB_SERVICE,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
           # Pass change flags as env vars into the SSH session via with.envs
           # (appleboy/ssh-action reads these from the runner environment)
           script: |
@@ -124,8 +128,9 @@ jobs:
             # Build only changed services
             SERVICES=""
             [ "$CHANGED_WEB"               = "true" ] && SERVICES="$SERVICES app"
-            [ "$CHANGED_AURIGNY_SCRAPER"   = "true" ] && SERVICES="$SERVICES aurigny-scraper"
             [ "$CHANGED_GUERNSEY_SCRAPER"  = "true" ] && SERVICES="$SERVICES guernsey-scraper"
+            [ "$CHANGED_FR24_SCRAPER"      = "true" ] && SERVICES="$SERVICES fr24-scraper"
+            [ "$CHANGED_ADSB_SERVICE"      = "true" ] && SERVICES="$SERVICES adsb-service"
             [ "$CHANGED_POSITION_SERVICE"  = "true" ] && SERVICES="$SERVICES position-service"
             [ "$CHANGED_WEATHER_SERVICE"   = "true" ] && SERVICES="$SERVICES weather-service"
             [ "$CHANGED_ML_SERVICE"        = "true" ] && SERVICES="$SERVICES ml-service"
@@ -147,8 +152,9 @@ jobs:
             docker system df
         env:
           CHANGED_WEB:              ${{ needs.detect-changes.outputs.web }}
-          CHANGED_AURIGNY_SCRAPER:  ${{ needs.detect-changes.outputs.aurigny_scraper }}
           CHANGED_GUERNSEY_SCRAPER: ${{ needs.detect-changes.outputs.guernsey_scraper }}
+          CHANGED_FR24_SCRAPER:     ${{ needs.detect-changes.outputs.fr24_scraper }}
+          CHANGED_ADSB_SERVICE:     ${{ needs.detect-changes.outputs.adsb_service }}
           CHANGED_POSITION_SERVICE: ${{ needs.detect-changes.outputs.position_service }}
           CHANGED_WEATHER_SERVICE:  ${{ needs.detect-changes.outputs.weather_service }}
           CHANGED_ML_SERVICE:       ${{ needs.detect-changes.outputs.ml_service }}
@@ -170,7 +176,7 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_SSH_PORT }}
           passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
-          envs: CHANGED_WEB,CHANGED_AURIGNY_SCRAPER,CHANGED_GUERNSEY_SCRAPER,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
+          envs: CHANGED_WEB,CHANGED_GUERNSEY_SCRAPER,CHANGED_FR24_SCRAPER,CHANGED_ADSB_SERVICE,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
           script: |
             set -e
             cd /opt/airways.gg-test
@@ -183,8 +189,9 @@ jobs:
 
             SERVICES=""
             [ "$CHANGED_WEB"               = "true" ] && SERVICES="$SERVICES app"
-            [ "$CHANGED_AURIGNY_SCRAPER"   = "true" ] && SERVICES="$SERVICES aurigny-scraper"
             [ "$CHANGED_GUERNSEY_SCRAPER"  = "true" ] && SERVICES="$SERVICES guernsey-scraper"
+            [ "$CHANGED_FR24_SCRAPER"      = "true" ] && SERVICES="$SERVICES fr24-scraper"
+            [ "$CHANGED_ADSB_SERVICE"      = "true" ] && SERVICES="$SERVICES adsb-service"
             [ "$CHANGED_POSITION_SERVICE"  = "true" ] && SERVICES="$SERVICES position-service"
             [ "$CHANGED_WEATHER_SERVICE"   = "true" ] && SERVICES="$SERVICES weather-service"
             [ "$CHANGED_ML_SERVICE"        = "true" ] && SERVICES="$SERVICES ml-service"
@@ -205,8 +212,9 @@ jobs:
             docker system df
         env:
           CHANGED_WEB:              ${{ needs.detect-changes.outputs.web }}
-          CHANGED_AURIGNY_SCRAPER:  ${{ needs.detect-changes.outputs.aurigny_scraper }}
           CHANGED_GUERNSEY_SCRAPER: ${{ needs.detect-changes.outputs.guernsey_scraper }}
+          CHANGED_FR24_SCRAPER:     ${{ needs.detect-changes.outputs.fr24_scraper }}
+          CHANGED_ADSB_SERVICE:     ${{ needs.detect-changes.outputs.adsb_service }}
           CHANGED_POSITION_SERVICE: ${{ needs.detect-changes.outputs.position_service }}
           CHANGED_WEATHER_SERVICE:  ${{ needs.detect-changes.outputs.weather_service }}
           CHANGED_ML_SERVICE:       ${{ needs.detect-changes.outputs.ml_service }}
@@ -228,7 +236,7 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_SSH_PORT }}
           passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
-          envs: CHANGED_WEB,CHANGED_AURIGNY_SCRAPER,CHANGED_GUERNSEY_SCRAPER,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
+          envs: CHANGED_WEB,CHANGED_GUERNSEY_SCRAPER,CHANGED_FR24_SCRAPER,CHANGED_ADSB_SERVICE,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
           script: |
             set -e
             cd /opt/airways.gg
@@ -241,8 +249,9 @@ jobs:
 
             SERVICES=""
             [ "$CHANGED_WEB"               = "true" ] && SERVICES="$SERVICES app"
-            [ "$CHANGED_AURIGNY_SCRAPER"   = "true" ] && SERVICES="$SERVICES aurigny-scraper"
             [ "$CHANGED_GUERNSEY_SCRAPER"  = "true" ] && SERVICES="$SERVICES guernsey-scraper"
+            [ "$CHANGED_FR24_SCRAPER"      = "true" ] && SERVICES="$SERVICES fr24-scraper"
+            [ "$CHANGED_ADSB_SERVICE"      = "true" ] && SERVICES="$SERVICES adsb-service"
             [ "$CHANGED_POSITION_SERVICE"  = "true" ] && SERVICES="$SERVICES position-service"
             [ "$CHANGED_WEATHER_SERVICE"   = "true" ] && SERVICES="$SERVICES weather-service"
             [ "$CHANGED_ML_SERVICE"        = "true" ] && SERVICES="$SERVICES ml-service"
@@ -263,8 +272,9 @@ jobs:
             docker system df
         env:
           CHANGED_WEB:              ${{ needs.detect-changes.outputs.web }}
-          CHANGED_AURIGNY_SCRAPER:  ${{ needs.detect-changes.outputs.aurigny_scraper }}
           CHANGED_GUERNSEY_SCRAPER: ${{ needs.detect-changes.outputs.guernsey_scraper }}
+          CHANGED_FR24_SCRAPER:     ${{ needs.detect-changes.outputs.fr24_scraper }}
+          CHANGED_ADSB_SERVICE:     ${{ needs.detect-changes.outputs.adsb_service }}
           CHANGED_POSITION_SERVICE: ${{ needs.detect-changes.outputs.position_service }}
           CHANGED_WEATHER_SERVICE:  ${{ needs.detect-changes.outputs.weather_service }}
           CHANGED_ML_SERVICE:       ${{ needs.detect-changes.outputs.ml_service }}

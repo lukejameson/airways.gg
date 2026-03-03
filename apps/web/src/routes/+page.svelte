@@ -95,8 +95,14 @@
   }
 
   const isCompleted = (f: (typeof data.flights)[0]) => {
+    if (f.canceled === true) return true;
     const s = f.status?.toLowerCase() ?? '';
-    return s === 'landed' || s === 'completed' || f.canceled === true;
+    if (s.includes('landed') || s.includes('completed') || s.includes('diverted')) return true;
+    // Has a recorded actual arrival time — definitely on the ground
+    if (f.actualArrival) return true;
+    // Scheduled arrival was > 45 min ago — almost certainly landed even without a status update
+    if (new Date(f.scheduledArrival).getTime() < Date.now() - 45 * 60_000) return true;
+    return false;
   };
 
   // An airborne departure has left GCI — hide it from the departures tab
@@ -117,8 +123,10 @@
     if (!showCompleted) flights = flights.filter((f: (typeof data.flights)[0]) => !isCompleted(f));
     // Hide airborne GCI departures from the departures tab — the plane has already left.
     // They remain visible in the arrivals tab so inbound tracking still works.
+    // Exception: if a flight is completed (past scheduled arrival + 45 min), it should
+    // still appear when "show done" is active — the scraper just hasn't updated its status yet.
     if (activeTab === 'departures') {
-      flights = flights.filter((f: (typeof data.flights)[0]) => !isAirborneFromGCI(f));
+      flights = flights.filter((f: (typeof data.flights)[0]) => !isAirborneFromGCI(f) || isCompleted(f));
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();

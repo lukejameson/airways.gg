@@ -27,7 +27,6 @@ async function getCachedAirports(): Promise<AirportCache['data']> {
       iataCode: airports.iataCode,
       icaoCode: airports.icaoCode,
       name: airports.name,
-      displayName: airports.displayName,
       city: airports.city,
       latitude: airports.latitude,
       longitude: airports.longitude,

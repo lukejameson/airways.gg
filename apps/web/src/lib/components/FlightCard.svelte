@@ -1,11 +1,10 @@
 <script lang="ts">
-  import type { flights, delayPredictions, weatherData } from '@airways/database';
+  import type { flights, weatherData } from '@airways/database';
   import { airportName } from '$lib/airports';
   import Icon, { type IconName } from './Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
 
   type Flight = typeof flights.$inferSelect & {
-    prediction?: (typeof delayPredictions.$inferSelect) | null;
     estimatedDeparture?: string | null;
     estimatedArrival?: string | null;
   };
@@ -97,8 +96,8 @@
   const estimatedTimeExpired = $derived.by(() => {
     if (!estimatedTime || actualTime) return false;
     const status = flight.status?.toLowerCase() ?? '';
-    // If flight has landed or cancelled, estimated time is still valid
-    if (status.includes('landed') || status.includes('completed') || status.includes('cancel')) return false;
+    // If flight has landed, diverted, or cancelled, estimated time is still valid
+    if (status.includes('landed') || status.includes('completed') || status.includes('cancel') || status.includes('diverted')) return false;
     // Check if estimated time has passed
     return new Date(estimatedTime).getTime() < Date.now();
   });
@@ -111,7 +110,7 @@
 
   const isCompleted = $derived.by(() => {
     const s = flight.status?.toLowerCase() ?? '';
-    return s === 'landed' || s === 'completed' || flight.canceled === true;
+    return s === 'landed' || s === 'completed' || s.includes('diverted') || flight.canceled === true;
   });
 
   // Calculate delay from available data (display time takes precedence over stored delayMinutes)
@@ -124,28 +123,36 @@
 
   // Calculate our own status when external source is unreliable
   const calculatedStatus = $derived.by(() => {
-    // If flight is already landed/airborne/cancelled, trust that status
+    // If flight is already landed/airborne/boarding/cancelled, trust that status
     const currentStatus = flight.status?.toLowerCase() ?? '';
-    if (currentStatus.includes('landed') || 
-        currentStatus.includes('airborne') || currentStatus.includes('cancel')) {
+    if (currentStatus.includes('landed') || currentStatus.includes('completed') ||
+        currentStatus.includes('airborne') || currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
       return flight.status;
     }
-    
+
     // Check calculated delay from times
     if (calculatedDelayMinutes > 15) {
       return 'Delayed';
-    } else if (calculatedDelayMinutes < -15) {
-      const absMins = Math.abs(calculatedDelayMinutes);
-      if (absMins >= 60) {
-        const hrs = Math.floor(absMins / 60);
-        const mins = absMins % 60;
-        return mins > 0 ? `${hrs}h ${mins}m early` : `${hrs}h early`;
-      }
-      return `${absMins}m early`;
     }
-    
+
+    // If the estimated arrival/departure is early, the flight must be airborne
+    if (calculatedDelayMinutes < -5 && new Date(flight.scheduledDeparture).getTime() <= Date.now()) {
+      return 'Airborne';
+    }
+
     // Otherwise trust the external status
     return flight.status || 'Scheduled';
+  });
+
+  // Format early arrival for display (e.g., "-16m" or "-1h 5m")
+  const formattedEarly = $derived.by(() => {
+    if (calculatedDelayMinutes >= -5) return null;
+    const absMins = Math.abs(calculatedDelayMinutes);
+    const hrs = Math.floor(absMins / 60);
+    const mins = absMins % 60;
+    if (hrs > 0 && mins > 0) return `-${hrs}h ${mins}m`;
+    if (hrs > 0) return `-${hrs}h`;
+    return `-${mins}m`;
   });
 
   // Format delay for display (e.g., "5h 35m" or "45m")
@@ -158,16 +165,24 @@
     return `${mins}m`;
   });
 
-  // Kept for potential future use (e.g. applying a CSS class to the card)
-  const _isDelayed = $derived(calculatedStatus?.toLowerCase().includes('delayed'));
-
-  type BadgeTone = 'green' | 'yellow' | 'red' | 'blue' | 'gray';
+  type BadgeTone = 'green' | 'yellow' | 'red' | 'blue' | 'purple' | 'orange' | 'gray';
   const tone = $derived.by((): BadgeTone => {
     const s = calculatedStatus?.toLowerCase() ?? '';
-    if (s.includes('delayed'))   return 'yellow';
+    // Delayed: explicit delay, approx times, new ETD, expected, indefinite
+    if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
+        s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'yellow';
     if (s.includes('cancel'))    return 'red';
+    // Diverted is a distinct state — not just landed
+    if (s.includes('diverted') || s.includes('diverting')) return 'orange';
     if (s.includes('landed') || s.includes('airborne') || s.includes('completed')) return 'blue';
-    if (s.includes('on time') || s.includes('scheduled')) return 'green';
+    // Boarding: check-in, go to gate/departures, final call, door closed, wait in lounge
+    if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
+        s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
+        s.includes('door and gate') || s.includes('wait in lounge')) return 'purple';
+    if (s.includes('holding')) return 'blue'; // holding overhead = airborne
+    if (s.includes('on time') || s === 'scheduled') return 'green';
+    // PAX transfer messages are informational
+    if (s.includes('pax') || s.includes('passengers')) return 'green';
     return 'gray';
   });
 
@@ -226,6 +241,8 @@
       <div class="flex items-center gap-2 shrink-0 ml-auto">
         {#if formattedDelay}
           <span class="text-sm font-bold text-red-600">+{formattedDelay}</span>
+        {:else if formattedEarly}
+          <span class="text-sm font-bold text-green-600">{formattedEarly}</span>
         {/if}
 
         <!-- Status badge -->
@@ -238,9 +255,17 @@
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-red-100 text-red-800 border border-red-300">
               <span class="h-2 w-2 rounded-full bg-red-500"></span>{calculatedStatus}
             </span>
+          {:else if tone === 'orange'}
+            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-orange-100 text-orange-800 border border-orange-300">
+              <span class="h-2 w-2 rounded-full bg-orange-500"></span>{calculatedStatus}
+            </span>
           {:else if tone === 'blue'}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">
               <span class="h-2 w-2 rounded-full bg-blue-500"></span>{calculatedStatus}
+            </span>
+          {:else if tone === 'purple'}
+            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-300">
+              <span class="h-2 w-2 rounded-full bg-purple-500"></span>{calculatedStatus}
             </span>
           {:else if tone === 'green'}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-green-100 text-green-800 border border-green-300">

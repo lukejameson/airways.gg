@@ -1,7 +1,7 @@
 {
-  "name": "@airways/aurigny-scraper",
+  "name": "@airways/fr24-scraper",
   "version": "1.0.0",
-  "description": "Aurigny flight data scraper with anti-detection",
+  "description": "FlightRadar24 GCI airport page scraper",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -12,12 +12,10 @@
     "@airways/database": "*",
     "dotenv": "^16.4.0",
     "drizzle-orm": "^0.45.1",
-    "fast-xml-parser": "^5.3.7",
     "puppeteer-real-browser": "^1.4.4"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/puppeteer": "^7.0.4",
     "ts-node": "^10.9.0",
     "typescript": "^5.3.0"
   }

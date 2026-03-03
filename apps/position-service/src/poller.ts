@@ -1,5 +1,5 @@
 import { db, flights, aircraftPositions, airports } from '@airways/database';
-import { and, gte, lte, or, eq, desc, isNotNull, not, inArray } from 'drizzle-orm';
+import { and, gte, lte, or, eq, desc, isNotNull, not, sql } from 'drizzle-orm';
 
 const FR24_BASE = 'https://fr24api.flightradar24.com';
 
@@ -37,7 +37,9 @@ interface FlightToPoll {
   flightNumber: string;
   status: string | null;
   scheduledDeparture: Date;
+  scheduledArrival: Date;
   actualDeparture: Date | null;
+  actualArrival: Date | null;
   aircraftRegistration: string | null;
   priority: 'high' | 'medium' | 'low';
 }
@@ -106,31 +108,41 @@ function normaliseReg(reg: string): string {
  */
 function isTerminal(status: string | null): boolean {
   const s = status?.toLowerCase() ?? '';
-  return s.includes('completed') || s.includes('landed') || s.includes('cancelled') || s.includes('canceled');
+  return s.includes('completed') || s.includes('landed') || s.includes('cancelled') || s.includes('canceled') || s.includes('divert');
 }
 
 /**
  * Determines whether a flight should be polled against the FR24 live API.
  *
  * Previously this was a strict `status === 'airborne'` check, which caused a
- * significant gap: Aurigny's schedule scraper updates status every 3–15 minutes,
+ * significant gap: the schedule scrapers update status every 2–15 minutes,
  * so a flight could be airborne for 15+ minutes before FR24 was ever queried.
  *
  * New logic — poll FR24 if ANY of the following are true:
- *   1. status === 'Airborne'  (confirmed by Aurigny scraper or back-written by us)
+ *   1. status === 'Airborne'  (confirmed by a scraper or back-written by us)
  *   2. status === 'Taxiing'   (back-written by us when FR24 shows ground movement)
  *   3. actualDeparture is set AND the flight is not in a terminal status
- *      (Aurigny writes ActualBlockOff before it writes status='Airborne', so this
+ *      (ActualBlockOff may be set before status='Airborne', so this
  *       catches the gap between pushback and the scraper's next status update)
+ *   4. scheduledDeparture has passed (the flight *should* be airborne by now but
+ *      no scraper has confirmed it yet)
  *
  * Terminal flights (Landed/Cancelled) are always excluded.
- * Flights that haven't departed yet and have no actualDeparture are excluded.
  */
-function shouldPollFR24(flight: Pick<FlightToPoll, 'status' | 'actualDeparture'>): boolean {
+function shouldPollFR24(flight: Pick<FlightToPoll, 'status' | 'actualDeparture' | 'scheduledDeparture' | 'scheduledArrival'>): boolean {
   if (isTerminal(flight.status)) return false;
   const s = flight.status?.toLowerCase() ?? '';
   if (s === 'airborne' || s === 'taxiing') return true;
   if (flight.actualDeparture != null) return true;
+  // If scheduled departure has passed, the flight may be airborne but no scraper
+  // has confirmed it yet. Poll FR24 to check. This catches flights like GR603
+  // where airport.gg shows "Approx 12:10" (on-time) but never sets Airborne.
+  // Only poll within a reasonable window: from scheduled departure until
+  // 30 minutes after scheduled arrival (to allow for delays and landing).
+  const now = Date.now();
+  const depPassed = flight.scheduledDeparture.getTime() <= now;
+  const arrivalBuffer = flight.scheduledArrival.getTime() + 30 * 60_000;
+  if (depPassed && now <= arrivalBuffer) return true;
   return false;
 }
 
@@ -159,16 +171,18 @@ function deriveStatusFromFR24(
     return null;
   }
 
-  // Aircraft is on the ground
+  // Aircraft is on the ground.
+  // If it was previously Airborne, it has just landed — mark it immediately
+  // rather than waiting for the scraper's next cycle.
+  if (current === 'airborne') return 'Landed';
+
   if (pos.gspeed > 5) {
-    // Moving on the ground — taxiing out (before departure) or vacating runway (after landing).
-    // Only write Taxiing if the flight isn't already Airborne (i.e. we haven't seen it fly yet).
-    // Once a flight has been Airborne, ground movement means it's landing — let Aurigny handle that.
-    if (current !== 'airborne' && current !== 'taxiing') return 'Taxiing';
+    // Moving on the ground before departure — taxiing out.
+    if (current !== 'taxiing') return 'Taxiing';
     return null;
   }
 
-  // Stationary on the ground — don't overwrite anything; Aurigny will write Landed.
+  // Stationary on the ground and not yet airborne — nothing to update.
   return null;
 }
 
@@ -207,7 +221,7 @@ async function getAirportCoords(iataCodes: string[]): Promise<Map<string, [numbe
  * Use our own flights table to infer where each grounded aircraft currently is.
  * For each unique registration, find the most recently completed (or landed/airborne)
  * flight ordered by actual_arrival desc, then scheduled_departure desc.
- * This is the same data Aurigny's "Where's my plane?" popup uses.
+ * Uses rotation history to determine the last known airport for each aircraft.
  * Returns a map of registration → { airportCode, flightNumber, arrivedAt }
  */
 async function inferPositionsFromOwnDb(
@@ -281,7 +295,9 @@ export async function pollPositions(): Promise<number> {
       flightNumber: flights.flightNumber,
       status: flights.status,
       scheduledDeparture: flights.scheduledDeparture,
+      scheduledArrival: flights.scheduledArrival,
       actualDeparture: flights.actualDeparture,
+      actualArrival: flights.actualArrival,
       aircraftRegistration: flights.aircraftRegistration,
     })
     .from(flights)
@@ -299,7 +315,7 @@ export async function pollPositions(): Promise<number> {
 
   // ── Track 1: LIVE polling ──────────────────────────────────────────────────
   // Poll FR24 for any flight that is confirmed airborne (status='Airborne') OR
-  // has an actualDeparture recorded (departed but Aurigny hasn't yet updated
+  // has an actualDeparture recorded (departed but the scraper hasn't yet updated
   // the status field). This closes the lag window between actual takeoff and
   // the scraper's next status update cycle.
   const liveFlights = todaysFlights.filter(f => shouldPollFR24(f));
@@ -333,6 +349,9 @@ export async function pollPositions(): Promise<number> {
     // Map id → flight for status back-write
     const flightById = new Map(liveNeedingPoll.map(f => [f.id, f]));
 
+    // Track which flights received a live position this cycle
+    const matchedFlightIds = new Set<number>();
+
     for (const pos of positions) {
       // Try flight number first, fall back to registration
       const flightId = flightIdByNumber.get(pos.flight ?? '')
@@ -343,6 +362,8 @@ export async function pollPositions(): Promise<number> {
         console.warn(`[Position] Could not match FR24 position to a flight — flight="${pos.flight}" reg="${pos.reg}" callsign="${pos.callsign}"`);
         continue;
       }
+
+      matchedFlightIds.add(flightId);
       const onGround = pos.alt < 100 && pos.gspeed < 50;
       try {
         await db.insert(aircraftPositions).values({
@@ -376,26 +397,73 @@ export async function pollPositions(): Promise<number> {
       // ── Status back-write ──────────────────────────────────────────────────
       // Derive the best available status from the FR24 position data and write
       // it to flights.status if it represents a meaningful state change.
-      // This makes the Aurigny scraper's update lag irrelevant during the active
+      // This makes the scraper's update lag irrelevant during the active
       // flight window — the position service becomes the live source of truth.
       const matchedFlight = flightById.get(flightId);
       if (matchedFlight) {
         const derivedStatus = deriveStatusFromFR24(pos, onGround, matchedFlight.status);
         if (derivedStatus !== null) {
+          // When we detect a landing, also record actualArrival if not already set.
+          const landingTime = derivedStatus === 'Landed' && matchedFlight.actualArrival == null
+            ? new Date(pos.timestamp)
+            : undefined;
+
           try {
             await db
               .update(flights)
-              .set({ status: derivedStatus, updatedAt: now })
-              .where(eq(flights.id, flightId));
+              .set({
+                status: derivedStatus,
+                updatedAt: now,
+                ...(landingTime ? { actualArrival: landingTime } : {}),
+              })
+              .where(
+                and(
+                  eq(flights.id, flightId),
+                  sql`COALESCE(${flights.status}, '') NOT IN ('Landed', 'Cancelled', 'Diverted')`,
+                ),
+              );
             console.log(
               `[Position] Status back-write: ${matchedFlight.flightNumber} (id=${flightId}) ` +
               `${matchedFlight.status} → ${derivedStatus} ` +
-              `(alt=${pos.alt}ft, speed=${pos.gspeed}kts, vspeed=${pos.vspeed}fpm)`,
+              `(alt=${pos.alt}ft, speed=${pos.gspeed}kts, vspeed=${pos.vspeed}fpm)` +
+              (landingTime ? ` — actualArrival set to ${landingTime.toISOString()}` : ''),
             );
           } catch (err) {
             console.error(`[Position] Failed status back-write for flight ${matchedFlight.flightNumber}:`, err);
           }
         }
+      }
+    }
+
+    // ── Auto-land: Airborne flights with no FR24 response past arrival buffer ──
+    // If FR24 returns no live position for an Airborne flight and we are already
+    // past the scheduled arrival + a generous buffer, the aircraft has almost
+    // certainly landed but FR24 stopped reporting it before we caught the
+    // on-ground transition. Mark the flight Landed so it doesn't stay stuck.
+    const AUTO_LAND_BUFFER_MS = 45 * 60_000; // 45 minutes after scheduled arrival
+    for (const flight of liveNeedingPoll) {
+      if (flight.status?.toLowerCase() !== 'airborne') continue;
+      if (matchedFlightIds.has(flight.id)) continue; // FR24 is still tracking it
+
+      const overdue = nowMs > flight.scheduledArrival.getTime() + AUTO_LAND_BUFFER_MS;
+      if (!overdue) continue;
+
+      try {
+        await db
+          .update(flights)
+          .set({ status: 'Landed', updatedAt: now })
+          .where(
+            and(
+              eq(flights.id, flight.id),
+              sql`COALESCE(${flights.status}, '') NOT IN ('Landed', 'Cancelled', 'Diverted')`,
+            ),
+          );
+        console.log(
+          `[Position] Auto-landed ${flight.flightNumber} (id=${flight.id}) — ` +
+          `no FR24 position found and ${Math.round((nowMs - flight.scheduledArrival.getTime()) / 60_000)}min past scheduled arrival`,
+        );
+      } catch (err) {
+        console.error(`[Position] Failed auto-land for ${flight.flightNumber}:`, err);
       }
     }
   }
@@ -418,7 +486,7 @@ export async function pollPositions(): Promise<number> {
   if (regsNeedingInfer.length > 0) {
     console.log(`[Position] Inferring location for ${regsNeedingInfer.length} unique aircraft`);
 
-    // ── Primary: use our own flights table (same data as Aurigny's "Where's my plane?") ──
+    // ── Primary: use our own flights table (rotation history) ──
     const ownDbMap = await inferPositionsFromOwnDb(regsNeedingInfer);
     console.log(`[Position] Own-DB inferred ${ownDbMap.size}/${regsNeedingInfer.length} aircraft`);
 

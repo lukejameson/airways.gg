@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { db, flights, weatherData, scraperLogs, airportDaylight, flightTimes } from '$lib/server/db';
-import { and, gte, lte, inArray, or, eq, desc, asc, count, not } from 'drizzle-orm';
+import { and, gte, lte, inArray, or, eq, desc, asc, count, not, sql } from 'drizzle-orm';
 
 // Guernsey local timezone
 const GY_TZ = 'Europe/London';
@@ -32,7 +32,7 @@ async function countFlightsForDate(dateStr: string): Promise<number> {
 
 /** Get all active (non-terminal) flights for a given date */
 async function getActiveFlightsForDate(dateStr: string) {
-  const TERMINAL_STATUSES = ['Landed', 'Cancelled'];
+  const TERMINAL_STATUSES = ['Landed', 'Cancelled', 'Completed'];
   try {
     return await db
       .select()
@@ -41,7 +41,9 @@ async function getActiveFlightsForDate(dateStr: string) {
         and(
           eq(flights.flightDate, dateStr),
           eq(flights.canceled, false),
-          not(inArray(flights.status, TERMINAL_STATUSES))
+          not(inArray(flights.status, TERMINAL_STATUSES)),
+          // Diverted flights are also terminal but have variable text
+          sql`LOWER(${flights.status}) NOT LIKE 'diverted%'`
         )
       );
   } catch {
@@ -49,43 +51,7 @@ async function getActiveFlightsForDate(dateStr: string) {
   }
 }
 
-const FLIGHT_COLUMNS = {
-  id: flights.id,
-  flightNumber: flights.flightNumber,
-  departureAirport: flights.departureAirport,
-  arrivalAirport: flights.arrivalAirport,
-  scheduledDeparture: flights.scheduledDeparture,
-  scheduledArrival: flights.scheduledArrival,
-  actualDeparture: flights.actualDeparture,
-  actualArrival: flights.actualArrival,
-  status: flights.status,
-  canceled: flights.canceled,
-  aircraftType: flights.aircraftType,
-  delayMinutes: flights.delayMinutes,
-  flightDate: flights.flightDate,
-};
-
-async function fetchDisplayFlights(dateStr: string) {
-  return db
-    .select(FLIGHT_COLUMNS)
-    .from(flights)
-    .where(eq(flights.flightDate, dateStr))
-    .orderBy(flights.scheduledDeparture);
-}
-
-async function fetchLastScrape() {
-  const [row] = await db
-    .select({ completedAt: scraperLogs.completedAt })
-    .from(scraperLogs)
-    .where(eq(scraperLogs.status, 'success'))
-    .orderBy(desc(scraperLogs.completedAt))
-    .limit(1);
-  return row;
-}
-
-type RecentFlight = { id: number; flightNumber: string; departureAirport: string; arrivalAirport: string; scheduledDeparture: string; viewedAt: string };
-
-export const load: PageServerLoad = async ({ url, cookies }) => {
+export const load: PageServerLoad = async ({ url }) => {
   const now = new Date();
   const todayStr = toGuernseyDateStr(now);
   const tomorrowStr = addDaysToDateStr(todayStr, 1);
@@ -95,39 +61,82 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
   let displayDateStr = todayStr;
   let autoAdvanced = false;
 
-  try {
-    let displayFlights: Awaited<ReturnType<typeof fetchDisplayFlights>>;
-    let lastScrape: Awaited<ReturnType<typeof fetchLastScrape>>;
+  if (dateParam && (dateParam === todayStr || dateParam === tomorrowStr)) {
+    // Valid explicit date
+    displayDateStr = dateParam;
+  } else if (!dateParam) {
+    // No explicit date — check for auto-advance
+    const todayFlightCount = await countFlightsForDate(todayStr);
 
-    if (dateParam && (dateParam === todayStr || dateParam === tomorrowStr)) {
-      // dateParam shortcut: fetch displayFlights + scraperLogs in parallel (no wave 1 needed)
-      displayDateStr = dateParam;
-      [displayFlights, lastScrape] = await Promise.all([
-        fetchDisplayFlights(displayDateStr),
-        fetchLastScrape(),
-      ]);
-    } else {
-      // Wave 1: fire all auto-advance queries + scraperLogs in parallel
-      const [todayFlightCount, activeFlightsToday, tomorrowFlightCount, lastScrapeResult] = await Promise.all([
-        countFlightsForDate(todayStr),
-        getActiveFlightsForDate(todayStr),
-        countFlightsForDate(tomorrowStr),
-        fetchLastScrape(),
-      ]);
-      lastScrape = lastScrapeResult;
+    if (todayFlightCount > 0) {
+      // Today has flights — check if all are terminal
+      const activeFlightsToday = await getActiveFlightsForDate(todayStr);
 
-      // Compute displayDateStr from wave 1 results (zero extra DB trips)
-      if (todayFlightCount > 0 && activeFlightsToday.length === 0 && tomorrowFlightCount > 0) {
-        displayDateStr = tomorrowStr;
-        autoAdvanced = true;
+      if (activeFlightsToday.length === 0) {
+        // All flights are terminal — check if tomorrow has flights
+        const tomorrowFlightCount = await countFlightsForDate(tomorrowStr);
+        if (tomorrowFlightCount > 0) {
+          displayDateStr = tomorrowStr;
+          autoAdvanced = true;
+        }
       }
+    }
+  }
 
-      // Wave 2: fetch display flights for determined date
-      displayFlights = await fetchDisplayFlights(displayDateStr);
+  try {
+    // Select only the columns the client actually needs — omitting uniqueId,
+    // aircraftRegistration, airlineCode, createdAt, updatedAt cuts inline payload size.
+    const displayFlights = await db
+      .select({
+        id: flights.id,
+        flightNumber: flights.flightNumber,
+        departureAirport: flights.departureAirport,
+        arrivalAirport: flights.arrivalAirport,
+        scheduledDeparture: flights.scheduledDeparture,
+        scheduledArrival: flights.scheduledArrival,
+        actualDeparture: flights.actualDeparture,
+        actualArrival: flights.actualArrival,
+        status: flights.status,
+        canceled: flights.canceled,
+        aircraftType: flights.aircraftType,
+        delayMinutes: flights.delayMinutes,
+        flightDate: flights.flightDate,
+      })
+      .from(flights)
+      .where(eq(flights.flightDate, displayDateStr))
+      .orderBy(flights.scheduledDeparture);
+
+    // Estimated times (EstimatedBlockOff for departures, EstimatedBlockOn for arrivals)
+    const estimatedTimesMap = new Map<number, { estimatedDeparture?: string; estimatedArrival?: string }>();
+    if (displayFlights.length > 0) {
+      const flightIds = displayFlights.map(f => f.id);
+      const estimatedTimes = await db
+        .select({ flightId: flightTimes.flightId, timeType: flightTimes.timeType, timeValue: flightTimes.timeValue })
+        .from(flightTimes)
+        .where(
+          and(
+            inArray(flightTimes.flightId, flightIds),
+            inArray(flightTimes.timeType, ['EstimatedBlockOff', 'EstimatedBlockOn'])
+          )
+        );
+      for (const t of estimatedTimes) {
+        const existing = estimatedTimesMap.get(t.flightId) ?? {};
+        if (t.timeType === 'EstimatedBlockOff') {
+          existing.estimatedDeparture = t.timeValue.toISOString();
+        } else if (t.timeType === 'EstimatedBlockOn') {
+          existing.estimatedArrival = t.timeValue.toISOString();
+        }
+        estimatedTimesMap.set(t.flightId, existing);
+      }
     }
 
-    // Wave 3: parallel queries that depend on displayFlights
-    const flightIds = displayFlights.map(f => f.id);
+    const flightsForDisplay = displayFlights.map(f => ({
+      ...f,
+      estimatedDeparture: estimatedTimesMap.get(f.id)?.estimatedDeparture ?? null,
+      estimatedArrival: estimatedTimesMap.get(f.id)?.estimatedArrival ?? null,
+    }));
+
+    // Collect all unique airports across display flights
     const airportCodes = [...new Set(
       displayFlights.flatMap(f => [f.departureAirport, f.arrivalAirport])
     )];

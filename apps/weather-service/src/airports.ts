@@ -90,7 +90,7 @@ async function fetchOurAirportsData(): Promise<Map<string, {
   return results;
 }
 
-export async function syncAirports(): Promise<number> {
+async function syncAirports(): Promise<number> {
   const data = await fetchOurAirportsData();
   
   const entries = Array.from(data.entries());

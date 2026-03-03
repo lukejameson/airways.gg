@@ -13,7 +13,7 @@
   // Get return tab from URL query param
   const returnTab = $derived($page.url.searchParams.get('tab') ?? '');
 
-  const { flight, statusHistory, prediction, weatherMap, daylightMap, position, rotationFlights, times } = $derived(data);
+  const { flight, statusHistory, weatherMap, daylightMap, position, rotationFlights, times } = $derived(data);
   const depWeather = $derived(weatherMap?.[flight.departureAirport] ?? null);
   const arrWeather = $derived(weatherMap?.[flight.arrivalAirport] ?? null);
 
@@ -59,28 +59,37 @@
   // Calculate our own status when external source is unreliable
   // If we have delay minutes or the actual/estimated time differs from scheduled by > 15 min
   const calculatedStatus = $derived.by(() => {
-    // If flight is already landed/airborne/cancelled, trust that status
+    // If flight is already landed/airborne/boarding/cancelled, trust that status
     const currentStatus = flight.status?.toLowerCase() ?? '';
-    if (currentStatus.includes('landed') || currentStatus.includes('completed') || 
-        currentStatus.includes('airborne') || currentStatus.includes('cancel')) {
+    if (currentStatus.includes('landed') || currentStatus.includes('completed') ||
+        currentStatus.includes('airborne') || currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
       return flight.status;
     }
-    
+
     // Check calculated delay from times
     if (calculatedDelayMinutes > 15) {
       return 'Delayed';
-    } else if (calculatedDelayMinutes < -15) {
-      const absMins = Math.abs(calculatedDelayMinutes);
-      if (absMins >= 60) {
-        const hrs = Math.floor(absMins / 60);
-        const mins = absMins % 60;
-        return mins > 0 ? `${hrs}h ${mins}m early` : `${hrs}h early`;
-      }
-      return `${absMins}m early`;
     }
-    
+
+    // If the estimated arrival/departure is early, the flight must be airborne
+    // (you can't arrive early unless you've departed)
+    if (calculatedDelayMinutes < -5 && new Date(flight.scheduledDeparture).getTime() <= Date.now()) {
+      return 'Airborne';
+    }
+
     // Otherwise trust the external status
     return flight.status || 'Scheduled';
+  });
+
+  // Format early arrival for display (e.g., "-16m" or "-1h 5m")
+  const formattedEarly = $derived.by(() => {
+    if (calculatedDelayMinutes >= -5) return null;
+    const absMins = Math.abs(calculatedDelayMinutes);
+    const hrs = Math.floor(absMins / 60);
+    const mins = absMins % 60;
+    if (hrs > 0 && mins > 0) return `-${hrs}h ${mins}m`;
+    if (hrs > 0) return `-${hrs}h`;
+    return `-${mins}m`;
   });
 
   // Format delay for display (e.g., "5h 35m" or "45m")
@@ -127,10 +136,15 @@
 
   function rotationStatusTone(status: string | null): string {
     const s = status?.toLowerCase() ?? '';
-    if (s.includes('landed') || s.includes('completed')) return 'blue';
-    if (s.includes('airborne')) return 'green';
-    if (s.includes('delayed')) return 'yellow';
+    if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
+        s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'yellow';
     if (s.includes('cancel')) return 'red';
+    if (s.includes('diverted') || s.includes('diverting')) return 'orange';
+    if (s.includes('landed') || s.includes('completed')) return 'blue';
+    if (s.includes('airborne') || s.includes('holding')) return 'green';
+    if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
+        s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
+        s.includes('door and gate') || s.includes('wait in lounge')) return 'purple';
     return 'gray';
   }
 
@@ -193,6 +207,12 @@
    * stored inferred position was recorded, prefer the rotation result.
    */
   function getInferredLocationFromRotation(): { airport: string; source: 'rotation' } | null {
+    // If the current flight itself has landed, the plane is at the arrival airport
+    const status = flight.status?.toLowerCase() || '';
+    if (status.includes('landed') || status.includes('completed')) {
+      return { airport: flight.arrivalAirport, source: 'rotation' };
+    }
+
     const mostRecent = getMostRecentLandedRotationFlight();
     if (!mostRecent) return null;
     return { airport: mostRecent.arrivalAirport, source: 'rotation' };
@@ -289,6 +309,14 @@
 
   const isEstimate = $derived(!actualTime && !!estimatedTime);
 
+  // True when the flight is pre-departure: hasn't taken off and not in a terminal/airborne state.
+  // Used to show a meaningful "on the ground at departure airport" fallback when no position is tracked.
+  const isPreDeparture = $derived(
+    !flight.actualDeparture &&
+    !['airborne', 'taxiing', 'landed', 'completed', 'cancelled', 'canceled']
+      .some(s => flight.status?.toLowerCase().includes(s))
+  );
+
   function formatTime(date: string | Date | null | undefined): string {
     if (!date) return '--:--';
     return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -316,36 +344,32 @@
 
   function getStatusColor(status: string | null | undefined): string {
     const s = status?.toLowerCase() || '';
-    if (s.includes('on time')) return 'text-green-600';
-    if (s.includes('delayed')) return 'text-yellow-600';
-    if (s.includes('cancelled')) return 'text-red-600';
-    if (s.includes('landed') || s.includes('airborne') || s.includes('completed')) return 'text-blue-600';
+    if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
+        s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'text-yellow-600';
+    if (s.includes('cancelled') || s.includes('canceled')) return 'text-red-600';
+    if (s.includes('diverted') || s.includes('diverting')) return 'text-orange-600';
+    if (s.includes('landed') || s.includes('airborne') || s.includes('completed') || s.includes('holding')) return 'text-blue-600';
+    if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
+        s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
+        s.includes('door and gate') || s.includes('wait in lounge')) return 'text-purple-600';
+    if (s.includes('on time') || s === 'scheduled') return 'text-green-600';
+    if (s.includes('pax') || s.includes('passengers')) return 'text-green-600';
     return 'text-muted-foreground';
   }
 
   function getStatusDotColor(status: string | null | undefined): string {
     const s = status?.toLowerCase() || '';
-    if (s.includes('on time')) return 'bg-green-500';
-    if (s.includes('delayed')) return 'bg-yellow-500';
-    if (s.includes('cancelled')) return 'bg-red-500';
-    if (s.includes('landed') || s.includes('airborne') || s.includes('completed')) return 'bg-blue-500';
+    if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
+        s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'bg-yellow-500';
+    if (s.includes('cancelled') || s.includes('canceled')) return 'bg-red-500';
+    if (s.includes('diverted') || s.includes('diverting')) return 'bg-orange-500';
+    if (s.includes('landed') || s.includes('airborne') || s.includes('completed') || s.includes('holding')) return 'bg-blue-500';
+    if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
+        s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
+        s.includes('door and gate') || s.includes('wait in lounge')) return 'bg-purple-500';
+    if (s.includes('on time') || s === 'scheduled') return 'bg-green-500';
+    if (s.includes('pax') || s.includes('passengers')) return 'bg-green-500';
     return 'bg-gray-400';
-  }
-
-  const predictionPct = $derived(
-    prediction ? Math.round((prediction.probability ?? 0) * 100) : null,
-  );
-
-  function getPredictionColor(pct: number): string {
-    if (pct >= 70) return 'text-red-600';
-    if (pct >= 40) return 'text-yellow-600';
-    return 'text-green-600';
-  }
-
-  function getPredictionBarColor(pct: number): string {
-    if (pct >= 70) return 'bg-red-500';
-    if (pct >= 40) return 'bg-yellow-500';
-    return 'bg-green-500';
   }
 
   let shareSuccess = $state(false);
@@ -467,6 +491,8 @@
       <span class="opacity-30 hidden sm:inline">·</span>
       {#if formattedDelay}
         <span class="text-sm font-bold text-red-600">+{formattedDelay}</span>
+      {:else if formattedEarly}
+        <span class="text-sm font-bold text-green-600">{formattedEarly}</span>
       {/if}
       <div class="flex items-center gap-1.5">
         <span class="h-2 w-2 rounded-full {getStatusDotColor(calculatedStatus)}"></span>
@@ -474,14 +500,7 @@
           {calculatedStatus}
         </span>
       </div>
-      {#if calculatedStatus?.toLowerCase().includes('delayed')}
-        <!-- Delay already shown above -->
-      {:else if calculatedDelayMinutes < -15}
-        <span class="opacity-30 hidden sm:inline">·</span>
-        <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
-          {calculatedStatus}
-        </span>
-      {:else if calculatedDelayMinutes <= 15}
+      {#if !formattedDelay && !formattedEarly && calculatedDelayMinutes <= 15}
         <span class="opacity-30 hidden sm:inline">·</span>
         <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
           On Time
@@ -622,8 +641,6 @@
             lat={position.lat}
             lon={position.lon}
             heading={position.heading ?? 0}
-            originIata={position.originIata}
-            destIata={position.destIata}
             depAirport={flight.departureAirport}
             arrAirport={flight.arrivalAirport}
           />
@@ -655,9 +672,26 @@
           </div>
         </div>
       {:else}
-        <p class="text-sm text-muted-foreground">
-          Aircraft not currently tracked by Flightradar24. It may be at {airportName(flight.departureAirport)} ({flight.departureAirport}), {airportName(flight.arrivalAirport)} ({flight.arrivalAirport}), or en route to/from base airport. Live tracking will appear once the aircraft transmits position data.
-        </p>
+        {#if isPreDeparture}
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
+                <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+                <circle cx="12" cy="10" r="3"/>
+              </svg>
+            </div>
+            <div>
+              <p class="font-semibold text-foreground">
+                On the ground at {airportName(flight.departureAirport)} <span class="opacity-50 font-normal">({flight.departureAirport})</span>
+              </p>
+              <p class="text-xs text-muted-foreground mt-0.5">Pre-departure — live tracking starts when airborne</p>
+            </div>
+          </div>
+        {:else}
+          <p class="text-sm text-muted-foreground">
+            Aircraft not currently tracked by Flightradar24. It may be at {airportName(flight.departureAirport)} ({flight.departureAirport}), {airportName(flight.arrivalAirport)} ({flight.arrivalAirport}), or en route to/from base airport. Live tracking will appear once the aircraft transmits position data.
+          </p>
+        {/if}
       {/if}
     </div>
   {/if}
@@ -770,6 +804,10 @@
                         <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">{rf.status}</span>
                       {:else if tone === 'red'}
                         <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">{rf.status}</span>
+                      {:else if tone === 'purple'}
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700">{rf.status}</span>
+                      {:else if tone === 'orange'}
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">{rf.status}</span>
                       {:else}
                         <span class="text-muted-foreground text-xs">{rf.status ?? 'Scheduled'}</span>
                       {/if}
@@ -807,6 +845,10 @@
                       <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">{rf.status}</span>
                     {:else if tone === 'red'}
                       <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">{rf.status}</span>
+                    {:else if tone === 'purple'}
+                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700">{rf.status}</span>
+                    {:else if tone === 'orange'}
+                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">{rf.status}</span>
                     {:else}
                       <span class="text-muted-foreground text-xs">{rf.status ?? 'Scheduled'}</span>
                     {/if}
@@ -869,7 +911,6 @@
       w.temperature != null ? `${Math.round(w.temperature)}°C` : null,
       w.windSpeed != null ? `${Math.round(w.windSpeed)}mph ${w.windDirection != null ? dirs[Math.round(w.windDirection/45)%8] : ''}`.trim() : null,
       w.visibility != null ? `${Math.round(w.visibility*10)/10}km vis` : null,
-      w.precipitation != null && w.precipitation > 0 ? `${Math.round(w.precipitation*10)/10}mm` : null,
       w.cloudCover != null ? `${w.cloudCover}% cloud` : null,
     ].filter(Boolean).join(' · ')}
     <div class="grid gap-3 mb-6 {depWeather && arrWeather ? 'grid-cols-2' : 'grid-cols-1'}">
@@ -894,10 +935,9 @@
     </div>
   {/if}
 
-  <!-- Flight info + prediction side by side -->
-  <div class="grid gap-4 mb-6 {prediction ? 'md:grid-cols-2' : ''}">
+  <!-- Flight details -->
+  <div class="grid gap-4 mb-6">
 
-    <!-- Flight details -->
     <div class="rounded-lg border bg-card p-4">
       <h2 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-3">Flight Details</h2>
       <dl class="space-y-2 text-sm">
@@ -948,46 +988,6 @@
       </dl>
     </div>
 
-    <!-- Delay prediction -->
-    {#if prediction && predictionPct !== null}
-      <div class="rounded-lg border bg-card p-4">
-        <h2 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-3">Delay Prediction</h2>
-
-        <div class="mb-4">
-          <div class="flex items-end justify-between mb-1">
-            <span class="text-sm text-muted-foreground">Probability of delay</span>
-            <span class="text-2xl font-bold {getPredictionColor(predictionPct)}">{predictionPct}%</span>
-          </div>
-          <div class="h-2 rounded-full bg-muted overflow-hidden">
-            <div
-              class="h-full rounded-full transition-all {getPredictionBarColor(predictionPct)}"
-              style="width: {predictionPct}%"
-            ></div>
-          </div>
-        </div>
-
-        <dl class="space-y-2 text-sm">
-          {#if prediction.predictedDelayMinutes > 0}
-            <div class="flex justify-between">
-              <dt class="text-muted-foreground">Predicted delay</dt>
-              <dd class="font-medium">{prediction.predictedDelayMinutes} min</dd>
-            </div>
-          {/if}
-          <div class="flex justify-between">
-            <dt class="text-muted-foreground">Confidence</dt>
-            <dd class="font-medium capitalize">{prediction.confidence}</dd>
-          </div>
-          <div class="flex justify-between">
-            <dt class="text-muted-foreground">Model version</dt>
-            <dd class="font-medium font-mono text-xs">{prediction.modelVersion}</dd>
-          </div>
-        </dl>
-
-        <p class="text-xs text-muted-foreground mt-3">
-          Expires {formatDateTime(prediction.expiresAt)}
-        </p>
-      </div>
-    {/if}
   </div>
 
   <!-- Status history -->
