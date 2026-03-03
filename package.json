@@ -8,12 +8,13 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently --names \"web,guernsey,weather,position,adsb\" --prefix-colors \"cyan,yellow,green,magenta,blue\" \"npm run dev:web\" \"npm run dev:guernsey\" \"npm run dev:weather\" \"npm run dev:position\" \"npm run dev:adsb\"",
+    "dev": "concurrently --names \"web,guernsey,weather,position,adsb,fr24\" --prefix-colors \"cyan,yellow,green,magenta,blue,red\" \"npm run dev:web\" \"npm run dev:guernsey\" \"npm run dev:weather\" \"npm run dev:position\" \"npm run dev:adsb\" \"npm run dev:fr24\"",
     "dev:web": "npm run dev --workspace=@airways/web",
     "dev:weather": "npm run dev --workspace=@airways/weather-service",
     "dev:position": "npm run dev --workspace=@airways/position-service",
     "dev:adsb": "npm run dev --workspace=@airways/adsb-service",
     "dev:guernsey": "npm run dev --workspace=@airways/guernsey-scraper",
+    "dev:fr24": "npm run dev --workspace=@airways/fr24-scraper",
     "build": "npm run build --workspace=@airways/web",
     "lint": "npm run lint --workspace=@airways/web",
     "lint:fix": "npm run lint:fix --workspace=@airways/web",

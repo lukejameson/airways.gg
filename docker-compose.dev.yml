@@ -54,6 +54,28 @@ services:
       - web
     restart: unless-stopped
 
+  fr24-scraper:
+    build:
+      context: .
+      dockerfile: apps/fr24-scraper/Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - SCRAPER_CUTOFF_HOUR=${SCRAPER_CUTOFF_HOUR:-23}
+      - SCRAPER_WAKE_OFFSET_MINS=${SCRAPER_WAKE_OFFSET_MINS:-30}
+      - SCRAPER_INTERVAL_HIGH_MINS=${SCRAPER_INTERVAL_HIGH_MINS:-2}
+      - SCRAPER_INTERVAL_MEDIUM_MINS=${SCRAPER_INTERVAL_MEDIUM_MINS:-5}
+      - SCRAPER_INTERVAL_LOW_MINS=${SCRAPER_INTERVAL_LOW_MINS:-10}
+      - SCRAPER_INTERVAL_IDLE_MINS=${SCRAPER_INTERVAL_IDLE_MINS:-15}
+      - SCRAPER_MAX_RETRIES=${SCRAPER_MAX_RETRIES:-3}
+      - PROXY_ENABLED=${PROXY_ENABLED:-false}
+      - PROXY_USERNAME=${PROXY_USERNAME}
+      - PROXY_PASSWORD=${PROXY_PASSWORD}
+      - PROXY_HOSTS=${PROXY_HOSTS}
+      - NODE_ENV=production
+    networks:
+      - web
+    restart: unless-stopped
+
   adsb-service:
     build:
       context: .

@@ -1,0 +1,759 @@
+import { connect } from 'puppeteer-real-browser';
+import type { Browser, Page } from 'rebrowser-puppeteer-core';
+import { db, flights as flightsTable, flightStatusHistory, flightTimes, scraperLogs } from '@airways/database';
+import { eq, and } from 'drizzle-orm';
+
+// ---------------------------------------------------------------------------
+// Timezone utility
+// ---------------------------------------------------------------------------
+
+const GY_TZ = 'Europe/London';
+
+export function guernseyDateStr(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: GY_TZ }).format(d);
+}
+
+// ---------------------------------------------------------------------------
+// Proxy helpers
+// ---------------------------------------------------------------------------
+
+interface ProxyConfig {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+}
+
+function getProxyList(): ProxyConfig[] {
+  if (process.env.PROXY_ENABLED !== 'true') return [];
+
+  const username = process.env.PROXY_USERNAME;
+  const password = process.env.PROXY_PASSWORD;
+  const hostsStr = process.env.PROXY_HOSTS;
+
+  if (!username || !password || !hostsStr) {
+    console.warn('[FR24] Proxy enabled but credentials/hosts not configured');
+    return [];
+  }
+
+  return hostsStr.split(',').map(h => h.trim()).filter(Boolean).map(host => {
+    const [ip, portStr] = host.split(':');
+    return { host: ip, port: parseInt(portStr || '8080'), username, password };
+  });
+}
+
+function getRandomProxy(proxies: ProxyConfig[]): ProxyConfig | null {
+  if (proxies.length === 0) return null;
+  return proxies[Math.floor(Math.random() * proxies.length)];
+}
+
+// ---------------------------------------------------------------------------
+// Anti-bot helpers
+// ---------------------------------------------------------------------------
+
+function randomDelay(min: number, max: number): Promise<void> {
+  const ms = Math.floor(Math.random() * (max - min + 1)) + min;
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function simulateHumanBehavior(page: Page): Promise<void> {
+  const scrollCount = Math.floor(Math.random() * 3) + 1;
+  for (let i = 0; i < scrollCount; i++) {
+    await page.evaluate((amount: number) => (globalThis as any).window.scrollBy(0, amount), Math.floor(Math.random() * 300) + 100);
+    await randomDelay(500, 1500);
+  }
+  for (let i = 0; i < Math.floor(Math.random() * 5) + 3; i++) {
+    await page.mouse.move(
+      Math.floor(Math.random() * 800) + 100,
+      Math.floor(Math.random() * 600) + 100,
+      { steps: Math.floor(Math.random() * 5) + 3 },
+    );
+    await randomDelay(200, 800);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Guernsey-scraper-style location helpers
+// ---------------------------------------------------------------------------
+
+const ROUTE_FLIGHT_MINUTES: Record<string, number> = {
+  ACI: 10, JER: 15, LGW: 55, LCY: 55, MAN: 60, BRS: 40, SOU: 30,
+  EXT: 40, BHX: 65, CDG: 45, EMA: 65, DUB: 60, EDI: 75,
+};
+
+function routeFlightMinutes(iata: string): number {
+  return ROUTE_FLIGHT_MINUTES[iata] ?? 60;
+}
+
+// ---------------------------------------------------------------------------
+// Parsed flight type
+// ---------------------------------------------------------------------------
+
+interface ParsedFR24Flight {
+  flightNumber: string;
+  airlineCode: string;
+  origin: string;      // IATA
+  destination: string;  // IATA
+  scheduledTime: string; // "HH:MM" or similar from FR24
+  actualEstTime: string | null; // actual/estimated time
+  status: string;
+  aircraftType: string | null;
+  aircraftReg: string | null;
+  type: 'arrival' | 'departure';
+}
+
+// ---------------------------------------------------------------------------
+// FR24 table parsing (runs inside page.evaluate)
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract flight rows from the FR24 airport page table.
+ * FR24 renders a table with rows containing flight data.
+ */
+async function extractFlightRows(page: Page, type: 'arrival' | 'departure', targetDate: string): Promise<ParsedFR24Flight[]> {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const rawRows = await page.evaluate((flightType: string) => {
+    const doc = (globalThis as any).document;
+    const rows: any[] = [];
+
+    // FR24 uses a table with date header rows and flight data rows.
+    // Date headers have a single <th> cell spanning all columns with text like "Monday, Mar 3"
+    // or they are <tr> rows with class/data attributes indicating a date separator.
+    const allElements = doc.querySelectorAll('table tbody tr, table thead tr');
+    let currentDate = ''; // Track which date section we're in
+
+    allElements.forEach((row: any) => {
+      try {
+        // Check if this is a date header row
+        const headerCell = row.querySelector('th, td[colspan]');
+        if (headerCell) {
+          const headerText = headerCell.innerText?.trim() || '';
+          // FR24 date headers look like "Monday, Mar 3" or "Today" or "Yesterday"
+          // Also check for rows with single cell spanning all columns
+          const cells = row.querySelectorAll('td, th');
+          if (cells.length <= 2 && headerText.length > 2) {
+            currentDate = headerText;
+            return;
+          }
+        }
+
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 4) return;
+
+        const cellTexts = Array.from(cells).map((td: any) => td.innerText?.trim() || '');
+
+        let flightNum = '';
+        let scheduledTime = '';
+        let originDest = '';
+        let statusText = '';
+        let aircraftText = '';
+
+        // FR24 table structure: Time | Flight | From/To | Aircraft | Status
+        if (cellTexts.length >= 5) {
+          scheduledTime = cellTexts[0];
+          flightNum = cellTexts[1];
+          originDest = cellTexts[2];
+          aircraftText = cellTexts[3];
+          statusText = cellTexts[cellTexts.length - 1];
+        } else if (cellTexts.length >= 4) {
+          scheduledTime = cellTexts[0];
+          flightNum = cellTexts[1];
+          originDest = cellTexts[2];
+          statusText = cellTexts[cellTexts.length - 1];
+        }
+
+        if (!flightNum || !scheduledTime) return;
+
+        // Skip if scheduledTime doesn't look like a time (HH:MM)
+        if (!/\d{1,2}:\d{2}/.test(scheduledTime)) return;
+
+        const iataMatch = originDest.match(/\(([A-Z]{3})\)/);
+        const iataCode = iataMatch ? iataMatch[1] : originDest.replace(/[^A-Z]/g, '').slice(0, 3);
+
+        const timeMatch = statusText.match(/(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i);
+        const actualEstTime = timeMatch ? timeMatch[1] : null;
+
+        const acTypeMatch = aircraftText.match(/^([A-Z0-9\s]+?)(?:\s*\(|$)/);
+        const acRegMatch = aircraftText.match(/\(([A-Z0-9-]+)\)/);
+
+        rows.push({
+          flightNumber: flightNum,
+          airlineCode: '',
+          origin: flightType === 'arrival' ? iataCode : 'GCI',
+          destination: flightType === 'arrival' ? 'GCI' : iataCode,
+          scheduledTime,
+          actualEstTime,
+          status: statusText,
+          aircraftType: acTypeMatch ? acTypeMatch[1].trim() : (aircraftText || null),
+          aircraftReg: acRegMatch ? acRegMatch[1] : null,
+          type: flightType,
+          dateContext: currentDate,
+        });
+      } catch {
+        // skip unparseable rows
+      }
+    });
+
+    return rows;
+  }, type);
+
+  // Filter to only today's flights based on dateContext
+  // FR24 date headers: "Today", "Monday, Mar 3", etc.
+  // Accept flights where dateContext is empty (first section = today), "Today", or matches target date
+  const todayDate = new Date(targetDate);
+  const todayDay = todayDate.getDate();
+  const todayMonthShort = todayDate.toLocaleString('en-US', { month: 'short' });
+
+  const filtered = rawRows.filter((row: any) => {
+    const ctx = (row.dateContext || '').toLowerCase();
+    // If no date context, assume it's the default (today) section
+    if (!ctx) return true;
+    if (ctx.includes('today')) return true;
+    // Match "Monday, Mar 3" pattern against target date
+    if (ctx.includes(todayMonthShort.toLowerCase()) && ctx.includes(String(todayDay))) return true;
+    return false;
+  });
+
+  console.log(`[FR24] Filtered ${rawRows.length} raw rows to ${filtered.length} for ${targetDate}`);
+  return filtered as ParsedFR24Flight[];
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+}
+
+// ---------------------------------------------------------------------------
+// Click "Load earlier flights" button
+// ---------------------------------------------------------------------------
+
+async function clickLoadEarlierFlights(page: Page): Promise<void> {
+  // FR24 loads ~80 rows per click; GCI typically has <30 flights/day.
+  // 2 clicks is enough to capture all of today's flights.
+  const maxClicks = 2;
+  for (let i = 0; i < maxClicks; i++) {
+    // Count rows before clicking to detect when no new rows are added
+    const rowCountBefore = await page.evaluate(() => {
+      return (globalThis as any).document.querySelectorAll('table tbody tr').length;
+    });
+
+    try {
+      // Try text-based search for the "load earlier" button
+      const buttons = await page.$$('button, a.btn, a');
+      let found = false;
+      for (const btn of buttons) {
+        const text = await btn.evaluate(el => (el as any).innerText?.toLowerCase() || '');
+        if (text.includes('earlier') || text.includes('load more') || text.includes('show more')) {
+          await btn.evaluate(el => (el as any).scrollIntoView({ behavior: 'smooth', block: 'center' }));
+          await randomDelay(500, 1000);
+          await btn.click().catch(() => btn.evaluate(el => (el as any).click()));
+          found = true;
+          console.log(`[FR24] Clicked "load earlier flights" button (attempt ${i + 1})`);
+          await randomDelay(2000, 4000);
+          break;
+        }
+      }
+      if (!found) {
+        console.log('[FR24] No "load earlier flights" button found — all flights loaded');
+        break;
+      }
+
+      // Check if clicking actually loaded more rows
+      const rowCountAfter = await page.evaluate(() => {
+        return (globalThis as any).document.querySelectorAll('table tbody tr').length;
+      });
+      if (rowCountAfter <= rowCountBefore) {
+        console.log(`[FR24] No new rows loaded (${rowCountBefore} → ${rowCountAfter}) — stopping`);
+        break;
+      }
+      console.log(`[FR24] Rows: ${rowCountBefore} → ${rowCountAfter}`);
+    } catch (err) {
+      console.log('[FR24] Error clicking load earlier button, may be fully loaded:', err);
+      break;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Status normalization
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize FR24 status text to our standard vocabulary.
+ *
+ * FR24 "Estimated HH:MM" is their default status for upcoming flights — it does NOT
+ * mean delayed. We return 'Scheduled' for "estimated" and let the caller compare the
+ * estimated time vs scheduled time to determine if the flight is actually delayed.
+ */
+function normalizeStatus(rawStatus: string): string {
+  const s = rawStatus.toLowerCase();
+  if (s.includes('landed')) return 'Landed';
+  if (s.includes('cancelled') || s.includes('canceled')) return 'Cancelled';
+  if (s.includes('diverted')) return 'Diverted';
+  if (s.includes('airborne') || s.includes('en route') || s.includes('in flight')) return 'Airborne';
+  if (s.includes('delayed')) return 'Delayed';
+  if (s.includes('scheduled') || s.includes('on time')) return 'Scheduled';
+  if (s.includes('boarding')) return 'Boarding';
+  if (s.includes('departed') || s.includes('took off')) return 'Airborne';
+  if (s.includes('arrived')) return 'Landed';
+  // FR24 "Estimated HH:MM" / "Expected HH:MM" = on time unless proven otherwise
+  if (s.includes('estimated') || s.includes('expected')) return 'Scheduled';
+  return rawStatus || 'Scheduled';
+}
+
+// ---------------------------------------------------------------------------
+// Flight number cleanup
+// ---------------------------------------------------------------------------
+
+function cleanFlightNumber(raw: string): string {
+  // FR24 shows "GR 670" — normalize to "GR670"
+  return raw.replace(/\s+/g, '').toUpperCase();
+}
+
+function extractAirlineCode(flightNumber: string): string {
+  const match = flightNumber.match(/^([A-Z]{2})/);
+  return match ? match[1] : 'XX';
+}
+
+// ---------------------------------------------------------------------------
+// Time parsing
+// ---------------------------------------------------------------------------
+
+function parseTimeToDate(timeStr: string, flightDate: string): Date | null {
+  // FR24 uses 12h AM/PM format: "8:01 AM", "4:57 PM", or sometimes 24h "16:57"
+  const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (!match) return null;
+  let hour = parseInt(match[1], 10);
+  const minute = parseInt(match[2], 10);
+  const ampm = match[3]?.toUpperCase();
+
+  if (ampm === 'PM' && hour < 12) hour += 12;
+  if (ampm === 'AM' && hour === 12) hour = 0;
+
+  const d = new Date(`${flightDate}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`);
+  // Treat as London time — FR24 shows local time for the airport
+  // Adjust from Europe/London to UTC
+  const londonOffset = getLondonOffsetMs(d);
+  return new Date(d.getTime() - londonOffset);
+}
+
+function getLondonOffsetMs(d: Date): number {
+  // Get the offset by comparing UTC and London representations
+  const londonStr = new Intl.DateTimeFormat('en-GB', {
+    timeZone: GY_TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).format(d);
+  // en-GB: "DD/MM/YYYY, HH:MM:SS"
+  const [datePart, timePart] = londonStr.split(', ');
+  const [dd, mo, yyyy] = datePart.split('/');
+  const londonAsUtc = new Date(`${yyyy}-${mo}-${dd}T${timePart}Z`);
+  return londonAsUtc.getTime() - d.getTime();
+}
+
+// ---------------------------------------------------------------------------
+// DB upsert
+// ---------------------------------------------------------------------------
+
+async function upsertFR24Flight(
+  flight: ParsedFR24Flight,
+  flightDate: string,
+): Promise<number | null> {
+  const flightNumber = cleanFlightNumber(flight.flightNumber);
+  if (!flightNumber || flightNumber.length < 3) return null;
+
+  const airlineCode = extractAirlineCode(flightNumber);
+
+  // Only keep Aurigny (GR) flights — includes Isles of Scilly Skybus which operates under Aurigny
+  if (airlineCode !== 'GR') {
+    return null;
+  }
+  let status = normalizeStatus(flight.status);
+  const canceled = status === 'Cancelled';
+
+  // Truncate aircraft fields to fit DB varchar(20) constraints
+  const aircraftType = flight.aircraftType ? flight.aircraftType.slice(0, 20) : null;
+  const aircraftReg = flight.aircraftReg ? flight.aircraftReg.slice(0, 20) : null;
+
+  // Parse scheduled time
+  const scheduledTimeDate = parseTimeToDate(flight.scheduledTime, flightDate);
+  if (!scheduledTimeDate) {
+    console.warn(`[FR24] Skipping ${flightNumber}: unparseable time "${flight.scheduledTime}"`);
+    return null;
+  }
+
+  // For FR24, origin/destination IATA codes
+  let departureAirport = flight.origin || 'GCI';
+  let arrivalAirport = flight.destination || 'GCI';
+
+  // Ensure GCI is always one endpoint
+  if (flight.type === 'arrival') {
+    arrivalAirport = 'GCI';
+    if (!departureAirport || departureAirport === 'GCI') departureAirport = '???';
+  } else {
+    departureAirport = 'GCI';
+    if (!arrivalAirport || arrivalAirport === 'GCI') arrivalAirport = '???';
+  }
+
+  // Estimate the other time using route duration
+  const otherIata = flight.type === 'arrival' ? departureAirport : arrivalAirport;
+  const flightMins = routeFlightMinutes(otherIata);
+
+  let scheduledDeparture: Date;
+  let scheduledArrival: Date;
+
+  if (flight.type === 'departure') {
+    scheduledDeparture = scheduledTimeDate;
+    scheduledArrival = new Date(scheduledTimeDate.getTime() + flightMins * 60_000);
+  } else {
+    scheduledArrival = scheduledTimeDate;
+    scheduledDeparture = new Date(scheduledTimeDate.getTime() - flightMins * 60_000);
+  }
+
+  // Parse actual/estimated time from FR24 status column
+  let actualDeparture: Date | null = null;
+  let actualArrival: Date | null = null;
+  let estimatedTime: Date | null = null;
+
+  if (flight.actualEstTime) {
+    const parsedTime = parseTimeToDate(flight.actualEstTime, flightDate);
+    const now = new Date();
+    if (parsedTime) {
+      // Only treat times as "actual" if they are in the past
+      if (status === 'Landed' && flight.type === 'arrival' && parsedTime <= now) {
+        actualArrival = parsedTime;
+      } else if ((status === 'Airborne' || status === 'Landed') && flight.type === 'departure' && parsedTime <= now) {
+        actualDeparture = parsedTime;
+      } else {
+        // FR24 "Estimated HH:MM" — only treat as a meaningful estimate if
+        // it differs from the scheduled time by more than 5 minutes.
+        // Otherwise it's just FR24's way of saying "on time".
+        const baseTime = flight.type === 'departure' ? scheduledDeparture : scheduledArrival;
+        const diffMins = Math.abs(parsedTime.getTime() - baseTime.getTime()) / 60_000;
+        if (diffMins > 5) {
+          estimatedTime = parsedTime;
+          // Upgrade status to Delayed since there's a real time difference
+          status = 'Delayed';
+        }
+        // If within 5 minutes of scheduled, ignore — it's on time
+      }
+    }
+  }
+
+  // Compute delay
+  let delayMinutes: number | null = null;
+  if (actualDeparture && flight.type === 'departure') {
+    const diff = Math.round((actualDeparture.getTime() - scheduledDeparture.getTime()) / 60_000);
+    if (diff > 0 && diff <= 1440) delayMinutes = diff;
+  } else if (actualArrival && flight.type === 'arrival') {
+    const diff = Math.round((actualArrival.getTime() - scheduledArrival.getTime()) / 60_000);
+    if (diff > 0 && diff <= 1440) delayMinutes = diff;
+  } else if (estimatedTime) {
+    const baseTime = flight.type === 'departure' ? scheduledDeparture : scheduledArrival;
+    const diff = Math.round((estimatedTime.getTime() - baseTime.getTime()) / 60_000);
+    if (diff > 5 && diff <= 1440) delayMinutes = diff;
+  }
+
+  try {
+    // First check if a flight already exists for this flight_number + flight_date
+    // This handles dedup with guernsey-scraper records
+    const existing = await db
+      .select({ id: flightsTable.id, uniqueId: flightsTable.uniqueId })
+      .from(flightsTable)
+      .where(
+        and(
+          eq(flightsTable.flightNumber, flightNumber),
+          eq(flightsTable.flightDate, flightDate),
+        ),
+      )
+      .limit(1);
+
+    let flightId: number | null;
+
+    const updateSet: Record<string, unknown> = {
+      updatedAt: new Date(),
+    };
+    // Always update status — including 'Scheduled' so we can downgrade flights
+    // that were previously marked 'Delayed' when FR24 now shows them as on-time
+    if (status) updateSet.status = status;
+    if (canceled) updateSet.canceled = canceled;
+    if (actualDeparture) updateSet.actualDeparture = actualDeparture;
+    if (actualArrival) updateSet.actualArrival = actualArrival;
+    if (delayMinutes !== null) updateSet.delayMinutes = delayMinutes;
+    if (aircraftType) updateSet.aircraftType = aircraftType;
+    if (aircraftReg) updateSet.aircraftRegistration = aircraftReg;
+
+    if (existing.length > 0) {
+      // Update existing record from guernsey-scraper
+      flightId = existing[0].id;
+      if (Object.keys(updateSet).length > 1) {
+        await db
+          .update(flightsTable)
+          .set(updateSet)
+          .where(eq(flightsTable.id, flightId));
+      }
+    } else {
+      // Flight not on Guernsey Airport website — skip it
+      return null;
+    }
+
+    if (flightId === null) return null;
+
+    // Write estimated time to flightTimes (or remove stale estimate if on-time)
+    const estTimeType = flight.type === 'departure' ? 'EstimatedBlockOff' : 'EstimatedBlockOn';
+    if (estimatedTime) {
+      await db
+        .insert(flightTimes)
+        .values({ flightId, timeType: estTimeType, timeValue: estimatedTime })
+        .onConflictDoUpdate({
+          target: [flightTimes.flightId, flightTimes.timeType],
+          set: { timeValue: estimatedTime },
+        });
+    } else {
+      // No meaningful estimate — remove any stale estimated time entry
+      // so the UI doesn't show "Estimated — subject to change" with same time as scheduled
+      await db
+        .delete(flightTimes)
+        .where(
+          and(
+            eq(flightTimes.flightId, flightId),
+            eq(flightTimes.timeType, estTimeType),
+          ),
+        ).catch(() => {});
+    }
+
+    // Write actual times to flightTimes
+    if (actualDeparture) {
+      await db
+        .insert(flightTimes)
+        .values({ flightId, timeType: 'ActualBlockOff', timeValue: actualDeparture })
+        .onConflictDoUpdate({
+          target: [flightTimes.flightId, flightTimes.timeType],
+          set: { timeValue: actualDeparture },
+        });
+    }
+    if (actualArrival) {
+      await db
+        .insert(flightTimes)
+        .values({ flightId, timeType: 'ActualBlockOn', timeValue: actualArrival })
+        .onConflictDoUpdate({
+          target: [flightTimes.flightId, flightTimes.timeType],
+          set: { timeValue: actualArrival },
+        });
+    }
+
+    // Insert status history
+    try {
+      await db
+        .insert(flightStatusHistory)
+        .values({
+          flightCode: flightNumber,
+          flightDate,
+          statusTimestamp: new Date(),
+          statusMessage: flight.status || status,
+          source: 'fr24',
+          flightId,
+        })
+        .onConflictDoNothing();
+    } catch {
+      // Status history insert is best-effort
+    }
+
+    return flightId;
+  } catch (err) {
+    console.error(`[FR24] Error upserting ${flightNumber}:`, err);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Core browser session
+// ---------------------------------------------------------------------------
+
+async function runBrowserSession(
+  logId: number,
+  maxRetries: number,
+): Promise<{ success: boolean; count: number; error?: string }> {
+  const flightDate = guernseyDateStr();
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    let browser: Browser | null = null;
+    try {
+      console.log(`[FR24] Attempt ${attempt}/${maxRetries} — date: ${flightDate}`);
+      await randomDelay(3000, 8000);
+
+      const proxies = getProxyList();
+      const selectedProxy = getRandomProxy(proxies);
+
+      if (selectedProxy) {
+        console.log(`[FR24] Using proxy: ${selectedProxy.host}:${selectedProxy.port}`);
+      } else {
+        console.log('[FR24] No proxy configured - connecting directly');
+      }
+
+      console.log('[FR24] Launching browser...');
+
+      const isDocker = process.env.CHROME_PATH !== undefined;
+      const chromePath = process.env.CHROME_PATH;
+      const connectOptions: Record<string, unknown> = {
+        headless: false,
+        turnstile: true,
+        disableXvfb: false,
+        args: [
+          '--disable-dev-shm-usage',
+          '--window-size=1920,1080',
+          '--lang=en-GB',
+          '--accept-lang=en-GB,en;q=0.9',
+          ...(isDocker ? [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+          ] : []),
+        ],
+      };
+
+      if (chromePath) {
+        connectOptions.customConfig = { chromePath };
+      }
+
+      if (selectedProxy) {
+        connectOptions.proxy = {
+          host: selectedProxy.host,
+          port: selectedProxy.port,
+          username: selectedProxy.username,
+          password: selectedProxy.password,
+        };
+      }
+
+      const { browser: b, page } = await connect(connectOptions);
+      console.log('[FR24] Browser launched successfully');
+      browser = b;
+
+      let totalUpserted = 0;
+
+      // ---- Scrape arrivals ----
+      console.log('[FR24] Loading arrivals page...');
+      await page.goto('https://www.flightradar24.com/data/airports/gci/arrivals', {
+        waitUntil: 'networkidle2',
+        timeout: 120000,
+      });
+
+      // Wait for Cloudflare challenge if present
+      let title = await page.title().catch(() => '');
+      let waitAttempts = 0;
+      while (title.includes('Just a moment') && waitAttempts < 10) {
+        console.log('[FR24] Waiting for Cloudflare challenge...');
+        await randomDelay(5000, 10000);
+        title = await page.title().catch(() => '');
+        waitAttempts++;
+      }
+
+      // Wait for table to render
+      console.log('[FR24] Waiting for flight table to render...');
+      await page.waitForSelector('table', { timeout: 30000 }).catch(() => {
+        console.log('[FR24] No table found via waitForSelector, will try to extract anyway');
+      });
+      await randomDelay(3000, 5000);
+
+      // Click "load earlier flights" button to get all flights
+      await clickLoadEarlierFlights(page);
+      await simulateHumanBehavior(page);
+
+      const arrivalFlights = await extractFlightRows(page, 'arrival', flightDate);
+      console.log(`[FR24] Parsed ${arrivalFlights.length} arrival rows`);
+
+      for (const flight of arrivalFlights) {
+        const id = await upsertFR24Flight(flight, flightDate);
+        if (id !== null) totalUpserted++;
+      }
+
+      // ---- Scrape departures ----
+      await randomDelay(3000, 6000);
+      console.log('[FR24] Loading departures page...');
+      await page.goto('https://www.flightradar24.com/data/airports/gci/departures', {
+        waitUntil: 'networkidle2',
+        timeout: 120000,
+      });
+
+      // Wait for Cloudflare again if needed
+      title = await page.title().catch(() => '');
+      waitAttempts = 0;
+      while (title.includes('Just a moment') && waitAttempts < 10) {
+        console.log('[FR24] Waiting for Cloudflare challenge...');
+        await randomDelay(5000, 10000);
+        title = await page.title().catch(() => '');
+        waitAttempts++;
+      }
+
+      await page.waitForSelector('table', { timeout: 30000 }).catch(() => {
+        console.log('[FR24] No table found via waitForSelector, will try to extract anyway');
+      });
+      await randomDelay(3000, 5000);
+
+      // Click "load earlier flights" on departures too
+      await clickLoadEarlierFlights(page);
+      await simulateHumanBehavior(page);
+
+      const departureFlights = await extractFlightRows(page, 'departure', flightDate);
+      console.log(`[FR24] Parsed ${departureFlights.length} departure rows`);
+
+      for (const flight of departureFlights) {
+        const id = await upsertFR24Flight(flight, flightDate);
+        if (id !== null) totalUpserted++;
+      }
+
+      // ---- Complete ----
+      await db.update(scraperLogs)
+        .set({ status: 'success', recordsScraped: totalUpserted, completedAt: new Date(), retryCount: attempt - 1 })
+        .where(eq(scraperLogs.id, logId));
+
+      console.log('[FR24] Closing browser...');
+      await Promise.race([
+        page.close(),
+        new Promise(resolve => setTimeout(resolve, 2000)),
+      ]).catch(() => {});
+      await Promise.race([
+        browser.close(),
+        new Promise(resolve => setTimeout(resolve, 3000)),
+      ]);
+      console.log('[FR24] Browser closed');
+
+      if (global.gc) global.gc();
+
+      return { success: true, count: totalUpserted };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[FR24] Attempt ${attempt} failed: ${message}`);
+      if (browser) {
+        await Promise.race([
+          browser.close(),
+          new Promise(resolve => setTimeout(resolve, 3000)),
+        ]).catch(() => {});
+      }
+
+      if (attempt < maxRetries) {
+        const backoff = Math.pow(2, attempt) * 5000 + Math.random() * 5000;
+        console.log(`[FR24] Retrying in ${Math.round(backoff / 1000)}s...`);
+        await randomDelay(backoff, backoff + 5000);
+      } else {
+        await db.update(scraperLogs)
+          .set({ status: 'failure', errorMessage: message, completedAt: new Date(), retryCount: maxRetries })
+          .where(eq(scraperLogs.id, logId));
+        return { success: false, count: 0, error: message };
+      }
+    }
+  }
+
+  return { success: false, count: 0, error: 'Exhausted retries' };
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export async function scrapeOnce(): Promise<{ success: boolean; count: number; error?: string }> {
+  const logEntry = await db
+    .insert(scraperLogs)
+    .values({ service: 'fr24_live', status: 'retry', startedAt: new Date(), retryCount: 0 })
+    .returning({ id: scraperLogs.id });
+  const logId = logEntry[0].id;
+
+  const maxRetries = parseInt(process.env.SCRAPER_MAX_RETRIES || '3');
+  return runBrowserSession(logId, maxRetries);
+}

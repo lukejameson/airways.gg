@@ -15,10 +15,10 @@ import {
 } from 'drizzle-orm/pg-core';
 
 export const userRoleEnum = pgEnum('user_role', ['admin', 'user']);
-export const scraperServiceEnum = pgEnum('scraper_service', ['aurigny_live', 'guernsey_historical', 'aurigny_prefetch', 'guernsey_live']);
+export const scraperServiceEnum = pgEnum('scraper_service', ['aurigny_live', 'guernsey_historical', 'aurigny_prefetch', 'guernsey_live', 'fr24_live']);
 export const scraperStatusEnum = pgEnum('scraper_status', ['success', 'failure', 'retry']);
 export const confidenceEnum = pgEnum('confidence_level', ['low', 'medium', 'high']);
-export const statusSourceEnum = pgEnum('status_source', ['aurigny', 'guernsey_airport']);
+export const statusSourceEnum = pgEnum('status_source', ['aurigny', 'guernsey_airport', 'fr24']);
 
 export const users = pgTable('users', {
   id: varchar('id', { length: 36 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
