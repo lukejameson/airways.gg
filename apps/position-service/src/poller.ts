@@ -39,6 +39,7 @@ interface FlightToPoll {
   scheduledDeparture: Date;
   scheduledArrival: Date;
   actualDeparture: Date | null;
+  actualArrival: Date | null;
   aircraftRegistration: string | null;
   priority: 'high' | 'medium' | 'low';
 }
@@ -170,16 +171,18 @@ function deriveStatusFromFR24(
     return null;
   }
 
-  // Aircraft is on the ground
+  // Aircraft is on the ground.
+  // If it was previously Airborne, it has just landed — mark it immediately
+  // rather than waiting for the scraper's next cycle.
+  if (current === 'airborne') return 'Landed';
+
   if (pos.gspeed > 5) {
-    // Moving on the ground — taxiing out (before departure) or vacating runway (after landing).
-    // Only write Taxiing if the flight isn't already Airborne (i.e. we haven't seen it fly yet).
-    // Once a flight has been Airborne, ground movement means it's landing — let the scraper handle that.
-    if (current !== 'airborne' && current !== 'taxiing') return 'Taxiing';
+    // Moving on the ground before departure — taxiing out.
+    if (current !== 'taxiing') return 'Taxiing';
     return null;
   }
 
-  // Stationary on the ground — don't overwrite anything; the scraper will write Landed.
+  // Stationary on the ground and not yet airborne — nothing to update.
   return null;
 }
 
@@ -294,6 +297,7 @@ export async function pollPositions(): Promise<number> {
       scheduledDeparture: flights.scheduledDeparture,
       scheduledArrival: flights.scheduledArrival,
       actualDeparture: flights.actualDeparture,
+      actualArrival: flights.actualArrival,
       aircraftRegistration: flights.aircraftRegistration,
     })
     .from(flights)
@@ -394,10 +398,19 @@ export async function pollPositions(): Promise<number> {
       if (matchedFlight) {
         const derivedStatus = deriveStatusFromFR24(pos, onGround, matchedFlight.status);
         if (derivedStatus !== null) {
+          // When we detect a landing, also record actualArrival if not already set.
+          const landingTime = derivedStatus === 'Landed' && matchedFlight.actualArrival == null
+            ? new Date(pos.timestamp)
+            : undefined;
+
           try {
             await db
               .update(flights)
-              .set({ status: derivedStatus, updatedAt: now })
+              .set({
+                status: derivedStatus,
+                updatedAt: now,
+                ...(landingTime ? { actualArrival: landingTime } : {}),
+              })
               .where(
                 and(
                   eq(flights.id, flightId),
@@ -407,7 +420,8 @@ export async function pollPositions(): Promise<number> {
             console.log(
               `[Position] Status back-write: ${matchedFlight.flightNumber} (id=${flightId}) ` +
               `${matchedFlight.status} → ${derivedStatus} ` +
-              `(alt=${pos.alt}ft, speed=${pos.gspeed}kts, vspeed=${pos.vspeed}fpm)`,
+              `(alt=${pos.alt}ft, speed=${pos.gspeed}kts, vspeed=${pos.vspeed}fpm)` +
+              (landingTime ? ` — actualArrival set to ${landingTime.toISOString()}` : ''),
             );
           } catch (err) {
             console.error(`[Position] Failed status back-write for flight ${matchedFlight.flightNumber}:`, err);
