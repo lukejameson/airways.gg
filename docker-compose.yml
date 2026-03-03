@@ -78,6 +78,26 @@ services:
       - web
     restart: unless-stopped
 
+  guernsey-live:
+    build:
+      context: .
+      dockerfile: apps/guernsey-scraper/Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - SCRAPER_MODE=live
+      - SCRAPER_CUTOFF_HOUR=${SCRAPER_CUTOFF_HOUR:-23}
+      - SCRAPER_WAKE_OFFSET_MINS=${SCRAPER_WAKE_OFFSET_MINS:-30}
+      - SCRAPER_INTERVAL_HIGH_MINS=${SCRAPER_INTERVAL_HIGH_MINS:-2}
+      - SCRAPER_INTERVAL_MEDIUM_MINS=${SCRAPER_INTERVAL_MEDIUM_MINS:-5}
+      - SCRAPER_INTERVAL_LOW_MINS=${SCRAPER_INTERVAL_LOW_MINS:-10}
+      - SCRAPER_INTERVAL_IDLE_MINS=${SCRAPER_INTERVAL_IDLE_MINS:-15}
+      - SCRAPER_INTERVAL_TOMORROW_MINS=${SCRAPER_INTERVAL_TOMORROW_MINS:-360}
+      - GUERNSEY_AIRPORT_URL=${GUERNSEY_AIRPORT_URL:-https://www.airport.gg}
+      - NODE_ENV=production
+    networks:
+      - web
+    restart: unless-stopped
+
   guernsey-backfill:
     build:
       context: .

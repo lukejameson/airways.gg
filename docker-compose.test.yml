@@ -34,7 +34,7 @@ services:
       - web
     restart: unless-stopped
 
-  guernsey-scraper:
+  guernsey-live:
     build:
       context: .
       dockerfile: apps/guernsey-scraper/Dockerfile
