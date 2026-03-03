@@ -306,9 +306,11 @@ function cleanFlightNumber(raw: string): string {
   return raw.replace(/\s+/g, '').toUpperCase();
 }
 
+// Skybus (SI) operates under Aurigny (GR)
 function extractAirlineCode(flightNumber: string): string {
   const match = flightNumber.match(/^([A-Z]{2})/);
-  return match ? match[1] : 'XX';
+  const code = match ? match[1] : 'XX';
+  return code === 'SI' ? 'GR' : code;
 }
 
 // ---------------------------------------------------------------------------
