@@ -349,6 +349,9 @@ export async function pollPositions(): Promise<number> {
     // Map id → flight for status back-write
     const flightById = new Map(liveNeedingPoll.map(f => [f.id, f]));
 
+    // Track which flights received a live position this cycle
+    const matchedFlightIds = new Set<number>();
+
     for (const pos of positions) {
       // Try flight number first, fall back to registration
       const flightId = flightIdByNumber.get(pos.flight ?? '')
@@ -359,6 +362,8 @@ export async function pollPositions(): Promise<number> {
         console.warn(`[Position] Could not match FR24 position to a flight — flight="${pos.flight}" reg="${pos.reg}" callsign="${pos.callsign}"`);
         continue;
       }
+
+      matchedFlightIds.add(flightId);
       const onGround = pos.alt < 100 && pos.gspeed < 50;
       try {
         await db.insert(aircraftPositions).values({
@@ -427,6 +432,38 @@ export async function pollPositions(): Promise<number> {
             console.error(`[Position] Failed status back-write for flight ${matchedFlight.flightNumber}:`, err);
           }
         }
+      }
+    }
+
+    // ── Auto-land: Airborne flights with no FR24 response past arrival buffer ──
+    // If FR24 returns no live position for an Airborne flight and we are already
+    // past the scheduled arrival + a generous buffer, the aircraft has almost
+    // certainly landed but FR24 stopped reporting it before we caught the
+    // on-ground transition. Mark the flight Landed so it doesn't stay stuck.
+    const AUTO_LAND_BUFFER_MS = 45 * 60_000; // 45 minutes after scheduled arrival
+    for (const flight of liveNeedingPoll) {
+      if (flight.status?.toLowerCase() !== 'airborne') continue;
+      if (matchedFlightIds.has(flight.id)) continue; // FR24 is still tracking it
+
+      const overdue = nowMs > flight.scheduledArrival.getTime() + AUTO_LAND_BUFFER_MS;
+      if (!overdue) continue;
+
+      try {
+        await db
+          .update(flights)
+          .set({ status: 'Landed', updatedAt: now })
+          .where(
+            and(
+              eq(flights.id, flight.id),
+              sql`COALESCE(${flights.status}, '') NOT IN ('Landed', 'Cancelled', 'Diverted')`,
+            ),
+          );
+        console.log(
+          `[Position] Auto-landed ${flight.flightNumber} (id=${flight.id}) — ` +
+          `no FR24 position found and ${Math.round((nowMs - flight.scheduledArrival.getTime()) / 60_000)}min past scheduled arrival`,
+        );
+      } catch (err) {
+        console.error(`[Position] Failed auto-land for ${flight.flightNumber}:`, err);
       }
     }
   }
