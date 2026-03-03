@@ -24,7 +24,7 @@ if (envPath) {
 }
 
 import { db, flights } from '@airways/database';
-import { eq, and, sql, isNull, gte, lte } from 'drizzle-orm';
+import { eq, and, sql, isNull, gte, lte, asc } from 'drizzle-orm';
 import { lookupByHex } from './lookup';
 import { AURIGNY_FLEET } from './fleet';
 
@@ -67,6 +67,142 @@ async function markLanded(flightId: number): Promise<void> {
         sql`COALESCE(${flights.status}, '') NOT IN ('Cancelled', 'Landed', 'Diverted')`,
       ),
     );
+}
+
+async function propagateRegistration(
+  registration: string,
+  aircraftType: string,
+  anchorFlightId: number,
+): Promise<void> {
+  // Fetch the anchor flight to get its route and times
+  const [anchor] = await db
+    .select({
+      id: flights.id,
+      departureAirport: flights.departureAirport,
+      arrivalAirport: flights.arrivalAirport,
+      scheduledDeparture: flights.scheduledDeparture,
+      scheduledArrival: flights.scheduledArrival,
+      flightDate: flights.flightDate,
+    })
+    .from(flights)
+    .where(eq(flights.id, anchorFlightId));
+
+  if (!anchor) return;
+
+  // Get all GR flights for the same day that are missing registration, ordered by departure
+  const unregistered = await db
+    .select({
+      id: flights.id,
+      departureAirport: flights.departureAirport,
+      arrivalAirport: flights.arrivalAirport,
+      scheduledDeparture: flights.scheduledDeparture,
+      scheduledArrival: flights.scheduledArrival,
+    })
+    .from(flights)
+    .where(
+      and(
+        eq(flights.airlineCode, 'GR'),
+        eq(flights.flightDate, anchor.flightDate),
+        isNull(flights.aircraftRegistration),
+      ),
+    )
+    .orderBy(asc(flights.scheduledDeparture));
+
+  if (unregistered.length === 0) return;
+
+  const matched: number[] = [];
+
+  // Walk forward: starting from anchor's arrival, find the chain of connecting flights
+  let currentArrival = anchor.arrivalAirport;
+  let currentArrivalTime = anchor.scheduledArrival;
+  for (const f of unregistered) {
+    if (
+      f.departureAirport === currentArrival &&
+      f.scheduledDeparture >= currentArrivalTime
+    ) {
+      matched.push(f.id);
+      currentArrival = f.arrivalAirport;
+      currentArrivalTime = f.scheduledArrival;
+    }
+  }
+
+  // Walk backward: starting from anchor's departure, find the chain going back
+  let currentDeparture = anchor.departureAirport;
+  let currentDepartureTime = anchor.scheduledDeparture;
+  for (let i = unregistered.length - 1; i >= 0; i--) {
+    const f = unregistered[i];
+    if (
+      f.arrivalAirport === currentDeparture &&
+      f.scheduledArrival <= currentDepartureTime
+    ) {
+      matched.push(f.id);
+      currentDeparture = f.departureAirport;
+      currentDepartureTime = f.scheduledDeparture;
+    }
+  }
+
+  if (matched.length === 0) return;
+
+  // Update all matched flights
+  for (const flightId of matched) {
+    await db
+      .update(flights)
+      .set({
+        aircraftRegistration: registration,
+        aircraftType: aircraftType,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(flights.id, flightId),
+          isNull(flights.aircraftRegistration),
+        ),
+      );
+  }
+
+  console.log(
+    `[ADSB] Propagated ${registration} to ${matched.length} flight(s): [${matched.join(', ')}]`,
+  );
+}
+
+async function propagateExistingRegistrations(): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Find all GR flights today that already have a registration
+  const anchors = await db
+    .select({
+      id: flights.id,
+      aircraftRegistration: flights.aircraftRegistration,
+      aircraftType: flights.aircraftType,
+    })
+    .from(flights)
+    .where(
+      and(
+        eq(flights.airlineCode, 'GR'),
+        eq(flights.flightDate, today),
+        sql`${flights.aircraftRegistration} IS NOT NULL`,
+      ),
+    )
+    .orderBy(asc(flights.scheduledDeparture));
+
+  if (anchors.length === 0) {
+    console.log('[ADSB] No registered flights today to propagate from');
+    return;
+  }
+
+  console.log(`[ADSB] Startup propagation: ${anchors.length} registered flight(s) today`);
+
+  // Group by registration to avoid redundant propagation
+  const seen = new Set<string>();
+  for (const a of anchors) {
+    if (seen.has(a.aircraftRegistration!)) continue;
+    seen.add(a.aircraftRegistration!);
+    await propagateRegistration(
+      a.aircraftRegistration!,
+      a.aircraftType ?? '',
+      a.id,
+    );
+  }
 }
 
 async function pollRegistrations(): Promise<void> {
@@ -198,6 +334,9 @@ async function pollRegistrations(): Promise<void> {
           `[ADSB] ${aircraft.registration}: airborne, ${departureIata}→${result.destIata} → ` +
             `matched flight ${match.id}, status=Airborne`,
         );
+
+        // Propagate this registration to adjacent flights in the day's rotation
+        await propagateRegistration(aircraft.registration, aircraft.type, match.id);
       }
     } else if (tracked) {
       // Registration already written — just keep status fresh
@@ -223,6 +362,9 @@ async function main(): Promise<void> {
   console.log(`[ADSB] Poll interval: ${INTERVAL_MS / 1000}s`);
   console.log('[ADSB] Providers: adsb.lol (primary), airplanes.live (fallback)');
   console.log(`[ADSB] Fleet: ${AURIGNY_FLEET.length} aircraft configured`);
+
+  // On startup, propagate any existing registrations to adjacent flights
+  await propagateExistingRegistrations();
 
   async function poll(): Promise<void> {
     try {

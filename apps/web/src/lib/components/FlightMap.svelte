@@ -6,13 +6,11 @@
     lat: number;
     lon: number;
     heading: number;
-    originIata: string | null;
-    destIata: string | null;
     depAirport: string;
     arrAirport: string;
   }
 
-  let { lat, lon, heading, originIata: _originIata, destIata: _destIata, depAirport, arrAirport }: Props = $props();
+  let { lat, lon, heading, depAirport, arrAirport }: Props = $props();
 
 
 

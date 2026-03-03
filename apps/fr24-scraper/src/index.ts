@@ -24,7 +24,7 @@ if (envPath) {
 
 import { scrapeOnce, guernseyDateStr } from './scraper';
 import { db, scraperLogs, flights, flightTimes } from '@airways/database';
-import { eq, and, not, inArray, desc, count, max } from 'drizzle-orm';
+import { eq, and, not, inArray, desc, count, max, asc, isNull, sql } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -464,12 +464,148 @@ async function msSinceLastScrape(): Promise<number> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Registration propagation — after FR24 writes a registration to any flight,
+// chain it forward/backward through the day's schedule so adjacent flights
+// operated by the same aircraft also get the registration.
+// ---------------------------------------------------------------------------
+
+async function propagateRegistration(
+  registration: string,
+  aircraftType: string | null,
+  anchorFlightId: number,
+): Promise<number> {
+  const [anchor] = await db
+    .select({
+      id: flights.id,
+      departureAirport: flights.departureAirport,
+      arrivalAirport: flights.arrivalAirport,
+      scheduledDeparture: flights.scheduledDeparture,
+      scheduledArrival: flights.scheduledArrival,
+      flightDate: flights.flightDate,
+    })
+    .from(flights)
+    .where(eq(flights.id, anchorFlightId));
+
+  if (!anchor) return 0;
+
+  const unregistered = await db
+    .select({
+      id: flights.id,
+      departureAirport: flights.departureAirport,
+      arrivalAirport: flights.arrivalAirport,
+      scheduledDeparture: flights.scheduledDeparture,
+      scheduledArrival: flights.scheduledArrival,
+    })
+    .from(flights)
+    .where(
+      and(
+        eq(flights.airlineCode, 'GR'),
+        eq(flights.flightDate, anchor.flightDate),
+        isNull(flights.aircraftRegistration),
+      ),
+    )
+    .orderBy(asc(flights.scheduledDeparture));
+
+  if (unregistered.length === 0) return 0;
+
+  const matched: number[] = [];
+
+  // Walk forward: anchor arrives at X → find next flight departing from X
+  let currentArrival = anchor.arrivalAirport;
+  let currentArrivalTime = anchor.scheduledArrival;
+  for (const f of unregistered) {
+    if (
+      f.departureAirport === currentArrival &&
+      f.scheduledDeparture >= currentArrivalTime
+    ) {
+      matched.push(f.id);
+      currentArrival = f.arrivalAirport;
+      currentArrivalTime = f.scheduledArrival;
+    }
+  }
+
+  // Walk backward: anchor departs from Y → find previous flight arriving at Y
+  let currentDeparture = anchor.departureAirport;
+  let currentDepartureTime = anchor.scheduledDeparture;
+  for (let i = unregistered.length - 1; i >= 0; i--) {
+    const f = unregistered[i];
+    if (
+      f.arrivalAirport === currentDeparture &&
+      f.scheduledArrival <= currentDepartureTime
+    ) {
+      matched.push(f.id);
+      currentDeparture = f.departureAirport;
+      currentDepartureTime = f.scheduledDeparture;
+    }
+  }
+
+  if (matched.length === 0) return 0;
+
+  const updateSet: Record<string, unknown> = {
+    aircraftRegistration: registration,
+    updatedAt: new Date(),
+  };
+  if (aircraftType) updateSet.aircraftType = aircraftType;
+
+  for (const flightId of matched) {
+    await db
+      .update(flights)
+      .set(updateSet)
+      .where(and(eq(flights.id, flightId), isNull(flights.aircraftRegistration)));
+  }
+
+  return matched.length;
+}
+
+async function propagateRegistrationsForToday(): Promise<void> {
+  const today = guernseyDateStr();
+
+  const anchors = await db
+    .select({
+      id: flights.id,
+      aircraftRegistration: flights.aircraftRegistration,
+      aircraftType: flights.aircraftType,
+    })
+    .from(flights)
+    .where(
+      and(
+        eq(flights.airlineCode, 'GR'),
+        eq(flights.flightDate, today),
+        sql`${flights.aircraftRegistration} IS NOT NULL`,
+      ),
+    )
+    .orderBy(asc(flights.scheduledDeparture));
+
+  if (anchors.length === 0) return;
+
+  const seen = new Set<string>();
+  let totalPropagated = 0;
+
+  for (const a of anchors) {
+    if (seen.has(a.aircraftRegistration!)) continue;
+    seen.add(a.aircraftRegistration!);
+    const count = await propagateRegistration(
+      a.aircraftRegistration!,
+      a.aircraftType,
+      a.id,
+    );
+    totalPropagated += count;
+  }
+
+  if (totalPropagated > 0) {
+    console.log(`[FR24] Propagated registrations to ${totalPropagated} additional flight(s)`);
+  }
+}
+
 async function runScrape(label: string): Promise<void> {
   const result = await scrapeOnce();
   if (!result.success) {
     console.error(`[FR24] ${label} failed: ${result.error}`);
   } else {
     console.log(`[FR24] ${label} complete — ${result.count} flights upserted`);
+    // After a successful scrape, propagate any registrations FR24 wrote
+    await propagateRegistrationsForToday();
   }
 }
 

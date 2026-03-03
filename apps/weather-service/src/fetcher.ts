@@ -1,5 +1,5 @@
 import { db, weatherData, flights, airportDaylight, airports } from '@airways/database';
-import { sql, eq, inArray } from 'drizzle-orm';
+import { sql, inArray } from 'drizzle-orm';
 import { getIcaoMapping } from './airports';
 import SunCalc from 'suncalc';
 
@@ -631,18 +631,4 @@ export async function fetchWeatherForUpcomingFlights(): Promise<void> {
   }
 }
 
-// WMO weather code → human-readable description
-export function describeWeatherCode(code: number): string {
-  if (code === 0) return 'Clear sky';
-  if (code === 1) return 'Mainly clear';
-  if (code === 2) return 'Partly cloudy';
-  if (code === 3) return 'Overcast';
-  if (code <= 49) return 'Foggy';
-  if (code <= 59) return 'Drizzle';
-  if (code <= 69) return 'Rain';
-  if (code <= 79) return 'Snow';
-  if (code <= 82) return 'Rain showers';
-  if (code <= 86) return 'Snow showers';
-  if (code <= 99) return 'Thunderstorm';
-  return 'Unknown';
-}
+

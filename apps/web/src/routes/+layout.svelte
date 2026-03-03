@@ -5,8 +5,10 @@
 
   let { data, children } = $props();
 
-  // Use $effect so initAirports re-runs if data ever updates (e.g. SvelteKit
-  // invalidation). Calling it directly captured only the initial value.
+  // Initialise synchronously so airport names are available on first render
+  // (avoids showing raw IATA codes before $effect fires after mount).
+  // $effect re-runs if SvelteKit ever invalidates the layout data.
+  initAirports(data.airports as Record<string, AirportInfo>);
   $effect(() => {
     initAirports(data.airports as Record<string, AirportInfo>);
   });

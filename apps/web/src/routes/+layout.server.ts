@@ -10,7 +10,6 @@ export const load: LayoutServerLoad = async (_) => {
       iataCode: airports.iataCode,
       icaoCode: airports.icaoCode,
       name: airports.name,
-      displayName: airports.displayName,
       city: airports.city,
       latitude: airports.latitude,
       longitude: airports.longitude,

@@ -91,7 +91,6 @@ function routeFlightMinutes(iata: string): number {
 
 interface ParsedFR24Flight {
   flightNumber: string;
-  airlineCode: string;
   origin: string;      // IATA
   destination: string;  // IATA
   scheduledTime: string; // "HH:MM" or similar from FR24
@@ -148,8 +147,15 @@ async function extractFlightRows(page: Page, type: 'arrival' | 'departure', targ
         let statusText = '';
         let aircraftText = '';
 
-        // FR24 table structure: Time | Flight | From/To | Aircraft | Status
-        if (cellTexts.length >= 5) {
+        // FR24 table structure: Time | Flight | From/To | Airline | Aircraft | Status
+        if (cellTexts.length >= 6) {
+          scheduledTime = cellTexts[0];
+          flightNum = cellTexts[1];
+          originDest = cellTexts[2];
+          // cellTexts[3] is airline name — skip it
+          aircraftText = cellTexts[4];
+          statusText = cellTexts[cellTexts.length - 1];
+        } else if (cellTexts.length >= 5) {
           scheduledTime = cellTexts[0];
           flightNum = cellTexts[1];
           originDest = cellTexts[2];
@@ -178,7 +184,6 @@ async function extractFlightRows(page: Page, type: 'arrival' | 'departure', targ
 
         rows.push({
           flightNumber: flightNum,
-          airlineCode: '',
           origin: flightType === 'arrival' ? iataCode : 'GCI',
           destination: flightType === 'arrival' ? 'GCI' : iataCode,
           scheduledTime,
@@ -188,6 +193,7 @@ async function extractFlightRows(page: Page, type: 'arrival' | 'departure', targ
           aircraftReg: acRegMatch ? acRegMatch[1] : null,
           type: flightType,
           dateContext: currentDate,
+          _rawCells: cellTexts.slice(0, 6),
         });
       } catch {
         // skip unparseable rows
@@ -215,6 +221,16 @@ async function extractFlightRows(page: Page, type: 'arrival' | 'departure', targ
   });
 
   console.log(`[FR24] Filtered ${rawRows.length} raw rows to ${filtered.length} for ${targetDate}`);
+
+  // Debug: log what we're seeing in the aircraft column to diagnose registration extraction
+  for (const row of filtered.slice(0, 5)) {
+    const r = row as any;
+    console.log(
+      `[FR24] DEBUG ${r.flightNumber}: aircraftType=${r.aircraftType ?? 'null'}, ` +
+      `aircraftReg=${r.aircraftReg ?? 'null'}, raw cells=${JSON.stringify(r._rawCells ?? 'n/a')}`,
+    );
+  }
+
   return filtered as ParsedFR24Flight[];
   /* eslint-enable @typescript-eslint/no-explicit-any */
 }
@@ -371,8 +387,11 @@ async function upsertFR24Flight(
   let status = normalizeStatus(flight.status);
   const canceled = status === 'Cancelled';
 
-  // Truncate aircraft fields to fit DB varchar(20) constraints
-  const aircraftType = flight.aircraftType ? flight.aircraftType.slice(0, 20) : null;
+  // Truncate aircraft fields to fit DB varchar(20) constraints.
+  // Validate aircraftType looks like a real type code (e.g. "ATR 72", "DHC8", "A320")
+  // and not a misread airline name (e.g. "Isles of Scilly Skyb").
+  const rawAcType = flight.aircraftType?.slice(0, 20) ?? null;
+  const aircraftType = rawAcType && /^[A-Z0-9][A-Z0-9\s-]{1,19}$/.test(rawAcType) ? rawAcType : null;
   const aircraftReg = flight.aircraftReg ? flight.aircraftReg.slice(0, 20) : null;
 
   // Parse scheduled time
@@ -425,17 +444,22 @@ async function upsertFR24Flight(
       } else if ((status === 'Airborne' || status === 'Landed') && flight.type === 'departure' && parsedTime <= now) {
         actualDeparture = parsedTime;
       } else {
-        // FR24 "Estimated HH:MM" — only treat as a meaningful estimate if
-        // it differs from the scheduled time by more than 5 minutes.
+        // FR24 "Estimated HH:MM" — treat as a meaningful estimate if it
+        // differs from the scheduled time by more than 5 minutes.
         // Otherwise it's just FR24's way of saying "on time".
         const baseTime = flight.type === 'departure' ? scheduledDeparture : scheduledArrival;
-        const diffMins = Math.abs(parsedTime.getTime() - baseTime.getTime()) / 60_000;
+        const diffMs = parsedTime.getTime() - baseTime.getTime();
+        const diffMins = diffMs / 60_000;
         if (diffMins > 5) {
+          // Estimated time is later than scheduled — flight is delayed
           estimatedTime = parsedTime;
-          // Upgrade status to Delayed since there's a real time difference
           status = 'Delayed';
+        } else if (diffMins < -5) {
+          // Estimated time is earlier than scheduled — flight is early, not delayed
+          estimatedTime = parsedTime;
+          // Keep status as Scheduled (early is not delayed)
         }
-        // If within 5 minutes of scheduled, ignore — it's on time
+        // If within ±5 minutes of scheduled, ignore — it's on time
       }
     }
   }
@@ -483,7 +507,10 @@ async function upsertFR24Flight(
 
     // Aircraft metadata — always safe to write
     if (aircraftType) updateSet.aircraftType = aircraftType;
-    if (aircraftReg) updateSet.aircraftRegistration = aircraftReg;
+    if (aircraftReg) {
+      updateSet.aircraftRegistration = aircraftReg;
+      console.log(`[FR24] Writing registration ${aircraftReg} for ${flightNumber}`);
+    }
 
     if (existing.length > 0) {
       const ex = existing[0];
@@ -491,7 +518,10 @@ async function upsertFR24Flight(
       // Bug fix #1: Status guard — only upgrade status, never downgrade.
       // FR24 "Estimated HH:MM" normalises to "Scheduled" which would overwrite
       // "Landed" or "Airborne" set by the guernsey scraper or ADSB service.
-      if (status && canUpgradeStatus(ex.status, status)) {
+      // Exception: allow "Delayed" → "Scheduled" when FR24 confirms the flight
+      // is on-time (corrects guernsey scraper's earlier mis-classification).
+      const isDelayedCorrection = ex.status === 'Delayed' && status === 'Scheduled';
+      if (status && (isDelayedCorrection || canUpgradeStatus(ex.status, status))) {
         updateSet.status = status;
       }
       if (canceled) updateSet.canceled = canceled;

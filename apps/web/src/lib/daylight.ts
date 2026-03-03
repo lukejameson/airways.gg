@@ -1,5 +1,5 @@
 /** Icon names available for weather icons */
-export type WeatherIconName =
+type WeatherIconName =
 	| 'sun'
 	| 'moon'
 	| 'sunCloud'
@@ -14,9 +14,7 @@ export type WeatherIconName =
 	| 'cloudBolt'
 	| 'cloudBoltSun'
 	| 'fog'
-	| 'smog'
-	| 'snowflake'
-	| 'snowflakes';
+	| 'smog';
 
 /** Check if a timestamp is during daytime (between sunrise and sunset) */
 export function isDaytime(sunrise: Date, sunset: Date, timestamp: Date): boolean {

@@ -1,9 +1,4 @@
-import type { Handle, HandleServerError } from '@sveltejs/kit';
-
-export const handle: Handle = async ({ event, resolve }) => {
-  const response = await resolve(event);
-  return response;
-};
+import type { HandleServerError } from '@sveltejs/kit';
 
 export const handleError: HandleServerError = ({ error, event, status }) => {
   // Log server-side errors with context (avoids leaking stack traces to the client)

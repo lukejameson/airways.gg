@@ -12,7 +12,7 @@
   // Get return tab from URL query param
   const returnTab = $derived($page.url.searchParams.get('tab') ?? '');
 
-  const { flight, statusHistory, prediction, weatherMap, daylightMap, position, rotationFlights, times } = $derived(data);
+  const { flight, statusHistory, weatherMap, daylightMap, position, rotationFlights, times } = $derived(data);
   const depWeather = $derived(weatherMap?.[flight.departureAirport] ?? null);
   const arrWeather = $derived(weatherMap?.[flight.arrivalAirport] ?? null);
 
@@ -64,22 +64,31 @@
         currentStatus.includes('airborne') || currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
       return flight.status;
     }
-    
+
     // Check calculated delay from times
     if (calculatedDelayMinutes > 15) {
       return 'Delayed';
-    } else if (calculatedDelayMinutes < -15) {
-      const absMins = Math.abs(calculatedDelayMinutes);
-      if (absMins >= 60) {
-        const hrs = Math.floor(absMins / 60);
-        const mins = absMins % 60;
-        return mins > 0 ? `${hrs}h ${mins}m early` : `${hrs}h early`;
-      }
-      return `${absMins}m early`;
     }
-    
+
+    // If the estimated arrival/departure is early, the flight must be airborne
+    // (you can't arrive early unless you've departed)
+    if (calculatedDelayMinutes < -5 && new Date(flight.scheduledDeparture).getTime() <= Date.now()) {
+      return 'Airborne';
+    }
+
     // Otherwise trust the external status
     return flight.status || 'Scheduled';
+  });
+
+  // Format early arrival for display (e.g., "-16m" or "-1h 5m")
+  const formattedEarly = $derived.by(() => {
+    if (calculatedDelayMinutes >= -5) return null;
+    const absMins = Math.abs(calculatedDelayMinutes);
+    const hrs = Math.floor(absMins / 60);
+    const mins = absMins % 60;
+    if (hrs > 0 && mins > 0) return `-${hrs}h ${mins}m`;
+    if (hrs > 0) return `-${hrs}h`;
+    return `-${mins}m`;
   });
 
   // Format delay for display (e.g., "5h 35m" or "45m")
@@ -197,6 +206,12 @@
    * stored inferred position was recorded, prefer the rotation result.
    */
   function getInferredLocationFromRotation(): { airport: string; source: 'rotation' } | null {
+    // If the current flight itself has landed, the plane is at the arrival airport
+    const status = flight.status?.toLowerCase() || '';
+    if (status.includes('landed') || status.includes('completed')) {
+      return { airport: flight.arrivalAirport, source: 'rotation' };
+    }
+
     const mostRecent = getMostRecentLandedRotationFlight();
     if (!mostRecent) return null;
     return { airport: mostRecent.arrivalAirport, source: 'rotation' };
@@ -356,22 +371,6 @@
     return 'bg-gray-400';
   }
 
-  const predictionPct = $derived(
-    prediction ? Math.round((prediction.probability ?? 0) * 100) : null,
-  );
-
-  function getPredictionColor(pct: number): string {
-    if (pct >= 70) return 'text-red-600';
-    if (pct >= 40) return 'text-yellow-600';
-    return 'text-green-600';
-  }
-
-  function getPredictionBarColor(pct: number): string {
-    if (pct >= 70) return 'bg-red-500';
-    if (pct >= 40) return 'bg-yellow-500';
-    return 'bg-green-500';
-  }
-
   let shareSuccess = $state(false);
 
   // Save to recently viewed
@@ -484,6 +483,8 @@
       <span class="opacity-30 hidden sm:inline">·</span>
       {#if formattedDelay}
         <span class="text-sm font-bold text-red-600">+{formattedDelay}</span>
+      {:else if formattedEarly}
+        <span class="text-sm font-bold text-green-600">{formattedEarly}</span>
       {/if}
       <div class="flex items-center gap-1.5">
         <span class="h-2 w-2 rounded-full {getStatusDotColor(calculatedStatus)}"></span>
@@ -491,14 +492,7 @@
           {calculatedStatus}
         </span>
       </div>
-      {#if calculatedStatus?.toLowerCase().includes('delayed')}
-        <!-- Delay already shown above -->
-      {:else if calculatedDelayMinutes < -15}
-        <span class="opacity-30 hidden sm:inline">·</span>
-        <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
-          {calculatedStatus}
-        </span>
-      {:else if calculatedDelayMinutes <= 15}
+      {#if !formattedDelay && !formattedEarly && calculatedDelayMinutes <= 15}
         <span class="opacity-30 hidden sm:inline">·</span>
         <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
           On Time
@@ -639,8 +633,6 @@
             lat={position.lat}
             lon={position.lon}
             heading={position.heading ?? 0}
-            originIata={position.originIata}
-            destIata={position.destIata}
             depAirport={flight.departureAirport}
             arrAirport={flight.arrivalAirport}
           />
@@ -911,7 +903,6 @@
       w.temperature != null ? `${Math.round(w.temperature)}°C` : null,
       w.windSpeed != null ? `${Math.round(w.windSpeed)}mph ${w.windDirection != null ? dirs[Math.round(w.windDirection/45)%8] : ''}`.trim() : null,
       w.visibility != null ? `${Math.round(w.visibility*10)/10}km vis` : null,
-      w.precipitation != null && w.precipitation > 0 ? `${Math.round(w.precipitation*10)/10}mm` : null,
       w.cloudCover != null ? `${w.cloudCover}% cloud` : null,
     ].filter(Boolean).join(' · ')}
     <div class="grid gap-3 mb-6 {depWeather && arrWeather ? 'grid-cols-2' : 'grid-cols-1'}">
@@ -936,10 +927,9 @@
     </div>
   {/if}
 
-  <!-- Flight info + prediction side by side -->
-  <div class="grid gap-4 mb-6 {prediction ? 'md:grid-cols-2' : ''}">
+  <!-- Flight details -->
+  <div class="grid gap-4 mb-6">
 
-    <!-- Flight details -->
     <div class="rounded-lg border bg-card p-4">
       <h2 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-3">Flight Details</h2>
       <dl class="space-y-2 text-sm">
@@ -990,46 +980,6 @@
       </dl>
     </div>
 
-    <!-- Delay prediction -->
-    {#if prediction && predictionPct !== null}
-      <div class="rounded-lg border bg-card p-4">
-        <h2 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-3">Delay Prediction</h2>
-
-        <div class="mb-4">
-          <div class="flex items-end justify-between mb-1">
-            <span class="text-sm text-muted-foreground">Probability of delay</span>
-            <span class="text-2xl font-bold {getPredictionColor(predictionPct)}">{predictionPct}%</span>
-          </div>
-          <div class="h-2 rounded-full bg-muted overflow-hidden">
-            <div
-              class="h-full rounded-full transition-all {getPredictionBarColor(predictionPct)}"
-              style="width: {predictionPct}%"
-            ></div>
-          </div>
-        </div>
-
-        <dl class="space-y-2 text-sm">
-          {#if prediction.predictedDelayMinutes > 0}
-            <div class="flex justify-between">
-              <dt class="text-muted-foreground">Predicted delay</dt>
-              <dd class="font-medium">{prediction.predictedDelayMinutes} min</dd>
-            </div>
-          {/if}
-          <div class="flex justify-between">
-            <dt class="text-muted-foreground">Confidence</dt>
-            <dd class="font-medium capitalize">{prediction.confidence}</dd>
-          </div>
-          <div class="flex justify-between">
-            <dt class="text-muted-foreground">Model version</dt>
-            <dd class="font-medium font-mono text-xs">{prediction.modelVersion}</dd>
-          </div>
-        </dl>
-
-        <p class="text-xs text-muted-foreground mt-3">
-          Expires {formatDateTime(prediction.expiresAt)}
-        </p>
-      </div>
-    {/if}
   </div>
 
   <!-- Status history -->

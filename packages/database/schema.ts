@@ -6,7 +6,6 @@ import {
   integer,
   boolean,
   text,
-  jsonb,
   real,
   date,
   pgEnum,
@@ -17,7 +16,6 @@ import {
 export const userRoleEnum = pgEnum('user_role', ['admin', 'user']);
 export const scraperServiceEnum = pgEnum('scraper_service', ['aurigny_live', 'guernsey_historical', 'aurigny_prefetch', 'guernsey_live', 'fr24_live']);
 export const scraperStatusEnum = pgEnum('scraper_status', ['success', 'failure', 'retry']);
-export const confidenceEnum = pgEnum('confidence_level', ['low', 'medium', 'high']);
 export const statusSourceEnum = pgEnum('status_source', ['aurigny', 'guernsey_airport', 'fr24']);
 
 export const users = pgTable('users', {
@@ -42,35 +40,6 @@ export const sessions = pgTable('sessions', {
   index('sessions_user_id_idx').on(table.userId),
 ]);
 
-// Legacy tables — kept for backward compatibility during migration
-export const departures = pgTable('departures', {
-  id: serial('id').primaryKey(),
-  airline: varchar('airline', { length: 100 }).notNull(),
-  location: varchar('location', { length: 200 }).notNull(),
-  code: varchar('code', { length: 100 }).notNull(),
-  scheduledTime: timestamp('scheduled_time').notNull(),
-  actualTime: timestamp('actual_time').notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-}, (table) => [
-  index('departures_scheduled_time_idx').on(table.scheduledTime),
-  index('departures_airline_idx').on(table.airline),
-  index('departures_code_idx').on(table.code),
-]);
-
-export const arrivals = pgTable('arrivals', {
-  id: serial('id').primaryKey(),
-  airline: varchar('airline', { length: 100 }).notNull(),
-  location: varchar('location', { length: 200 }).notNull(),
-  code: varchar('code', { length: 100 }).notNull(),
-  scheduledTime: timestamp('scheduled_time').notNull(),
-  actualTime: timestamp('actual_time').notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-}, (table) => [
-  index('arrivals_scheduled_time_idx').on(table.scheduledTime),
-  index('arrivals_airline_idx').on(table.airline),
-  index('arrivals_code_idx').on(table.code),
-]);
-
 export const flights = pgTable('flights', {
   id: serial('id').primaryKey(),
   uniqueId: varchar('unique_id', { length: 50 }).notNull().unique(),
@@ -88,7 +57,6 @@ export const flights = pgTable('flights', {
   aircraftType: varchar('aircraft_type', { length: 20 }),
   delayMinutes: integer('delay_minutes'),
   flightDate: date('flight_date').notNull(),
-  rawXml: text('raw_xml'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (table) => [
@@ -100,18 +68,6 @@ export const flights = pgTable('flights', {
   index('flights_arrival_airport_idx').on(table.arrivalAirport),
   index('flights_status_idx').on(table.status),
   index('flights_airline_date_idx').on(table.airlineCode, table.flightDate),
-]);
-
-export const flightDelays = pgTable('flight_delays', {
-  id: serial('id').primaryKey(),
-  flightId: integer('flight_id').notNull().references(() => flights.id, { onDelete: 'cascade' }),
-  delayCode: varchar('delay_code', { length: 20 }),
-  delayCode2: varchar('delay_code2', { length: 20 }),
-  minutes: integer('minutes').notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-}, (table) => [
-  index('flight_delays_flight_id_idx').on(table.flightId),
-  uniqueIndex('flight_delays_unique_idx').on(table.flightId, table.delayCode, table.minutes),
 ]);
 
 export const flightTimes = pgTable('flight_times', {
@@ -169,7 +125,6 @@ export const weatherData = pgTable('weather_data', {
   temperature: real('temperature'),
   windSpeed: real('wind_speed'),
   windDirection: integer('wind_direction'),
-  precipitation: real('precipitation'),
   visibility: real('visibility'),
   cloudCover: integer('cloud_cover'),
   pressure: real('pressure'),
@@ -198,7 +153,6 @@ export const airports = pgTable('airports', {
   iataCode: varchar('iata_code', { length: 10 }).notNull().unique(),
   icaoCode: varchar('icao_code', { length: 10 }),
   name: varchar('name', { length: 255 }).notNull(),
-  displayName: varchar('display_name', { length: 255 }),
   city: varchar('city', { length: 100 }),
   country: varchar('country', { length: 100 }),
   latitude: real('latitude'),
@@ -208,22 +162,6 @@ export const airports = pgTable('airports', {
 }, (table) => [
   index('airports_iata_idx').on(table.iataCode),
   index('airports_icao_idx').on(table.icaoCode),
-]);
-
-export const delayPredictions = pgTable('delay_predictions', {
-  id: serial('id').primaryKey(),
-  flightId: integer('flight_id').notNull().references(() => flights.id, { onDelete: 'cascade' }),
-  probability: real('probability').notNull(),
-  confidence: confidenceEnum('confidence').notNull(),
-  predictedDelayMinutes: integer('predicted_delay_minutes').notNull(),
-  modelVersion: varchar('model_version', { length: 50 }).notNull(),
-  featuresUsed: jsonb('features_used'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  expiresAt: timestamp('expires_at').notNull(),
-}, (table) => [
-  index('delay_predictions_flight_id_idx').on(table.flightId),
-  index('delay_predictions_expires_at_idx').on(table.expiresAt),
-  index('delay_predictions_created_at_idx').on(table.createdAt),
 ]);
 
 export const scraperLogs = pgTable('scraper_logs', {
@@ -264,19 +202,4 @@ export const aircraftPositions = pgTable('aircraft_positions', {
   index('aircraft_positions_flight_id_idx').on(table.flightId),
   index('aircraft_positions_fetched_at_idx').on(table.fetchedAt),
   uniqueIndex('aircraft_positions_flight_timestamp_idx').on(table.flightId, table.positionTimestamp),
-]);
-
-export const mlModelMetrics = pgTable('ml_model_metrics', {
-  id: serial('id').primaryKey(),
-  modelVersion: varchar('model_version', { length: 50 }).notNull().unique(),
-  accuracy: real('accuracy'),
-  precision: real('precision'),
-  recall: real('recall'),
-  f1Score: real('f1_score'),
-  trainedAt: timestamp('trained_at').notNull(),
-  trainingRecords: integer('training_records'),
-  features: jsonb('features'),
-}, (table) => [
-  uniqueIndex('ml_model_metrics_version_idx').on(table.modelVersion),
-  index('ml_model_metrics_trained_at_idx').on(table.trainedAt),
 ]);

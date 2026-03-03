@@ -1,5 +1,5 @@
 import type { PageServerLoad } from './$types';
-import { db, flights, flightStatusHistory, flightNotes, delayPredictions, weatherData, aircraftPositions, flightTimes, airportDaylight } from '$lib/server/db';
+import { db, flights, flightStatusHistory, weatherData, aircraftPositions, flightTimes, airportDaylight } from '$lib/server/db';
 import { eq, desc, and, lte, gte, inArray, isNotNull, asc } from 'drizzle-orm';
 import { error } from '@sveltejs/kit';
 
@@ -17,7 +17,7 @@ export const load: PageServerLoad = async ({ params }) => {
     const airports    = [...new Set([flight.departureAirport, flight.arrivalAirport])];
 
     // Aircraft rotation: all flights for this registration within the last 24 hours
-    // (same data source as Aurigny's "Where's my plane?" modal)
+    // Shows the aircraft's journey throughout the day
     const rotationStart = new Date(flight.scheduledDeparture.getTime() - 24 * 60 * 60 * 1000);
     const rotationFlights = flight.aircraftRegistration
       ? await db.select({
@@ -44,17 +44,10 @@ export const load: PageServerLoad = async ({ params }) => {
     const depDate = flight.scheduledDeparture.toISOString().split('T')[0];
     const arrDate = flight.scheduledArrival.toISOString().split('T')[0];
 
-    const [statusHistory, notes, predictions, weatherRows, positionRows, times, daylightRows] = await Promise.all([
+    const [rawStatusHistory, weatherRows, positionRows, times, daylightRows] = await Promise.all([
       db.select().from(flightStatusHistory)
         .where(eq(flightStatusHistory.flightId, id))
         .orderBy(desc(flightStatusHistory.statusTimestamp)),
-      db.select().from(flightNotes)
-        .where(eq(flightNotes.flightId, id))
-        .orderBy(desc(flightNotes.timestamp)),
-      db.select().from(delayPredictions)
-        .where(eq(delayPredictions.flightId, id))
-        .orderBy(desc(delayPredictions.createdAt))
-        .limit(1),
       // Weather for both dep+arr airports near departure time
       db.select().from(weatherData)
         .where(and(
@@ -92,11 +85,20 @@ export const load: PageServerLoad = async ({ params }) => {
       daylightMap[row.airportCode].push(row);
     }
 
+    // Collapse consecutive identical status messages — FR24 polls every ~6 minutes
+    // and records a new row each time even when the estimated time hasn't changed,
+    // producing long runs of identical entries. Keep only the first occurrence of
+    // each message within a consecutive run (the oldest, since list is desc).
+    // The list is newest-first so we walk it and drop entries whose message matches
+    // the one immediately following them (i.e. the previous chronological entry).
+    const statusHistory = rawStatusHistory.filter((entry, i) => {
+      const next = rawStatusHistory[i + 1];
+      return !next || entry.statusMessage !== next.statusMessage;
+    });
+
     return {
       flight,
       statusHistory,
-      notes,
-      prediction: predictions[0] ?? null,
       weatherMap,
       daylightMap,
       position: positionRows[0] ?? null,

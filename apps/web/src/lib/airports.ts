@@ -1,10 +1,9 @@
-import { writable, derived } from 'svelte/store';
+import { writable } from 'svelte/store';
 
 export type AirportInfo = {
   iataCode: string;
   icaoCode: string | null;
   name: string;
-  displayName: string | null;
   city: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -16,26 +15,14 @@ export function initAirports(data: Record<string, AirportInfo>) {
   airportsStore.set(data);
 }
 
-export const AIRPORTS = derived(airportsStore, $a => $a);
-
 export function airportName(iata: string): string {
   let name = iata;
   const unsub = airportsStore.subscribe(a => {
     const airport = a[iata];
-    name = airport?.displayName ?? airport?.name ?? iata;
+    name = airport?.name ?? iata;
   });
   unsub();
   return name;
-}
-
-export function airportLabel(iata: string): { name: string; code: string } {
-  let name = iata;
-  const unsub = airportsStore.subscribe(a => {
-    const airport = a[iata];
-    name = airport?.displayName ?? airport?.name ?? iata;
-  });
-  unsub();
-  return { name, code: iata };
 }
 
 export function getAirportCoords(iata: string): [number, number] | null {

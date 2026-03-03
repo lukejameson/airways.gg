@@ -1,14 +1,14 @@
 # airways.gg - Build Spec
 
 ## What It Does
-Flight delay prediction platform for Guernsey's Aurigny airline. Shows live arrivals/departures with ML-powered delay predictions based on weather data and 5+ years of historical flight performance. Mobile-first live departure board for locals and tourists (hundreds of daily users).
+Flight tracking and delay prediction platform for Guernsey Airport. Shows live arrivals/departures with ML-powered delay predictions based on weather data and 5+ years of historical flight performance. Mobile-first live departure board for locals and tourists (hundreds of daily users).
 
 ## Stack
 Fixed: SvelteKit5 | TypeScript | PostgreSQL | Drizzle ORM | Docker | GitHub Actions
 Added:
 - FastAPI (Python ML service)
 - scikit-learn/pandas (ML model)
-- puppeteer-real-browser (Turnstile-bypassing scraper)
+- cheerio (HTML parsing)
 - OpenMeteo API (weather data)
 - xml2js (XML parsing)
 - Tailwind CSS (custom design, NOT generic AI look)
@@ -17,7 +17,7 @@ Added:
 1. Live Departure Board: Real-time arrivals/departures with auto-refresh (5min), mobile-optimized
 2. Delay Predictions: ML probability % + confidence level + predicted delay minutes
 3. Flight Search: Search by flight number, filter arrivals/departures
-4. Official Delays: Show actual delay times in hours from Aurigny data
+4. Official Delays: Show actual delay times from scraper data
 5. Admin Panel: User management, scraper monitoring, ML accuracy metrics, data corrections
 6. User Auth System: Full account system (locked to admins for MVP)
 7. Dark/Light Mode: Light default, user preference stored
@@ -33,21 +33,11 @@ Table: sessions
 - id(uuid, pk), user_id(uuid, fk:users), token(varchar, unique), expires_at(timestamp), created_at(timestamp)
 - Indexes: token, user_id
 
-Table: departures
-- id(serial, pk), airline(varchar 100), location(varchar 200), code(varchar 100), scheduled_time(timestamp), actual_time(timestamp), created_at(timestamp)
-- Indexes: scheduled_time, airline, airline+scheduled_time, code
-- Note: Legacy table, keep for backward compatibility during migration
-
-Table: arrivals
-- id(serial, pk), airline(varchar 100), location(varchar 200), code(varchar 100), scheduled_time(timestamp), actual_time(timestamp), created_at(timestamp)
-- Indexes: scheduled_time, airline, airline+scheduled_time, code
-- Note: Legacy table, keep for backward compatibility during migration
-
 Table: flights
 - id(serial, pk), unique_id(varchar, unique), flight_number(varchar), airline_code(varchar), departure_airport(varchar), arrival_airport(varchar), scheduled_departure(timestamp), scheduled_arrival(timestamp), actual_departure(timestamp nullable), actual_arrival(timestamp nullable), status(varchar), canceled(boolean), aircraft_registration(varchar), aircraft_type(varchar), delay_minutes(int nullable), flight_date(date), raw_xml(text), created_at(timestamp), updated_at(timestamp)
 - Relations: One-to-many with flight_delays, flight_times, flight_notes, flight_status_history
 - Indexes: unique_id, flight_number, flight_date, scheduled_departure, departure_airport, arrival_airport, status
-- Note: Primary source of truth from Aurigny XML data
+- Note: Primary source of truth
 
 Table: flight_delays
 - id(serial, pk), flight_id(int, fk:flights), delay_code(varchar), delay_code2(varchar), minutes(int), created_at(timestamp)
@@ -63,7 +53,7 @@ Table: flight_notes
 - Indexes: flight_id
 
 Table: flight_status_history
-- id(serial, pk), flight_code(varchar), flight_date(date), status_timestamp(timestamp), status_message(text), source(enum: aurigny|guernsey_airport), flight_id(int nullable, fk:flights), created_at(timestamp)
+- id(serial, pk), flight_code(varchar), flight_date(date), status_timestamp(timestamp), status_message(text), source(enum: guernsey_airport|fr24), flight_id(int nullable, fk:flights), created_at(timestamp)
 - Relations: Linked to flights via flight_code + flight_date (soft link) and flight_id (hard link when matched)
 - Indexes: flight_code, flight_date, status_timestamp, source, flight_id
 - Note: Stores timestamped status updates from Guernsey Airport scraper (e.g., "On Time", "Check in open - Flight delayed", "Landed 12:14")
@@ -71,14 +61,14 @@ Table: flight_status_history
 Table: weather_data
 - id(serial, pk), airport_code(varchar), timestamp(timestamp), temperature(float), wind_speed(float), wind_direction(int), precipitation(float), visibility(float), cloud_cover(int), pressure(float), weather_code(int), created_at(timestamp)
 - Indexes: airport_code, timestamp
-- Note: OpenMeteo data for GCI (Guernsey), JER (Jersey), and other Aurigny destinations
+- Note: OpenMeteo data for GCI (Guernsey), JER (Jersey), and other Guernsey Airport destinations
 
 Table: delay_predictions
 - id(serial, pk), flight_id(int, fk:flights), probability(float), confidence(enum: low|medium|high), predicted_delay_minutes(int), model_version(varchar), features_used(jsonb), created_at(timestamp), expires_at(timestamp)
 - Indexes: flight_id, expires_at, created_at
 
 Table: scraper_logs
-- id(serial, pk), service(enum: aurigny_live|guernsey_historical), status(enum: success|failure|retry), records_scraped(int), error_message(text nullable), retry_count(int default 0), started_at(timestamp), completed_at(timestamp nullable)
+- id(serial, pk), service(enum: guernsey_historical|guernsey_live|fr24_live), status(enum: success|failure|retry), records_scraped(int), error_message(text nullable), retry_count(int default 0), started_at(timestamp), completed_at(timestamp nullable)
 - Indexes: service, status, started_at
 
 Table: ml_model_metrics
@@ -159,11 +149,6 @@ OpenMeteo API: Historical and forecast weather data
 - Endpoint: https://api.open-meteo.com/v1/forecast
 - Rate limit: Handle gracefully, cache aggressively
 
-Aurigny XML API: Live flight data via /api/schedule
-- Auth: Turnstile challenge (handled by puppeteer-real-browser)
-- Operations: Scrape XML every 5-10min, parse flights, delays, times, notes
-- Cloudflare bypass: cf_clearance cookie + Turnstile auto-solve
-
 Guernsey Airport Website: Historical flight status updates
 - Auth: None
 - Operations: Backfill 5+ years of timestamped status updates for arrivals/departures
@@ -193,23 +178,28 @@ Services:
    - Volumes: None
    - Env: DATABASE_URL, REDIS_URL, ML_SERVICE_URL, SESSION_SECRET
 
-2. **aurigny-scraper** (Node service)
-   - Build: Node 20 with puppeteer dependencies
-   - Depends: postgres (external), app
-   - Restart: always
-   - Env: DATABASE_URL, SCRAPER_INTERVAL_MS, SCRAPER_MAX_RETRIES
-   - Command: Run scraper on interval, log to scraper_logs table
-   - Note: Uses provided puppeteer-real-browser code with Turnstile auto-solve
-
-3. **guernsey-scraper** (Node service)
+2. **guernsey-scraper** (Node service)
    - Build: Node 20
    - Depends: postgres (external)
-   - Restart: on-failure
-   - Env: DATABASE_URL, BACKFILL_START_DATE, BACKFILL_END_DATE
-   - Command: Backfill historical data on-demand or scheduled
-   - Note: User provides base scraper code, needs modification to capture status update rows
+   - Restart: always (live mode), on-failure (backfill mode)
+   - Env: DATABASE_URL, SCRAPER_MODE, GUERNSEY_AIRPORT_URL
+   - Command: Live scraping or historical backfill depending on SCRAPER_MODE
 
-4. **ml-service** (Python FastAPI)
+3. **fr24-scraper** (Node service)
+   - Build: Node 20
+   - Depends: postgres (external)
+   - Restart: always
+   - Env: DATABASE_URL, PROXY_ENABLED, PROXY_USERNAME, PROXY_PASSWORD, PROXY_HOSTS
+   - Command: Scrape FlightRadar24 for flight data
+
+4. **adsb-service** (Node service)
+   - Build: Node 20
+   - Depends: postgres (external)
+   - Restart: always
+   - Env: DATABASE_URL, ADSB_INTERVAL_MS
+   - Command: Lookup aircraft registrations via ADS-B
+
+5. **ml-service** (Python FastAPI)
    - Build: Python 3.11 slim
    - Ports: 8000 (internal only)
    - Depends: postgres (external)
@@ -254,40 +244,35 @@ Networks: Internal bridge network for service communication
 
 ## Scraper Architecture
 
-### Aurigny Live Scraper (aurigny-scraper service)
-- Interval: Every 5-10 minutes
+### Guernsey Airport Scraper (guernsey-scraper service)
+- Modes: Live (continuous polling) or Backfill (historical data import)
+- Live mode: Scrapes airport.gg for current flight status, adaptive polling intervals
+- Backfill mode: Imports 5+ years of historical status data from airport.gg
 - Process:
-  1. Launch puppeteer-real-browser with Turnstile auto-solve
-  2. Navigate to Aurigny arrivals/departures page
-  3. Intercept /api/schedule XML response
-  4. Parse XML (xml2js)
-  5. Upsert flights table (unique_id as key)
-  6. Insert flight_delays, flight_times, flight_notes
-  7. Calculate delay_minutes from Times
-  8. Log to scraper_logs
-- Retry logic: 3 attempts with exponential backoff
-- Alert: If 3 consecutive failures, log error with status='failure' (admin dashboard shows alert)
-
-### Guernsey Historical Scraper (guernsey-scraper service)
-- Mode: Backfill (run once or scheduled for incremental updates)
-- Process:
-  1. User provides existing scraper code
-  2. Modify to capture timestamped status updates (not just final Landed/Airborne)
-  3. Parse status messages: "21/02/2026 10:12: On Time" → {flight_code, flight_date, status_timestamp, status_message}
-  4. Insert into flight_status_history table with source='guernsey_airport'
+  1. Fetch day HTML from airport.gg/arrivals-departures/history/{date}
+  2. Parse with cheerio — extract flights, status updates, times
+  3. Upsert flights table (unique_id as key)
+  4. Insert into flight_status_history with source='guernsey_airport'
   5. Link to flights table via flight_code + flight_date matching
   6. Log to scraper_logs
 - Date range: Configurable via env vars (default 2019-01-01 to present)
 - Deduplication: Check existing records before insert
 
+### FR24 Scraper (fr24-scraper service)
+- Scrapes FlightRadar24 for supplementary flight data
+- Adaptive polling intervals based on time-to-next-flight
+- Logs to scraper_logs with service='fr24_live'
+
+### ADS-B Service (adsb-service)
+- Looks up aircraft registrations via adsb.lol / airplanes.live
+- Runs on configurable interval (default 60s)
+
 ## Special Notes
 
-### Data Migration Strategy
-- Existing departures/arrivals tables (13K + 1.5K records) remain intact
-- New flights table becomes primary source from Aurigny XML
+### Data Sources
+- flights table is the primary source of truth, populated by guernsey-scraper and fr24-scraper
 - Historical data from Guernsey Airport backfill populates flight_status_history
-- ML model uses combined data from both sources
-- Admin can manually link old departures/arrivals to new flights table if needed
+- ML model uses combined data from all sources
 
 ### Mobile-First UI Requirements
 - Touch-friendly tap targets (min 44px)

@@ -267,7 +267,7 @@ async function logSchedulerEvent(type: 'sleep' | 'wake' | 'prefetch', detail: st
 }
 
 // ---------------------------------------------------------------------------
-// Dynamic interval calculation (4-tier, matching aurigny)
+// Dynamic interval calculation (4-tier)
 // ---------------------------------------------------------------------------
 
 async function computeNextInterval(): Promise<{ ms: number; jitterMs: number; reason: string }> {
@@ -716,6 +716,47 @@ async function scheduleNextScrape(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Startup history check — ensure the last 10 days have data
+// ---------------------------------------------------------------------------
+
+/**
+ * On startup, check that each of the 10 days prior to today has at least one
+ * flight record. Any day with no data is backfilled before the live loop starts.
+ * This ensures the web app always has recent history even after a long outage or
+ * a fresh deployment.
+ */
+async function ensureRecentHistory(): Promise<void> {
+  const today = guernseyDateStr();
+  const missing: string[] = [];
+
+  for (let i = 1; i <= 10; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().slice(0, 10);
+    const n = await countFlightsForDate(dateStr);
+    if (n === 0) missing.push(dateStr);
+  }
+
+  if (missing.length === 0) {
+    console.log('[Guernsey Live] Recent history OK — all 10 prior days have data');
+    return;
+  }
+
+  console.log(`[Guernsey Live] Missing data for ${missing.length} of last 10 days: ${missing.join(', ')} — backfilling...`);
+
+  for (const dateStr of missing) {
+    try {
+      const result = await scrapeDayFlights(new Date(dateStr));
+      console.log(`[Guernsey Live] Backfilled ${dateStr}: ${result.flights} flights, ${result.updates} updates`);
+    } catch (err) {
+      console.error(`[Guernsey Live] Failed to backfill ${dateStr}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  console.log('[Guernsey Live] Recent history backfill complete');
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -739,6 +780,9 @@ export async function runLiveMode(): Promise<void> {
     clearAllTimers();
     process.exit(1);
   });
+
+  // Ensure at least 10 days of prior history exist before entering the live loop
+  await ensureRecentHistory();
 
   // Schedule wall-clock prefetch slots at 00:00, 06:00, 12:00, 18:00 GY local
   schedulePrefetchSlot();

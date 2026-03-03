@@ -84,7 +84,7 @@ export const load: PageServerLoad = async ({ url }) => {
   }
 
   try {
-    // Select only the columns the client actually needs — omitting rawXml, uniqueId,
+    // Select only the columns the client actually needs — omitting uniqueId,
     // aircraftRegistration, airlineCode, createdAt, updatedAt cuts inline payload size.
     const displayFlights = await db
       .select({

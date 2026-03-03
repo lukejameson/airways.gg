@@ -1,11 +1,10 @@
 <script lang="ts">
-  import type { flights, delayPredictions, weatherData } from '@airways/database';
+  import type { flights, weatherData } from '@airways/database';
   import { airportName } from '$lib/airports';
   import Icon, { type IconName } from './Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
 
   type Flight = typeof flights.$inferSelect & {
-    prediction?: (typeof delayPredictions.$inferSelect) | null;
     estimatedDeparture?: string | null;
     estimatedArrival?: string | null;
   };
@@ -130,22 +129,30 @@
         currentStatus.includes('airborne') || currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
       return flight.status;
     }
-    
+
     // Check calculated delay from times
     if (calculatedDelayMinutes > 15) {
       return 'Delayed';
-    } else if (calculatedDelayMinutes < -15) {
-      const absMins = Math.abs(calculatedDelayMinutes);
-      if (absMins >= 60) {
-        const hrs = Math.floor(absMins / 60);
-        const mins = absMins % 60;
-        return mins > 0 ? `${hrs}h ${mins}m early` : `${hrs}h early`;
-      }
-      return `${absMins}m early`;
     }
-    
+
+    // If the estimated arrival/departure is early, the flight must be airborne
+    if (calculatedDelayMinutes < -5 && new Date(flight.scheduledDeparture).getTime() <= Date.now()) {
+      return 'Airborne';
+    }
+
     // Otherwise trust the external status
     return flight.status || 'Scheduled';
+  });
+
+  // Format early arrival for display (e.g., "-16m" or "-1h 5m")
+  const formattedEarly = $derived.by(() => {
+    if (calculatedDelayMinutes >= -5) return null;
+    const absMins = Math.abs(calculatedDelayMinutes);
+    const hrs = Math.floor(absMins / 60);
+    const mins = absMins % 60;
+    if (hrs > 0 && mins > 0) return `-${hrs}h ${mins}m`;
+    if (hrs > 0) return `-${hrs}h`;
+    return `-${mins}m`;
   });
 
   // Format delay for display (e.g., "5h 35m" or "45m")
@@ -157,9 +164,6 @@
     if (hrs > 0) return `${hrs}h`;
     return `${mins}m`;
   });
-
-  // Kept for potential future use (e.g. applying a CSS class to the card)
-  const _isDelayed = $derived(calculatedStatus?.toLowerCase().includes('delayed'));
 
   type BadgeTone = 'green' | 'yellow' | 'red' | 'blue' | 'purple' | 'orange' | 'gray';
   const tone = $derived.by((): BadgeTone => {
@@ -237,6 +241,8 @@
       <div class="flex items-center gap-2 shrink-0 ml-auto">
         {#if formattedDelay}
           <span class="text-sm font-bold text-red-600">+{formattedDelay}</span>
+        {:else if formattedEarly}
+          <span class="text-sm font-bold text-green-600">{formattedEarly}</span>
         {/if}
 
         <!-- Status badge -->

@@ -42,7 +42,6 @@ async function main() {
   }
 
   if (mode === 'dedup') {
-    // Remove duplicate flights created by both aurigny and guernsey scrapers
     console.log('[Guernsey] Running dedup mode...');
     await deduplicateFlights();
     console.log('[Guernsey] Dedup completed. Exiting...');
