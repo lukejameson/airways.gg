@@ -306,11 +306,12 @@ function cleanFlightNumber(raw: string): string {
   return raw.replace(/\s+/g, '').toUpperCase();
 }
 
-// Skybus (SI) operates under Aurigny (GR)
+// Skybus (SI) and Blue Islands AT6 series (AT) operate under Aurigny (GR)
 function extractAirlineCode(flightNumber: string): string {
   const match = flightNumber.match(/^([A-Z]{2})/);
   const code = match ? match[1] : 'XX';
-  return code === 'SI' ? 'GR' : code;
+  if (code === 'SI' || code === 'AT') return 'GR';
+  return code;
 }
 
 // ---------------------------------------------------------------------------

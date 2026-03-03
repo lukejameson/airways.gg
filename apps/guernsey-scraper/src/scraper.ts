@@ -78,11 +78,12 @@ function locationToIata(location: string): string {
 }
 
 // Derive airline code from the primary flight code (first two non-numeric chars)
-// Skybus (SI) operates under Aurigny (GR)
+// Skybus (SI) and Blue Islands AT6 series (AT) operate under Aurigny (GR)
 function airlineCode(flightCode: string): string {
   const match = flightCode.match(/^([A-Z]{2})/);
   const code = match ? match[1] : 'XX';
-  return code === 'SI' ? 'GR' : code;
+  if (code === 'SI' || code === 'AT') return 'GR';
+  return code;
 }
 
 async function fetchDayHtml(date: Date): Promise<string> {
