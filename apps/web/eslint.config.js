@@ -73,6 +73,7 @@ export default [
       '*.config.js',
       '*.config.ts',
       'preload-env.js',
+      'src/service-worker.ts',
     ],
   },
 ];

@@ -194,10 +194,6 @@
     }
   }
 
-  function clearFilters() {
-    activeFilters = [];
-  }
-
   onMount(() => {
     const interval = setInterval(async () => {
       await invalidateAll();

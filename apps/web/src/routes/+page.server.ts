@@ -51,7 +51,43 @@ async function getActiveFlightsForDate(dateStr: string) {
   }
 }
 
-export const load: PageServerLoad = async ({ url }) => {
+const FLIGHT_COLUMNS = {
+  id: flights.id,
+  flightNumber: flights.flightNumber,
+  departureAirport: flights.departureAirport,
+  arrivalAirport: flights.arrivalAirport,
+  scheduledDeparture: flights.scheduledDeparture,
+  scheduledArrival: flights.scheduledArrival,
+  actualDeparture: flights.actualDeparture,
+  actualArrival: flights.actualArrival,
+  status: flights.status,
+  canceled: flights.canceled,
+  aircraftType: flights.aircraftType,
+  delayMinutes: flights.delayMinutes,
+  flightDate: flights.flightDate,
+};
+
+async function fetchDisplayFlights(dateStr: string) {
+  return db
+    .select(FLIGHT_COLUMNS)
+    .from(flights)
+    .where(eq(flights.flightDate, dateStr))
+    .orderBy(flights.scheduledDeparture);
+}
+
+async function fetchLastScrape() {
+  const [row] = await db
+    .select({ completedAt: scraperLogs.completedAt })
+    .from(scraperLogs)
+    .where(eq(scraperLogs.status, 'success'))
+    .orderBy(desc(scraperLogs.completedAt))
+    .limit(1);
+  return row;
+}
+
+type RecentFlight = { id: number; flightNumber: string; departureAirport: string; arrivalAirport: string; scheduledDeparture: string; viewedAt: string };
+
+export const load: PageServerLoad = async ({ url, cookies }) => {
   const now = new Date();
   const todayStr = toGuernseyDateStr(now);
   const tomorrowStr = addDaysToDateStr(todayStr, 1);
@@ -61,82 +97,39 @@ export const load: PageServerLoad = async ({ url }) => {
   let displayDateStr = todayStr;
   let autoAdvanced = false;
 
-  if (dateParam && (dateParam === todayStr || dateParam === tomorrowStr)) {
-    // Valid explicit date
-    displayDateStr = dateParam;
-  } else if (!dateParam) {
-    // No explicit date — check for auto-advance
-    const todayFlightCount = await countFlightsForDate(todayStr);
-
-    if (todayFlightCount > 0) {
-      // Today has flights — check if all are terminal
-      const activeFlightsToday = await getActiveFlightsForDate(todayStr);
-
-      if (activeFlightsToday.length === 0) {
-        // All flights are terminal — check if tomorrow has flights
-        const tomorrowFlightCount = await countFlightsForDate(tomorrowStr);
-        if (tomorrowFlightCount > 0) {
-          displayDateStr = tomorrowStr;
-          autoAdvanced = true;
-        }
-      }
-    }
-  }
-
   try {
-    // Select only the columns the client actually needs — omitting uniqueId,
-    // aircraftRegistration, airlineCode, createdAt, updatedAt cuts inline payload size.
-    const displayFlights = await db
-      .select({
-        id: flights.id,
-        flightNumber: flights.flightNumber,
-        departureAirport: flights.departureAirport,
-        arrivalAirport: flights.arrivalAirport,
-        scheduledDeparture: flights.scheduledDeparture,
-        scheduledArrival: flights.scheduledArrival,
-        actualDeparture: flights.actualDeparture,
-        actualArrival: flights.actualArrival,
-        status: flights.status,
-        canceled: flights.canceled,
-        aircraftType: flights.aircraftType,
-        delayMinutes: flights.delayMinutes,
-        flightDate: flights.flightDate,
-      })
-      .from(flights)
-      .where(eq(flights.flightDate, displayDateStr))
-      .orderBy(flights.scheduledDeparture);
+    let displayFlights: Awaited<ReturnType<typeof fetchDisplayFlights>>;
+    let lastScrape: Awaited<ReturnType<typeof fetchLastScrape>>;
 
-    // Estimated times (EstimatedBlockOff for departures, EstimatedBlockOn for arrivals)
-    const estimatedTimesMap = new Map<number, { estimatedDeparture?: string; estimatedArrival?: string }>();
-    if (displayFlights.length > 0) {
-      const flightIds = displayFlights.map(f => f.id);
-      const estimatedTimes = await db
-        .select({ flightId: flightTimes.flightId, timeType: flightTimes.timeType, timeValue: flightTimes.timeValue })
-        .from(flightTimes)
-        .where(
-          and(
-            inArray(flightTimes.flightId, flightIds),
-            inArray(flightTimes.timeType, ['EstimatedBlockOff', 'EstimatedBlockOn'])
-          )
-        );
-      for (const t of estimatedTimes) {
-        const existing = estimatedTimesMap.get(t.flightId) ?? {};
-        if (t.timeType === 'EstimatedBlockOff') {
-          existing.estimatedDeparture = t.timeValue.toISOString();
-        } else if (t.timeType === 'EstimatedBlockOn') {
-          existing.estimatedArrival = t.timeValue.toISOString();
-        }
-        estimatedTimesMap.set(t.flightId, existing);
+    if (dateParam && (dateParam === todayStr || dateParam === tomorrowStr)) {
+      // dateParam shortcut: fetch displayFlights + scraperLogs in parallel (no wave 1 needed)
+      displayDateStr = dateParam;
+      [displayFlights, lastScrape] = await Promise.all([
+        fetchDisplayFlights(displayDateStr),
+        fetchLastScrape(),
+      ]);
+    } else {
+      // Wave 1: fire all auto-advance queries + scraperLogs in parallel
+      const [todayFlightCount, activeFlightsToday, tomorrowFlightCount, lastScrapeResult] = await Promise.all([
+        countFlightsForDate(todayStr),
+        getActiveFlightsForDate(todayStr),
+        countFlightsForDate(tomorrowStr),
+        fetchLastScrape(),
+      ]);
+      lastScrape = lastScrapeResult;
+
+      // Compute displayDateStr from wave 1 results (zero extra DB trips)
+      if (todayFlightCount > 0 && activeFlightsToday.length === 0 && tomorrowFlightCount > 0) {
+        displayDateStr = tomorrowStr;
+        autoAdvanced = true;
       }
+
+      // Wave 2: fetch display flights for determined date
+      displayFlights = await fetchDisplayFlights(displayDateStr);
     }
 
-    const flightsForDisplay = displayFlights.map(f => ({
-      ...f,
-      estimatedDeparture: estimatedTimesMap.get(f.id)?.estimatedDeparture ?? null,
-      estimatedArrival: estimatedTimesMap.get(f.id)?.estimatedArrival ?? null,
-    }));
-
-    // Collect all unique airports across display flights
+    // Wave 3: parallel queries that depend on displayFlights
+    const flightIds = displayFlights.map(f => f.id);
     const airportCodes = [...new Set(
       displayFlights.flatMap(f => [f.departureAirport, f.arrivalAirport])
     )];
