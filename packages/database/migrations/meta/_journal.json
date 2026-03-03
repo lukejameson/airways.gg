@@ -71,6 +71,13 @@
       "when": 1772800000000,
       "tag": "0009_drop_unused_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1772900000000,
+      "tag": "0010_push_notifications",
+      "breakpoints": true
     }
   ]
 }
