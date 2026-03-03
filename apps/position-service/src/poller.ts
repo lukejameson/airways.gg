@@ -1,5 +1,5 @@
 import { db, flights, aircraftPositions, airports } from '@airways/database';
-import { and, gte, lte, or, eq, desc, isNotNull, not, inArray } from 'drizzle-orm';
+import { and, gte, lte, or, eq, desc, isNotNull, not, inArray, sql } from 'drizzle-orm';
 
 const FR24_BASE = 'https://fr24api.flightradar24.com';
 
@@ -106,7 +106,7 @@ function normaliseReg(reg: string): string {
  */
 function isTerminal(status: string | null): boolean {
   const s = status?.toLowerCase() ?? '';
-  return s.includes('completed') || s.includes('landed') || s.includes('cancelled') || s.includes('canceled');
+  return s.includes('completed') || s.includes('landed') || s.includes('cancelled') || s.includes('canceled') || s.includes('divert');
 }
 
 /**
@@ -386,7 +386,12 @@ export async function pollPositions(): Promise<number> {
             await db
               .update(flights)
               .set({ status: derivedStatus, updatedAt: now })
-              .where(eq(flights.id, flightId));
+              .where(
+                and(
+                  eq(flights.id, flightId),
+                  sql`COALESCE(${flights.status}, '') NOT IN ('Landed', 'Cancelled', 'Diverted')`,
+                ),
+              );
             console.log(
               `[Position] Status back-write: ${matchedFlight.flightNumber} (id=${flightId}) ` +
               `${matchedFlight.status} → ${derivedStatus} ` +

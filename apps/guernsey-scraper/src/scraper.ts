@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { db, flights, flightStatusHistory, flightTimes, scraperLogs } from '@airways/database';
+import { db, flights, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus } from '@airways/database';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 
 interface StatusUpdate {
@@ -216,13 +216,14 @@ function deriveStatus(updates: StatusUpdate[]): string | null {
   if (last.includes('delayed') || last.includes('approx') || last.includes('expected at') ||
       last.includes('new etd') || last.includes('next info') || last.includes('indefini') ||
       last.includes('boarding expected')) return 'Delayed';
+  // Check-in phase — distinct from Boarding (passengers aren't at the gate yet)
+  if (last.includes('check in open') || last.includes('check-in open') ||
+      last.includes('go to departure')) return 'Check-In Open';
   // Boarding-related: "Final Call", "Go To Door/Gate", "Door and Gate Closed",
-  // "Go To Departures", "Wait In Lounge", "Check-In Open"
-  if (last.includes('final call') || last.includes('go to') ||
+  // "Wait In Lounge"
+  if (last.includes('final call') || last.includes('go to door') || last.includes('go to gate') ||
       last.includes('gate closed') || last.includes('door and gate') ||
       last.includes('wait in lounge')) return 'Boarding';
-  // Check-in phase
-  if (last.includes('check in open') || last.includes('check-in open')) return 'Boarding';
   if (last.includes('check in suspended') || last.includes('check in closes') ||
       last.includes('check-in closes') || last.includes('check in opens')) return 'Delayed';
   if (last.includes('holding overhead') || last.includes('holding in')) return 'Airborne';
@@ -379,7 +380,7 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
     // This catches records created by the aurigny scraper (which uses numeric unique_ids)
     // and avoids creating duplicates.
     const existing = await db
-      .select({ id: flights.id })
+      .select({ id: flights.id, status: flights.status })
       .from(flights)
       .where(
         and(
@@ -392,6 +393,11 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
     let flightId: number | null;
 
     if (existing.length > 0) {
+      // Safety net: don't downgrade status (e.g. stale re-parse overwriting Landed)
+      if (status && !canUpgradeStatus(existing[0].status, status)) {
+        delete updateSet.status;
+      }
+
       // Update the existing record (may have been created by aurigny or a previous guernsey scrape)
       flightId = existing[0].id;
       if (Object.keys(updateSet).length > 1) { // > 1 because updatedAt is always present

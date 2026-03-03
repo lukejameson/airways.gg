@@ -63,8 +63,8 @@ async function markLanded(flightId: number): Promise<void> {
     .where(
       and(
         eq(flights.id, flightId),
-        // Don't touch cancelled flights
-        sql`COALESCE(${flights.status}, '') != 'Cancelled'`,
+        // Don't touch terminal flights
+        sql`COALESCE(${flights.status}, '') NOT IN ('Cancelled', 'Landed', 'Diverted')`,
       ),
     );
 }
@@ -180,7 +180,12 @@ async function pollRegistrations(): Promise<void> {
             status: 'Airborne',
             updatedAt: new Date(),
           })
-          .where(eq(flights.id, match.id));
+          .where(
+            and(
+              eq(flights.id, match.id),
+              sql`COALESCE(${flights.status}, '') NOT IN ('Landed', 'Cancelled', 'Diverted')`,
+            ),
+          );
 
         registrationDone.set(aircraft.icao24, nowMs + REGISTRATION_COOLDOWN_MS);
         airborneTracker.set(aircraft.icao24, {
@@ -203,7 +208,7 @@ async function pollRegistrations(): Promise<void> {
         .where(
           and(
             eq(flights.id, entry.flightId),
-            sql`COALESCE(${flights.status}, '') NOT IN ('Landed', 'Cancelled')`,
+            sql`COALESCE(${flights.status}, '') NOT IN ('Landed', 'Cancelled', 'Diverted')`,
           ),
         );
       console.log(

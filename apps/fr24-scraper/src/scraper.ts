@@ -1,6 +1,6 @@
 import { connect } from 'puppeteer-real-browser';
 import type { Browser, Page } from 'rebrowser-puppeteer-core';
-import { db, flights as flightsTable, flightStatusHistory, flightTimes, scraperLogs } from '@airways/database';
+import { db, flights as flightsTable, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, isTerminalStatus } from '@airways/database';
 import { eq, and } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
@@ -455,7 +455,14 @@ async function upsertFR24Flight(
     // First check if a flight already exists for this flight_number + flight_date
     // This handles dedup with guernsey-scraper records
     const existing = await db
-      .select({ id: flightsTable.id, uniqueId: flightsTable.uniqueId })
+      .select({
+        id: flightsTable.id,
+        uniqueId: flightsTable.uniqueId,
+        status: flightsTable.status,
+        actualDeparture: flightsTable.actualDeparture,
+        actualArrival: flightsTable.actualArrival,
+        delayMinutes: flightsTable.delayMinutes,
+      })
       .from(flightsTable)
       .where(
         and(
@@ -470,17 +477,41 @@ async function upsertFR24Flight(
     const updateSet: Record<string, unknown> = {
       updatedAt: new Date(),
     };
-    // Always update status — including 'Scheduled' so we can downgrade flights
-    // that were previously marked 'Delayed' when FR24 now shows them as on-time
-    if (status) updateSet.status = status;
-    if (canceled) updateSet.canceled = canceled;
-    if (actualDeparture) updateSet.actualDeparture = actualDeparture;
-    if (actualArrival) updateSet.actualArrival = actualArrival;
-    if (delayMinutes !== null) updateSet.delayMinutes = delayMinutes;
+
+    // Aircraft metadata — always safe to write
     if (aircraftType) updateSet.aircraftType = aircraftType;
     if (aircraftReg) updateSet.aircraftRegistration = aircraftReg;
 
     if (existing.length > 0) {
+      const ex = existing[0];
+
+      // Bug fix #1: Status guard — only upgrade status, never downgrade.
+      // FR24 "Estimated HH:MM" normalises to "Scheduled" which would overwrite
+      // "Landed" or "Airborne" set by the guernsey scraper or ADSB service.
+      if (status && canUpgradeStatus(ex.status, status)) {
+        updateSet.status = status;
+      }
+      if (canceled) updateSet.canceled = canceled;
+
+      // Bug fix #2: Actual time guard — only write if DB value is null.
+      // Guernsey scraper extracts precise times from "Landed 12:14" etc.
+      // FR24's times are often less accurate, so don't overwrite.
+      if (actualDeparture && ex.actualDeparture == null) {
+        updateSet.actualDeparture = actualDeparture;
+      }
+      if (actualArrival && ex.actualArrival == null) {
+        updateSet.actualArrival = actualArrival;
+      }
+
+      // Bug fix #3: Delay clearing — clear stale delayMinutes when FR24 shows
+      // on-time AND the flight is not in a terminal status.
+      if (delayMinutes !== null) {
+        updateSet.delayMinutes = delayMinutes;
+      } else if (ex.delayMinutes != null && !isTerminalStatus(ex.status)) {
+        // FR24 computed no delay → clear the stale value
+        updateSet.delayMinutes = null;
+      }
+
       // Update existing record from guernsey-scraper
       flightId = existing[0].id;
       if (Object.keys(updateSet).length > 1) {
@@ -519,8 +550,10 @@ async function upsertFR24Flight(
         ).catch(() => {});
     }
 
-    // Write actual times to flightTimes
-    if (actualDeparture) {
+    // Write actual times to flightTimes — only if the DB doesn't already have a value
+    // (guernsey scraper provides more accurate actual times)
+    const ex = existing.length > 0 ? existing[0] : null;
+    if (actualDeparture && (ex == null || ex.actualDeparture == null)) {
       await db
         .insert(flightTimes)
         .values({ flightId, timeType: 'ActualBlockOff', timeValue: actualDeparture })
@@ -529,7 +562,7 @@ async function upsertFR24Flight(
           set: { timeValue: actualDeparture },
         });
     }
-    if (actualArrival) {
+    if (actualArrival && (ex == null || ex.actualArrival == null)) {
       await db
         .insert(flightTimes)
         .values({ flightId, timeType: 'ActualBlockOn', timeValue: actualArrival })
