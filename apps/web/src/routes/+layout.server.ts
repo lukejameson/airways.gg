@@ -10,7 +10,6 @@ interface AirportCache {
     iataCode: string;
     icaoCode: string | null;
     name: string;
-    displayName: string | null;
     city: string | null;
     latitude: number | null;
     longitude: number | null;
@@ -27,7 +26,6 @@ async function getCachedAirports(): Promise<AirportCache['data']> {
       iataCode: airports.iataCode,
       icaoCode: airports.icaoCode,
       name: airports.name,
-      displayName: airports.displayName,
       city: airports.city,
       latitude: airports.latitude,
       longitude: airports.longitude,
