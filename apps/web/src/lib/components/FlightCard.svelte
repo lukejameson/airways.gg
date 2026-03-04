@@ -104,10 +104,11 @@
   });
   
   // Use estimated time only if it hasn't expired, otherwise fall back to scheduled
-  const displayTime = $derived(actualTime ?? (estimatedTimeExpired ? null : estimatedTime));
+  const effectiveEstimatedTime = $derived(estimatedTime && scheduledTime && new Date(estimatedTime).getTime() !== new Date(scheduledTime).getTime() ? estimatedTime : null);
+  const displayTime = $derived(actualTime ?? (estimatedTimeExpired ? null : effectiveEstimatedTime));
   const otherAirport = $derived(isDeparture ? flight.arrivalAirport : flight.departureAirport);
   const delayMinutes = $derived(flight.delayMinutes ?? 0);
-  const isEstimate = $derived(!actualTime && !!estimatedTime && !estimatedTimeExpired);
+  const isEstimate = $derived(!actualTime && !!effectiveEstimatedTime && !estimatedTimeExpired);
 
   const isCompleted = $derived.by(() => {
     const s = flight.status?.toLowerCase() ?? '';

@@ -24,11 +24,14 @@
   const isViewingTomorrow = $derived(displayDate === data.tomorrowStr);
   
   function navigateToDate(dateStr: string) {
-    // Clear "Next hour" filter when navigating to tomorrow (since it won't make sense)
     if (dateStr === data.tomorrowStr && activeFilters.includes('next-hour')) {
       activeFilters = activeFilters.filter(f => f !== 'next-hour');
     }
-    goto(`/?date=${dateStr}`);
+    const params = new URLSearchParams();
+    params.set('date', dateStr);
+    if (activeTab !== 'departures') params.set('tab', activeTab);
+    if (showCompleted) params.set('completed', '1');
+    goto(`/?${params.toString()}`);
   }
   
   function goToToday() {
@@ -95,9 +98,7 @@
     if (showCompleted) params.set('completed', '1');
     const query = params.toString();
     updatingUrl = true;
-    replaceState(query ? `?${query}` : '/', {});
-    // Reset the flag after the current microtask so the $effect can distinguish
-    // our own replaceState from external navigation
+    goto(query ? `?${query}` : '/', { replaceState: false, keepFocus: true, noScroll: true });
     Promise.resolve().then(() => { updatingUrl = false; });
   }
 
