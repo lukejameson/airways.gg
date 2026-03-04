@@ -694,21 +694,10 @@ async function scrapeDateRange(
     }
 
     try {
-      // Fetch once per day — both arrivals and departures are on the same page
-      const html = await fetchDayHtml(date);
-
-      for (const type of ['arrivals', 'departures'] as const) {
-        const scrapedFlights = await parseFlightHtml(html, date, type);
-        console.log(`  ${type}: ${scrapedFlights.length} flights`);
-        totalFlights += scrapedFlights.length;
-
-        for (const flight of scrapedFlights) {
-          // 1. Upsert the flight record → get its DB id
-          const flightId = await upsertFlight(flight);
-          // 2. Save status updates, linked to the flight
-          totalUpdates += await saveStatusUpdates(flight.statusUpdates, flightId);
-        }
-      }
+      const result = await scrapeDayFlights(date);
+      totalFlights += result.flights;
+      totalUpdates += result.updates;
+      console.log(`  ${dateStr}: ${result.flights} flights, ${result.updates} updates`);
     } catch (err) {
       const msg = `Error on ${dateStr}: ${err instanceof Error ? err.message : String(err)}`;
       console.error(`[Guernsey] ${msg}`);
