@@ -6,6 +6,7 @@
   import Icon from '$lib/components/Icon.svelte';
   import type { IconName } from '$lib/components/Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
+  import { shortenStatus, statusHasDetail } from '$lib/status';
 
   let { data }: { data: PageData } = $props();
   
@@ -61,7 +62,8 @@
     // If flight is already landed/airborne/boarding/cancelled, trust that status
     const currentStatus = flight.status?.toLowerCase() ?? '';
     if (currentStatus.includes('landed') || currentStatus.includes('completed') ||
-        currentStatus.includes('airborne') || currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
+        currentStatus.includes('airborne') || currentStatus.includes('taxiing') ||
+        currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
       return flight.status;
     }
 
@@ -135,15 +137,16 @@
 
   function rotationStatusTone(status: string | null): string {
     const s = status?.toLowerCase() ?? '';
+    if (s.includes('diverted') || s.includes('diverting')) return 'orange';
+    if (s.includes('cancel')) return 'red';
     if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
         s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'yellow';
-    if (s.includes('cancel')) return 'red';
-    if (s.includes('diverted') || s.includes('diverting')) return 'orange';
-    if (s.includes('landed') || s.includes('completed')) return 'blue';
-    if (s.includes('airborne') || s.includes('holding')) return 'green';
+    if (s.includes('landed') || s.includes('completed') || s.includes('airborne') ||
+        s.includes('taxiing') || s.includes('holding') || s.includes('door and gate')) return 'blue';
     if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
         s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
-        s.includes('door and gate') || s.includes('wait in lounge')) return 'purple';
+        s.includes('wait in lounge')) return 'purple';
+    if (s.includes('pax') || s.includes('passengers')) return 'gray';
     return 'gray';
   }
 
@@ -343,31 +346,31 @@
 
   function getStatusColor(status: string | null | undefined): string {
     const s = status?.toLowerCase() || '';
+    if (s.includes('diverted') || s.includes('diverting')) return 'text-orange-600';
+    if (s.includes('cancelled') || s.includes('canceled')) return 'text-red-600';
     if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
         s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'text-yellow-600';
-    if (s.includes('cancelled') || s.includes('canceled')) return 'text-red-600';
-    if (s.includes('diverted') || s.includes('diverting')) return 'text-orange-600';
-    if (s.includes('landed') || s.includes('airborne') || s.includes('completed') || s.includes('holding')) return 'text-blue-600';
+    if (s.includes('landed') || s.includes('airborne') || s.includes('taxiing') ||
+        s.includes('completed') || s.includes('holding') || s.includes('door and gate')) return 'text-blue-600';
     if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
         s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
-        s.includes('door and gate') || s.includes('wait in lounge')) return 'text-purple-600';
+        s.includes('wait in lounge')) return 'text-purple-600';
     if (s.includes('on time') || s === 'scheduled') return 'text-green-600';
-    if (s.includes('pax') || s.includes('passengers')) return 'text-green-600';
     return 'text-muted-foreground';
   }
 
   function getStatusDotColor(status: string | null | undefined): string {
     const s = status?.toLowerCase() || '';
+    if (s.includes('diverted') || s.includes('diverting')) return 'bg-orange-500';
+    if (s.includes('cancelled') || s.includes('canceled')) return 'bg-red-500';
     if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
         s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'bg-yellow-500';
-    if (s.includes('cancelled') || s.includes('canceled')) return 'bg-red-500';
-    if (s.includes('diverted') || s.includes('diverting')) return 'bg-orange-500';
-    if (s.includes('landed') || s.includes('airborne') || s.includes('completed') || s.includes('holding')) return 'bg-blue-500';
+    if (s.includes('landed') || s.includes('airborne') || s.includes('taxiing') ||
+        s.includes('completed') || s.includes('holding') || s.includes('door and gate')) return 'bg-blue-500';
     if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
         s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
-        s.includes('door and gate') || s.includes('wait in lounge')) return 'bg-purple-500';
+        s.includes('wait in lounge')) return 'bg-purple-500';
     if (s.includes('on time') || s === 'scheduled') return 'bg-green-500';
-    if (s.includes('pax') || s.includes('passengers')) return 'bg-green-500';
     return 'bg-gray-400';
   }
 
@@ -489,7 +492,7 @@
       <div class="flex items-center gap-1.5">
         <span class="h-2 w-2 rounded-full {getStatusDotColor(calculatedStatus)}"></span>
         <span class="font-medium {getStatusColor(calculatedStatus)}">
-          {calculatedStatus}
+          {shortenStatus(calculatedStatus)}
         </span>
       </div>
       {#if !formattedDelay && !formattedEarly && calculatedDelayMinutes <= 15}
@@ -500,6 +503,14 @@
       {/if}
     </div>
   </div>
+
+  <!-- Full status detail — shown when the status text is longer than the badge label -->
+  {#if statusHasDetail(calculatedStatus)}
+    <div class="mb-6 flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
+      <span class="mt-0.5 h-2 w-2 shrink-0 rounded-full {getStatusDotColor(calculatedStatus)}"></span>
+      <span class="text-foreground">{calculatedStatus}</span>
+    </div>
+  {/if}
 
   <!-- Times grid -->
   <div class="grid grid-cols-2 gap-4 mb-6">

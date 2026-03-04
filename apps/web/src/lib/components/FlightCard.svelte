@@ -3,6 +3,7 @@
   import { airportName } from '$lib/airports';
   import Icon, { type IconName } from './Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
+  import { shortenStatus } from '$lib/status';
 
   type Flight = typeof flights.$inferSelect & {
     estimatedDeparture?: string | null;
@@ -126,7 +127,8 @@
     // If flight is already landed/airborne/boarding/cancelled, trust that status
     const currentStatus = flight.status?.toLowerCase() ?? '';
     if (currentStatus.includes('landed') || currentStatus.includes('completed') ||
-        currentStatus.includes('airborne') || currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
+        currentStatus.includes('airborne') || currentStatus.includes('taxiing') ||
+        currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
       return flight.status;
     }
 
@@ -168,21 +170,22 @@
   type BadgeTone = 'green' | 'yellow' | 'red' | 'blue' | 'purple' | 'orange' | 'gray';
   const tone = $derived.by((): BadgeTone => {
     const s = calculatedStatus?.toLowerCase() ?? '';
+    // Diverted must be checked before yellow — "Flight Diverted to X Next Info HH:MM" contains both
+    if (s.includes('diverted') || s.includes('diverting')) return 'orange';
+    if (s.includes('cancel'))    return 'red';
     // Delayed: explicit delay, approx times, new ETD, expected, indefinite
     if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
         s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'yellow';
-    if (s.includes('cancel'))    return 'red';
-    // Diverted is a distinct state — not just landed
-    if (s.includes('diverted') || s.includes('diverting')) return 'orange';
-    if (s.includes('landed') || s.includes('airborne') || s.includes('completed')) return 'blue';
-    // Boarding: check-in, go to gate/departures, final call, door closed, wait in lounge
+    // Door and gate closed = pushed back, post-boarding → blue
+    if (s.includes('landed') || s.includes('airborne') || s.includes('taxiing') ||
+        s.includes('completed') || s.includes('holding') || s.includes('door and gate')) return 'blue';
+    // Boarding: check-in, go to gate/departures, final call, gate closed, wait in lounge
     if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
         s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
-        s.includes('door and gate') || s.includes('wait in lounge')) return 'purple';
-    if (s.includes('holding')) return 'blue'; // holding overhead = airborne
+        s.includes('wait in lounge')) return 'purple';
     if (s.includes('on time') || s === 'scheduled') return 'green';
-    // PAX transfer messages are informational
-    if (s.includes('pax') || s.includes('passengers')) return 'green';
+    // PAX transfer messages are informational — gray, not green
+    if (s.includes('pax') || s.includes('passengers')) return 'gray';
     return 'gray';
   });
 
@@ -249,31 +252,31 @@
         <div class="shrink-0">
           {#if tone === 'yellow'}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
-              <span class="h-2 w-2 rounded-full bg-amber-500"></span>{calculatedStatus}
+              <span class="h-2 w-2 rounded-full bg-amber-500"></span>{shortenStatus(calculatedStatus)}
             </span>
           {:else if tone === 'red'}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-red-100 text-red-800 border border-red-300">
-              <span class="h-2 w-2 rounded-full bg-red-500"></span>{calculatedStatus}
+              <span class="h-2 w-2 rounded-full bg-red-500"></span>{shortenStatus(calculatedStatus)}
             </span>
           {:else if tone === 'orange'}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-orange-100 text-orange-800 border border-orange-300">
-              <span class="h-2 w-2 rounded-full bg-orange-500"></span>{calculatedStatus}
+              <span class="h-2 w-2 rounded-full bg-orange-500"></span>{shortenStatus(calculatedStatus)}
             </span>
           {:else if tone === 'blue'}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">
-              <span class="h-2 w-2 rounded-full bg-blue-500"></span>{calculatedStatus}
+              <span class="h-2 w-2 rounded-full bg-blue-500"></span>{shortenStatus(calculatedStatus)}
             </span>
           {:else if tone === 'purple'}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-300">
-              <span class="h-2 w-2 rounded-full bg-purple-500"></span>{calculatedStatus}
+              <span class="h-2 w-2 rounded-full bg-purple-500"></span>{shortenStatus(calculatedStatus)}
             </span>
           {:else if tone === 'green'}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
-              <span class="h-2 w-2 rounded-full bg-green-500"></span>{calculatedStatus}
+              <span class="h-2 w-2 rounded-full bg-green-500"></span>{shortenStatus(calculatedStatus)}
             </span>
           {:else}
             <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
-              <span class="h-2 w-2 rounded-full bg-gray-400"></span>{calculatedStatus}
+              <span class="h-2 w-2 rounded-full bg-gray-400"></span>{shortenStatus(calculatedStatus)}
             </span>
           {/if}
         </div>

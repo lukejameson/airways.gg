@@ -10,9 +10,11 @@
 
   let { data } = $props();
 
-  let activeTab = $state<'departures' | 'arrivals'>(
-    $page.url.searchParams.get('tab') === 'arrivals' ? 'arrivals' : 'departures'
-  );
+  function tabFromUrl(url: URL): 'departures' | 'arrivals' {
+    return url.searchParams.get('tab') === 'arrivals' ? 'arrivals' : 'departures';
+  }
+
+  let activeTab = $state<'departures' | 'arrivals'>(tabFromUrl($page.url));
   let showCompleted = $state($page.url.searchParams.get('completed') === '1');
   let searchQuery = $state('');
   let isLoading = $state(true);
@@ -53,15 +55,18 @@
     data.weather ? getWeatherIconName(data.weather.weatherCode, gciIsDay) : 'cloud'
   );
 
-  // Sync state from URL only when the URL path/search actually changes (back/forward nav)
-  let lastSeenUrl = $state($page.url.href);
+  // Sync activeTab/showCompleted from the URL whenever SvelteKit changes it externally
+  // (back/forward navigation, or navigating back from a flight detail page).
+  // We skip the sync when the URL change came from our own replaceState call in updateUrl()
+  // to avoid a feedback loop.
+  let updatingUrl = false;
   $effect(() => {
-    const currentUrl = $page.url.href;
-    if (currentUrl === lastSeenUrl) return;
-    lastSeenUrl = currentUrl;
+    // Establish reactive dependency on the URL
     const tab = $page.url.searchParams.get('tab');
+    const completed = $page.url.searchParams.get('completed');
+    if (updatingUrl) return;
     activeTab = tab === 'arrivals' ? 'arrivals' : 'departures';
-    showCompleted = $page.url.searchParams.get('completed') === '1';
+    showCompleted = completed === '1';
   });
 
   // Simulate loading state — resolves as soon as server data arrives,
@@ -89,7 +94,11 @@
     if (activeTab !== 'departures') params.set('tab', activeTab);
     if (showCompleted) params.set('completed', '1');
     const query = params.toString();
+    updatingUrl = true;
     replaceState(query ? `?${query}` : '/', {});
+    // Reset the flag after the current microtask so the $effect can distinguish
+    // our own replaceState from external navigation
+    Promise.resolve().then(() => { updatingUrl = false; });
   }
 
   const isCompleted = (f: (typeof data.flights)[0]) => {
