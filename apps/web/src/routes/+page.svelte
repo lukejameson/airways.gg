@@ -133,9 +133,7 @@
     // They remain visible in the arrivals tab so inbound tracking still works.
     // Exception: if a flight is completed (past scheduled arrival + 45 min), it should
     // still appear when "show done" is active — the scraper just hasn't updated its status yet.
-    if (activeTab === 'departures') {
-      flights = flights.filter((f: (typeof data.flights)[0]) => !isAirborneFromGCI(f) || isCompleted(f));
-    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       flights = flights.filter((f: (typeof data.flights)[0]) => {
