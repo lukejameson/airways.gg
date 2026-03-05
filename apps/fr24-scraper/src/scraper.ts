@@ -266,16 +266,12 @@ async function fetchFlightDetailTimes(
         const allCells = Array.from(row.querySelectorAll('td')) as any[];
         const timeCells = allCells.filter((td: any) => td.hasAttribute('data-timestamp'));
         const timeCellDebug = timeCells.map((td: any) => ({ ts: td.getAttribute('data-timestamp'), text: td.innerText?.trim() }));
-        let std: string | null = null;
-        let sta: string | null = null;
-        let timeCount = 0;
-        for (const td of timeCells) {
-          const text = td.innerText?.trim().replace(/\s+/g, ' ') || '';
-          if (!text.match(/^\d{1,2}:\d{2}(\s*(AM|PM))?$/i)) continue;
-          timeCount++;
-          if (timeCount === 1) std = text;
-          else if (timeCount === 3) { sta = text; break; }
-        }
+        const extractTime = (td: any) => {
+          const text = (td.innerText?.trim().replace(/\s+/g, ' ') || '');
+          return /^\d{1,2}:\d{2}(\s*(AM|PM))?$/i.test(text) ? text : null;
+        };
+        let std: string | null = timeCells.length > 1 ? extractTime(timeCells[1]) : null;
+        let sta: string | null = timeCells.length > 3 ? extractTime(timeCells[3]) : null;
         if (std || sta) return { std, sta, _debug: null, _timeCells: timeCellDebug };
       }
       const matchedRow = Array.from(rows).find((r: any) => {
