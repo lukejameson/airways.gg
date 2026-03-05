@@ -128,7 +128,7 @@
   const activeFlights = $derived(activeTab === 'departures' ? departures : arrivals);
   const visibleFlights = $derived.by(() => {
     let flights = activeFlights;
-    if (!showCompleted) flights = flights.filter((f: (typeof data.flights)[0]) => !isCompleted(f));
+    if (!showCompleted) flights = flights.filter((f: (typeof data.flights)[0]) => !isCompleted(f) || f.canceled === true);
     // Hide airborne GCI departures from the departures tab — the plane has already left.
     // They remain visible in the arrivals tab so inbound tracking still works.
     // Exception: if a flight is completed (past scheduled arrival + 45 min), it should
