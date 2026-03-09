@@ -61,21 +61,30 @@
       </a>
 
       <nav class="flex flex-1 items-center space-x-6 text-sm font-medium">
-        <!-- Navigation items removed - search integrated into homepage -->
       </nav>
-
       <div class="flex items-center space-x-4">
+        <a
+          href="/contact"
+          aria-label="Contact"
+          class="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span class="hidden sm:inline">Contact</span>
+        </a>
         {#if buyMeACoffeeUrl}
           <a
             href={buyMeACoffeeUrl}
             target="_blank"
             rel="noopener noreferrer"
+            aria-label="Support Us"
             class="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
             </svg>
-            Support Us
+            <span class="hidden sm:inline">Support Us</span>
           </a>
         {/if}
       </div>
