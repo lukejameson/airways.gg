@@ -1,0 +1,23 @@
+## PR Description
+
+**Flight status context cards, weather accuracy fixes, and board bug fixes**
+
+- Added delay reason cards on flight detail pages — parses Guernsey Airport status messages (weather delays, indefinite delays, holding, check-in suspended) and shows a human-readable context card with next update time where available
+- Added fog/low visibility warning card on flight details when visibility at either airport is <=5km
+- Fixed cancelled flights incorrectly appearing in the "done" section — they now stay visible for 3 hours after scheduled departure
+- Fixed heavily delayed flights (2h+) being hidden from the board even though they hadn't departed
+- Fixed weather icons showing sunny when conditions are overcast/foggy — SCT cloud (50%) now correctly maps to the cloud icon; METAR observations now take priority over TAF forecast rows
+- Switched Guernsey scraper live mode to use the JSON API instead of HTML scraping
+- FR24 estimated times no longer overwrite a Guernsey-sourced estimate that is still in the future
+
+---
+
+## Social Post
+
+airways.gg just got smarter about delays
+
+When Guernsey Airport posts a status like "Flight Delayed Due Weather — Next Info 09:30", the flight page now shows exactly that in plain English, with the next update time front and centre. Low visibility and fog warnings also show up automatically when conditions are poor at either end of the route.
+
+Also fixed: delayed flights were vanishing from the board as if they'd departed — they now stay visible until they actually leave. And the weather widget was showing sunshine during fog (classic) — that's sorted too.
+
+airways.gg — built for Guernsey

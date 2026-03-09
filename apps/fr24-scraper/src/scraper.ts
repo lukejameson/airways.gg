@@ -1,5 +1,6 @@
 import { connect } from 'puppeteer-real-browser';
 import type { Browser, Page } from 'rebrowser-puppeteer-core';
+import { execSync } from 'child_process';
 import { db, flights as flightsTable, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, isTerminalStatus } from '@airways/database';
 import { eq, and, max, desc, count } from 'drizzle-orm';
 
@@ -54,6 +55,26 @@ function getRandomProxy(proxies: ProxyConfig[]): ProxyConfig | null {
 function randomDelay(min: number, max: number): Promise<void> {
   const ms = Math.floor(Math.random() * (max - min + 1)) + min;
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function forceKillBrowser(browser: Browser | null): Promise<void> {
+  if (!browser) return;
+  const proc = (browser as any).process?.() ?? null;
+  const pid = proc?.pid ?? null;
+  await Promise.race([
+    browser.close(),
+    new Promise<void>(resolve => setTimeout(resolve, 5000)),
+  ]).catch(() => {});
+  if (pid != null) {
+    try {
+      execSync(`kill -9 -$(ps -o pgid= -p ${pid} | tr -d ' ') 2>/dev/null || kill -9 ${pid} 2>/dev/null`, { stdio: 'ignore' });
+    } catch {
+    }
+  }
+  try {
+    execSync(`pkill -9 -f 'chrome.*remote-debugging' 2>/dev/null || true`, { stdio: 'ignore' });
+  } catch {
+  }
 }
 
 async function simulateHumanBehavior(page: Page): Promise<void> {
@@ -923,24 +944,16 @@ async function runBrowserSession(
         page.close(),
         new Promise(resolve => setTimeout(resolve, 2000)),
       ]).catch(() => {});
-      await Promise.race([
-        browser.close(),
-        new Promise(resolve => setTimeout(resolve, 3000)),
-      ]);
+      await forceKillBrowser(browser);
+      browser = null;
       console.log('[FR24] Browser closed');
-
       if (global.gc) global.gc();
-
       return { success: true, count: totalUpserted };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[FR24] Attempt ${attempt} failed: ${message}`);
-      if (browser) {
-        await Promise.race([
-          browser.close(),
-          new Promise(resolve => setTimeout(resolve, 3000)),
-        ]).catch(() => {});
-      }
+      await forceKillBrowser(browser);
+      browser = null;
 
       if (attempt < maxRetries) {
         const backoff = Math.pow(2, attempt) * 5000 + Math.random() * 5000;

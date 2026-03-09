@@ -634,7 +634,10 @@ async function scheduleNextScrape(): Promise<void> {
           await scheduleNextScrape();
         } catch (err2) {
           console.error('[FR24] Fatal: Failed to reschedule after wake error:', err2);
-          setTimeout(() => scheduleNextScrape().catch(e => console.error('[FR24] Fatal retry failed:', e)), 5 * 60 * 1000);
+          timers.wakeTimeout = setTimeout(() => {
+            timers.wakeTimeout = null;
+            scheduleNextScrape().catch(e => console.error('[FR24] Fatal retry failed:', e));
+          }, 5 * 60 * 1000);
         }
       }
     }, sleepMs);
