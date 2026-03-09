@@ -664,11 +664,15 @@ async function upsertFR24Flight(
         const currentArrMs = ex.scheduledArrival?.getTime() ?? 0;
         const newDepMs = scheduledDeparture.getTime();
         const newArrMs = scheduledArrival.getTime();
-        if (Math.abs(currentDepMs - newDepMs) > 60000) {
+        const depDriftMs = Math.abs(currentDepMs - newDepMs);
+        const maxAllowedDriftMs = 30 * 60_000;
+        if (depDriftMs > 60000 && depDriftMs <= maxAllowedDriftMs) {
           updateSet.scheduledDeparture = scheduledDeparture;
           console.log(`[FR24] Updating scheduledDeparture for ${flightNumber}: ${ex.scheduledDeparture} -> ${scheduledDeparture}`);
+        } else if (depDriftMs > maxAllowedDriftMs) {
+          console.warn(`[FR24] Rejecting scheduledDeparture update for ${flightNumber}: drift ${Math.round(depDriftMs / 60000)}min exceeds 30min limit (${ex.scheduledDeparture} -> ${scheduledDeparture})`);
         }
-      if (Math.abs(currentArrMs - newArrMs) > 60000) {
+        if (Math.abs(currentArrMs - newArrMs) > 60000) {
           updateSet.scheduledArrival = scheduledArrival;
           console.log(`[FR24] Updating scheduledArrival for ${flightNumber}: ${ex.scheduledArrival} -> ${scheduledArrival}`);
         }

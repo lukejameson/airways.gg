@@ -130,11 +130,17 @@ export const load: PageServerLoad = async ({ url }) => {
       }
     }
 
-    const flightsForDisplay = displayFlights.map(f => ({
-      ...f,
-      estimatedDeparture: estimatedTimesMap.get(f.id)?.estimatedDeparture ?? null,
-      estimatedArrival: estimatedTimesMap.get(f.id)?.estimatedArrival ?? null,
-    }));
+    const flightsForDisplay = displayFlights
+      .map(f => ({
+        ...f,
+        estimatedDeparture: estimatedTimesMap.get(f.id)?.estimatedDeparture ?? null,
+        estimatedArrival: estimatedTimesMap.get(f.id)?.estimatedArrival ?? null,
+      }))
+      .sort((a, b) => {
+        const aTime = new Date(a.estimatedDeparture ?? a.scheduledDeparture).getTime();
+        const bTime = new Date(b.estimatedDeparture ?? b.scheduledDeparture).getTime();
+        return aTime - bTime;
+      });
 
     // Collect all unique airports across display flights
     const airportCodes = [...new Set(
