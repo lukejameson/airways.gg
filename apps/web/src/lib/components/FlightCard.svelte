@@ -35,12 +35,14 @@
   function findClosestWeather(airportCode: string, targetTime: Date) {
     const weatherArray = weatherMap[airportCode];
     if (!weatherArray || weatherArray.length === 0) return null;
-    
-    return weatherArray.reduce((closest: WeatherRow, current: WeatherRow) => {
-      const closestDiff = Math.abs(new Date(closest.timestamp).getTime() - targetTime.getTime());
-      const currentDiff = Math.abs(new Date(current.timestamp).getTime() - targetTime.getTime());
-      return currentDiff < closestDiff ? current : closest;
-    });
+    const targetMs = targetTime.getTime();
+    const past = weatherArray.filter(w => new Date(w.timestamp).getTime() <= targetMs);
+    if (past.length > 0) {
+      return past.reduce((a, b) => new Date(a.timestamp).getTime() > new Date(b.timestamp).getTime() ? a : b);
+    }
+    return weatherArray.reduce((a: WeatherRow, b: WeatherRow) =>
+      Math.abs(new Date(a.timestamp).getTime() - targetMs) <= Math.abs(new Date(b.timestamp).getTime() - targetMs) ? a : b
+    );
   }
 
   // Find daylight data for a specific date

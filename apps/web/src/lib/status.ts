@@ -4,6 +4,35 @@
  * destination codes, gate numbers). That detail is surfaced separately on
  * the flight detail page via statusHasDetail / the full status callout.
  */
+export type DelayReason =
+  | { reason: 'weather'; label: string; nextInfo: string | null }
+  | { reason: 'indefinite'; label: string }
+  | { reason: 'holding'; label: string }
+  | { reason: 'check_in_suspended'; label: string };
+
+export function extractDelayReason(status: string | null | undefined): DelayReason | null {
+  if (!status) return null;
+  const s = status.toLowerCase();
+  if (!s.includes('delay') && !s.includes('indefini') && !s.includes('holding') && !s.includes('check in suspend') && !s.includes('check-in suspend')) return null;
+  if (s.includes('weather') || (s.includes('due') && s.includes('weather')) || s.match(/due\s+weather/)) {
+    const nextInfoMatch = status.match(/next\s+info(?:\s+at)?\s+([0-9]{1,2}:[0-9]{2})/i);
+    return { reason: 'weather', label: 'Delayed due to weather', nextInfo: nextInfoMatch ? nextInfoMatch[1] : null };
+  }
+  if (s.includes('indefini')) {
+    if (s.includes('weather')) {
+      return { reason: 'weather', label: 'Indefinitely delayed due to weather', nextInfo: null };
+    }
+    return { reason: 'indefinite', label: 'Indefinitely delayed' };
+  }
+  if (s.includes('holding')) {
+    return { reason: 'holding', label: 'Aircraft holding overhead' };
+  }
+  if (s.includes('check in suspend') || s.includes('check-in suspend')) {
+    return { reason: 'check_in_suspended', label: 'Check-in suspended' };
+  }
+  return null;
+}
+
 export function shortenStatus(status: string | null | undefined): string {
   if (!status) return 'Scheduled';
 

@@ -1,7 +1,7 @@
 import { connect } from 'puppeteer-real-browser';
 import type { Browser, Page } from 'rebrowser-puppeteer-core';
 import { db, flights as flightsTable, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, isTerminalStatus } from '@airways/database';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, max, desc, count } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // Timezone utility
@@ -425,6 +425,38 @@ function getLondonOffsetMs(d: Date): number {
 // DB upsert
 // ---------------------------------------------------------------------------
 
+async function guernseyEstimatedTimeHasPriority(
+  flightId: number,
+  timeType: string,
+  fr24EstimatedTime: Date,
+): Promise<boolean> {
+  const [latestGuernsey] = await db
+    .select({ ts: max(flightStatusHistory.statusTimestamp) })
+    .from(flightStatusHistory)
+    .where(
+      and(
+        eq(flightStatusHistory.flightId, flightId),
+        eq(flightStatusHistory.source, 'guernsey_airport'),
+      ),
+    );
+  const [existing] = await db
+    .select({ timeValue: flightTimes.timeValue })
+    .from(flightTimes)
+    .where(
+      and(
+        eq(flightTimes.flightId, flightId),
+        eq(flightTimes.timeType, timeType),
+      ),
+    );
+  if (!latestGuernsey?.ts || !existing?.timeValue) return false;
+  const guernseyTs = new Date(latestGuernsey.ts);
+  const existingEstimate = new Date(existing.timeValue);
+  const now = new Date();
+  const guernseyEstimateStillFuture = existingEstimate > now;
+  const guernseyIsNewer = guernseyTs > fr24EstimatedTime;
+  return guernseyEstimateStillFuture && guernseyIsNewer;
+}
+
 async function upsertFR24Flight(
   flight: ParsedFR24Flight,
   flightDate: string,
@@ -635,16 +667,19 @@ async function upsertFR24Flight(
     // Write estimated time to flightTimes (or remove stale estimate if on-time)
     const estTimeType = flight.type === 'departure' ? 'EstimatedBlockOff' : 'EstimatedBlockOn';
     if (estimatedTime) {
-      await db
-        .insert(flightTimes)
-        .values({ flightId, timeType: estTimeType, timeValue: estimatedTime })
-        .onConflictDoUpdate({
-          target: [flightTimes.flightId, flightTimes.timeType],
-          set: { timeValue: estimatedTime },
-        });
+      const guernseyHasPriority = await guernseyEstimatedTimeHasPriority(flightId, estTimeType, estimatedTime);
+      if (!guernseyHasPriority) {
+        await db
+          .insert(flightTimes)
+          .values({ flightId, timeType: estTimeType, timeValue: estimatedTime })
+          .onConflictDoUpdate({
+            target: [flightTimes.flightId, flightTimes.timeType],
+            set: { timeValue: estimatedTime },
+          });
+      } else {
+        console.log(`[FR24] Skipping EstimatedBlockOff/On write for flight ${flightId} — Guernsey airport has a newer estimate still in the future`);
+      }
     } else {
-      // No meaningful estimate — remove any stale estimated time entry
-      // so the UI doesn't show "Estimated — subject to change" with same time as scheduled
       await db
         .delete(flightTimes)
         .where(
@@ -679,19 +714,38 @@ async function upsertFR24Flight(
 
     // Insert status history
     try {
-      await db
-        .insert(flightStatusHistory)
-        .values({
-          flightCode: flightNumber,
-          flightDate,
-          statusTimestamp: new Date(),
-          statusMessage: flight.status || status,
-          source: 'fr24',
-          flightId,
-        })
-        .onConflictDoNothing();
+      const rawMessage = flight.status || status;
+      let skipHistory = false;
+      if (rawMessage.toLowerCase().startsWith('estimated dep')) {
+        const timeMatch = rawMessage.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+        if (timeMatch) {
+          let hh = parseInt(timeMatch[1]);
+          const mm = parseInt(timeMatch[2]);
+          const ampm = timeMatch[3].toUpperCase();
+          if (ampm === 'PM' && hh !== 12) hh += 12;
+          if (ampm === 'AM' && hh === 12) hh = 0;
+          const ex = existing[0];
+          const scheduledMs = ex?.scheduledDeparture ? new Date(ex.scheduledDeparture).getTime() : null;
+          if (scheduledMs !== null) {
+            const estMs = new Date(ex.scheduledDeparture!).setHours(hh, mm, 0, 0);
+            if (estMs <= scheduledMs) skipHistory = true;
+          }
+        }
+      }
+      if (!skipHistory) {
+        await db
+          .insert(flightStatusHistory)
+          .values({
+            flightCode: flightNumber,
+            flightDate,
+            statusTimestamp: new Date(),
+            statusMessage: rawMessage,
+            source: 'fr24',
+            flightId,
+          })
+          .onConflictDoNothing();
+      }
     } catch {
-      // Status history insert is best-effort
     }
 
     return flightId;

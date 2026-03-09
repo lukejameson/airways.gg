@@ -111,7 +111,7 @@ function getCloudCoverPercent(data: ParsedConditions): number {
 function getWeatherCode(cloudCover: number): number {
   if (cloudCover === 0) return 0;
   if (cloudCover <= 25) return 1;
-  if (cloudCover <= 50) return 2;
+  if (cloudCover < 50) return 2;
   return 3;
 }
 
@@ -300,10 +300,10 @@ async function fetchAllTafs(airports: { code: string; icao: string }[]): Promise
       forecasts.push({
         airportCode: airport.code,
         timestamp: new Date(hour),
-        temperature: data.temp ?? 15,
-        windSpeed: data.wspd ?? 5,
-        windDirection: data.wdir ?? 0,
-        visibility: data.visib ?? 10,
+        temperature: data.temp ?? null,
+        windSpeed: data.wspd ?? null,
+        windDirection: data.wdir ?? null,
+        visibility: data.visib ?? null,
         cloudCover,
         pressure: data.pressure ?? null,
         weatherCode: getWeatherCode(cloudCover),

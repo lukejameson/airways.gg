@@ -103,12 +103,11 @@
   }
 
   const isCompleted = (f: (typeof data.flights)[0]) => {
-    if (f.canceled === true) return true;
+    if (f.canceled === true) return new Date(f.scheduledDeparture).getTime() < Date.now() - 3 * 60 * 60_000;
     const s = f.status?.toLowerCase() ?? '';
     if (s.includes('landed') || s.includes('completed') || s.includes('diverted')) return true;
-    // Has a recorded actual arrival time — definitely on the ground
     if (f.actualArrival) return true;
-    // Scheduled arrival was > 45 min ago — almost certainly landed even without a status update
+    if (!f.actualDeparture && (s.includes('delayed') || s.includes('etd') || s.includes('next info') || s.includes('indefini') || s.includes('check in') || s.includes('check-in') || s.includes('boarding') || s.includes('go to') || s.includes('approx'))) return false;
     if (new Date(f.scheduledArrival).getTime() < Date.now() - 45 * 60_000) return true;
     return false;
   };

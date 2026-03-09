@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { db, flights, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus } from '@airways/database';
-import { eq, and, isNull, sql } from 'drizzle-orm';
+import { eq, and, isNull, sql, count } from 'drizzle-orm';
 
 interface StatusUpdate {
   flightCode: string;
@@ -19,6 +19,84 @@ interface ScrapedFlight {
 }
 
 const BASE_URL = process.env.GUERNSEY_AIRPORT_URL || 'https://www.airport.gg';
+const API_URL = process.env.GUERNSEY_API_URL || 'https://www.airport.gg/arr-dep/json';
+const API_KEY = process.env.GUERNSEY_API_KEY || '92873426';
+
+interface ApiFlightEntry {
+  flight_time: string;
+  flight_comment: string;
+  flight_date: string;
+  last_updated: string;
+  flight_numbers: string[];
+  flight_locations: string[];
+  airlines: string[];
+}
+
+interface ApiResponse {
+  arrivals: ApiFlightEntry[];
+  departures: ApiFlightEntry[];
+}
+
+async function fetchApiData(): Promise<ApiResponse> {
+  const url = `${API_URL}?key=${API_KEY}`;
+  console.log(`[Guernsey] Fetching API data → ${url}`);
+  const response = await fetch(url, {
+    headers: {
+      'Accept': 'application/json',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} from Guernsey API`);
+  }
+  return response.json() as Promise<ApiResponse>;
+}
+
+function mapApiEntriesToScrapedFlights(
+  entries: ApiFlightEntry[],
+  type: 'arrivals' | 'departures',
+  filterDate?: string,
+): ScrapedFlight[] {
+  const results: ScrapedFlight[] = [];
+  for (const entry of entries) {
+    if (filterDate && entry.flight_date !== filterDate) continue;
+    if (!entry.flight_numbers || entry.flight_numbers.length === 0) continue;
+
+    const timeParts = entry.flight_time.match(/^(\d{1,2}):(\d{2})$/);
+    if (!timeParts) continue;
+    const hh = parseInt(timeParts[1]);
+    const mm = parseInt(timeParts[2]);
+
+    const scheduledTime = new Date(`${entry.flight_date}T00:00:00Z`);
+    scheduledTime.setUTCHours(hh, mm, 0, 0);
+
+    const location = entry.flight_locations.join(', ');
+    const codes = entry.flight_numbers;
+    const statusUpdates: StatusUpdate[] = [];
+
+    if (entry.flight_comment) {
+      const lastUpdated = parseInt(entry.last_updated, 10);
+      const statusTimestamp = isNaN(lastUpdated) ? new Date() : new Date(lastUpdated * 1000);
+      for (const flightCode of codes) {
+        statusUpdates.push({
+          flightCode,
+          flightDate: entry.flight_date,
+          statusTimestamp,
+          statusMessage: entry.flight_comment,
+        });
+      }
+    }
+
+    results.push({
+      location,
+      codes,
+      scheduledTime,
+      flightDate: entry.flight_date,
+      type,
+      statusUpdates,
+    });
+  }
+  return results;
+}
 
 // Known typical flight times in minutes for routes from/to GCI.
 // Used to estimate scheduledDeparture/scheduledArrival when only one end is known.
@@ -335,11 +413,9 @@ function extractCanceled(updates: StatusUpdate[]): boolean {
 function extractDelayMinutes(updates: StatusUpdate[], scheduledTime: Date): number | null {
   for (const u of [...updates].reverse()) {
     const msg = u.statusMessage.toLowerCase();
-    // Match any time-bearing delay message: "Delayed To HH:MM", "Approx HH:MM",
-    // "New ETD HH:MM", "Expected at HH:MM", "Delayed until HH:MM", "Boarding Expected HH:MM"
     if (msg.includes('delayed to') || msg.startsWith('approx') || msg.includes('new etd') ||
         msg.includes('expected at') || msg.includes('delayed until') || msg.includes('boarding expected') ||
-        msg.includes('flight delayed to approx')) {
+        msg.includes('flight delayed to approx') || msg.includes('next info')) {
       const parsed = parseHHMM(u.statusMessage);
       if (parsed) {
         const estimatedTime = new Date(scheduledTime);
@@ -363,10 +439,9 @@ function extractDelayMinutes(updates: StatusUpdate[], scheduledTime: Date): numb
 function extractEstimatedTime(updates: StatusUpdate[], scheduledTime: Date): Date | null {
   for (const u of [...updates].reverse()) {
     const msg = u.statusMessage.toLowerCase();
-    // Match any time-bearing delay/estimate message
     if (msg.includes('delayed to') || msg.startsWith('approx') || msg.includes('new etd') ||
         msg.includes('expected at') || msg.includes('delayed until') || msg.includes('boarding expected') ||
-        msg.includes('flight delayed to approx')) {
+        msg.includes('flight delayed to approx') || msg.includes('next info')) {
       const parsed = parseHHMM(u.statusMessage);
       if (parsed) {
         const estimated = new Date(scheduledTime);
@@ -520,17 +595,35 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
   }
 }
 
+function normaliseStatusMessage(msg: string): string {
+  return msg.replace(/\bNext Info\s+(\d{2})(\d{2})\b/gi, (_, h, m) => `Next Info ${h}:${m}`);
+}
+
 async function saveStatusUpdates(updates: StatusUpdate[], flightId: number | null): Promise<number> {
   let saved = 0;
   for (const u of updates) {
+    const statusMessage = normaliseStatusMessage(u.statusMessage);
     try {
+      if (flightId !== null) {
+        const [{ n }] = await db
+          .select({ n: count() })
+          .from(flightStatusHistory)
+          .where(
+            and(
+              eq(flightStatusHistory.flightId, flightId),
+              eq(flightStatusHistory.source, 'guernsey_airport'),
+              eq(flightStatusHistory.statusMessage, statusMessage),
+            ),
+          );
+        if (n > 0) continue;
+      }
       await db
         .insert(flightStatusHistory)
         .values({
           flightCode:      u.flightCode,
           flightDate:      u.flightDate,
           statusTimestamp: u.statusTimestamp,
-          statusMessage:   u.statusMessage,
+          statusMessage,
           source:          'guernsey_airport',
           flightId:        flightId ?? undefined,
         })
@@ -720,21 +813,34 @@ async function scrapeDateRange(
  * Scrape all arrivals and departures for a single date.
  * Used by live mode to poll today (and optionally tomorrow).
  */
-export async function scrapeDayFlights(date: Date): Promise<{ flights: number; updates: number }> {
+ export async function scrapeDayFlights(date: Date): Promise<{ flights: number; updates: number }> {
   const html = await fetchDayHtml(date);
   let totalFlights = 0;
   let totalUpdates = 0;
-
   for (const type of ['arrivals', 'departures'] as const) {
     const scrapedFlights = parseFlightHtml(html, date, type);
     totalFlights += scrapedFlights.length;
-
     for (const flight of scrapedFlights) {
       const flightId = await upsertFlight(flight);
       totalUpdates += await saveStatusUpdates(flight.statusUpdates, flightId);
     }
   }
+  return { flights: totalFlights, updates: totalUpdates };
+}
 
+export async function scrapeDayFlightsFromApi(date: Date): Promise<{ flights: number; updates: number }> {
+  const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(date);
+  const data = await fetchApiData();
+  let totalFlights = 0;
+  let totalUpdates = 0;
+  const arrivals = mapApiEntriesToScrapedFlights(data.arrivals, 'arrivals', dateStr);
+  const departures = mapApiEntriesToScrapedFlights(data.departures, 'departures', dateStr);
+  for (const flight of [...arrivals, ...departures]) {
+    totalFlights++;
+    const flightId = await upsertFlight(flight);
+    totalUpdates += await saveStatusUpdates(flight.statusUpdates, flightId);
+  }
+  console.log(`[Guernsey] API scrape for ${dateStr}: ${totalFlights} flights, ${totalUpdates} updates`);
   return { flights: totalFlights, updates: totalUpdates };
 }
 

@@ -1,6 +1,6 @@
 import { db, flights, flightTimes, scraperLogs } from '@airways/database';
 import { eq, and, not, inArray, asc, count, desc, max, sql } from 'drizzle-orm';
-import { scrapeDayFlights } from './scraper';
+import { scrapeDayFlights, scrapeDayFlightsFromApi } from './scraper';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -495,14 +495,13 @@ async function runLiveScrape(includeTomorrow: boolean): Promise<void> {
   try {
     const todayStr = guernseyDateStr();
     const todayDate = new Date(todayStr);
-    const todayResult = await scrapeDayFlights(todayDate);
+    const todayResult = await scrapeDayFlightsFromApi(todayDate);
     totalFlights += todayResult.flights;
     totalUpdates += todayResult.updates;
-
     if (includeTomorrow) {
       const tomorrowStr = guernseyTomorrowStr();
       const tomorrowDate = new Date(tomorrowStr);
-      const tomorrowResult = await scrapeDayFlights(tomorrowDate);
+      const tomorrowResult = await scrapeDayFlightsFromApi(tomorrowDate);
       totalFlights += tomorrowResult.flights;
       totalUpdates += tomorrowResult.updates;
       lastTomorrowScrapeAt = new Date();
@@ -537,9 +536,8 @@ async function runBackgroundPrefetch(): Promise<void> {
   try {
     const todayDate = new Date(todayStr);
     const tomorrowDate = new Date(tomorrowStr);
-
-    const todayResult = await scrapeDayFlights(todayDate);
-    const tomorrowResult = await scrapeDayFlights(tomorrowDate);
+    const todayResult = await scrapeDayFlightsFromApi(todayDate);
+    const tomorrowResult = await scrapeDayFlightsFromApi(tomorrowDate);
     lastTomorrowScrapeAt = new Date();
 
     const totalFlights = todayResult.flights + tomorrowResult.flights;
