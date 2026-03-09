@@ -30,6 +30,8 @@ export const load: PageServerLoad = async ({ params }) => {
           actualDeparture: flights.actualDeparture,
           actualArrival: flights.actualArrival,
           status: flights.status,
+          canceled: flights.canceled,
+          delayMinutes: flights.delayMinutes,
         })
         .from(flights)
         .where(and(

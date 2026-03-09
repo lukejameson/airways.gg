@@ -135,6 +135,14 @@
     }
   }
 
+  function rotationDelayDelta(delayMinutes: number | null): string | null {
+    if (!delayMinutes || delayMinutes <= 0) return null;
+    const hrs = Math.floor(delayMinutes / 60);
+    const mins = delayMinutes % 60;
+    if (hrs > 0 && mins > 0) return `+${hrs}h ${mins}m`;
+    if (hrs > 0) return `+${hrs}h`;
+    return `+${mins}m`;
+  }
   function rotationStatusTone(status: string | null): string {
     const s = status?.toLowerCase() ?? '';
     if (s.includes('diverted') || s.includes('diverting')) return 'orange';
@@ -827,14 +835,16 @@
               <tbody>
                 {#each rotationFlights as rf}
                   {@const isCurrent = rf.id === flight.id}
-                  {@const tone = rotationStatusTone(rf.status)}
+                  {@const tone = rf.canceled ? 'red' : rotationStatusTone(rf.status)}
+                  {@const delayDelta = rotationDelayDelta(rf.delayMinutes)}
                   <tr
                     data-current={isCurrent}
                     class="border-t border-border/50 transition-colors
-                      {isCurrent ? 'bg-primary/8 border-l-2 border-l-primary' : 'hover:bg-muted/30'}"
+                      {isCurrent ? 'bg-primary/8 border-l-2 border-l-primary' : 'hover:bg-muted/30'}
+                      {rf.canceled ? 'opacity-60' : ''}"
                   >
                     <td class="px-4 py-2.5">
-                      <a href="/flights/{rf.id}" class="font-semibold {isCurrent ? 'text-primary' : 'hover:text-primary transition-colors'}">
+                      <a href="/flights/{rf.id}" class="font-semibold {isCurrent ? 'text-primary' : 'hover:text-primary transition-colors'} {rf.canceled ? 'line-through' : ''}">
                         {rf.flightNumber}
                       </a>
                       {#if isCurrent}
@@ -872,20 +882,22 @@
                       {/if}
                     </td>
                     <td class="px-4 py-2.5 text-right">
-                      {#if tone === 'blue'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700">{rf.status}</span>
+                      {#if rf.canceled}
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">Cancelled</span>
+                      {:else if tone === 'blue'}
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700">{shortenStatus(rf.status)}{#if delayDelta} · {delayDelta}{/if}</span>
                       {:else if tone === 'green'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700">{rf.status}</span>
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700">{shortenStatus(rf.status)}{#if delayDelta} · {delayDelta}{/if}</span>
                       {:else if tone === 'yellow'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">{rf.status}</span>
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">{shortenStatus(rf.status)}{#if delayDelta} · {delayDelta}{/if}</span>
                       {:else if tone === 'red'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">{rf.status}</span>
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">{shortenStatus(rf.status)}{#if delayDelta} · {delayDelta}{/if}</span>
                       {:else if tone === 'purple'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700">{rf.status}</span>
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700">{shortenStatus(rf.status)}{#if delayDelta} · {delayDelta}{/if}</span>
                       {:else if tone === 'orange'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">{rf.status}</span>
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">{shortenStatus(rf.status)}{#if delayDelta} · {delayDelta}{/if}</span>
                       {:else}
-                        <span class="text-muted-foreground text-xs">{rf.status ?? 'Scheduled'}</span>
+                        <span class="text-muted-foreground text-xs">{shortenStatus(rf.status) ?? 'Scheduled'}{#if delayDelta} · <span class="text-red-600 font-bold">{delayDelta}</span>{/if}</span>
                       {/if}
                     </td>
                   </tr>
@@ -897,40 +909,42 @@
             <div class="md:hidden divide-y divide-border">
               {#each rotationFlights as rf}
                 {@const isCurrent = rf.id === flight.id}
-                {@const tone = rotationStatusTone(rf.status)}
+                {@const tone = rf.canceled ? 'red' : rotationStatusTone(rf.status)}
+                {@const delayDelta = rotationDelayDelta(rf.delayMinutes)}
                 {@const depShort = airportName(rf.departureAirport)}
                 {@const arrShort = airportName(rf.arrivalAirport)}
                 <a
                   href="/flights/{rf.id}"
                   data-current={isCurrent}
-                  class="block px-4 py-3 transition-colors {isCurrent ? 'bg-primary/8' : 'hover:bg-muted/30'}"
+                  class="block px-4 py-3 transition-colors {isCurrent ? 'bg-primary/8' : 'hover:bg-muted/30'} {rf.canceled ? 'opacity-60' : ''}"
                 >
-                  <!-- Header: Flight + Status -->
                   <div class="flex items-center justify-between mb-2">
                     <div class="flex items-center gap-2">
-                      <span class="font-semibold {isCurrent ? 'text-primary' : 'text-foreground'}">{rf.flightNumber}</span>
+                      <span class="font-semibold {isCurrent ? 'text-primary' : 'text-foreground'} {rf.canceled ? 'line-through' : ''}">{rf.flightNumber}</span>
                       {#if isCurrent}
                         <span class="text-[10px] font-bold uppercase tracking-wide text-primary opacity-70">this flight</span>
                       {/if}
                     </div>
-                    {#if tone === 'blue'}
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700">{rf.status}</span>
-                    {:else if tone === 'green'}
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700">{rf.status}</span>
-                    {:else if tone === 'yellow'}
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">{rf.status}</span>
-                    {:else if tone === 'red'}
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">{rf.status}</span>
-                    {:else if tone === 'purple'}
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700">{rf.status}</span>
-                    {:else if tone === 'orange'}
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">{rf.status}</span>
-                    {:else}
-                      <span class="text-muted-foreground text-xs">{rf.status ?? 'Scheduled'}</span>
-                    {/if}
+                    <div>
+                      {#if rf.canceled}
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">Cancelled</span>
+                      {:else if tone === 'blue'}
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700">{shortenStatus(rf.status)}{#if delayDelta} · {delayDelta}{/if}</span>
+                      {:else if tone === 'green'}
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700">{shortenStatus(rf.status)}{#if delayDelta} · {delayDelta}{/if}</span>
+                      {:else if tone === 'yellow'}
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">{shortenStatus(rf.status)}{#if delayDelta} · {delayDelta}{/if}</span>
+                      {:else if tone === 'red'}
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">{shortenStatus(rf.status)}{#if delayDelta} · {delayDelta}{/if}</span>
+                      {:else if tone === 'purple'}
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700">{shortenStatus(rf.status)}{#if delayDelta} · {delayDelta}{/if}</span>
+                      {:else if tone === 'orange'}
+                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">{shortenStatus(rf.status)}{#if delayDelta} · {delayDelta}{/if}</span>
+                      {:else}
+                        <span class="text-muted-foreground text-xs">{shortenStatus(rf.status) ?? 'Scheduled'}{#if delayDelta} · <span class="text-red-600 font-bold">{delayDelta}</span>{/if}</span>
+                      {/if}
+                    </div>
                   </div>
-
-                  <!-- Route: From -> To -->
                   <div class="flex items-center gap-2 text-sm mb-2">
                     <span class="font-medium text-foreground">{depShort}</span>
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
