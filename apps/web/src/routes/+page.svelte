@@ -104,8 +104,7 @@
 
   const isCompleted = (f: (typeof data.flights)[0]) => {
     if (f.canceled === true) {
-      const cancelledAt = f.cancelledAt ? new Date(f.cancelledAt).getTime() : new Date(f.scheduledDeparture).getTime();
-      return Date.now() > cancelledAt + 60 * 60_000;
+      return Date.now() > new Date(f.scheduledDeparture).getTime() + 60 * 60_000;
     }
     const s = f.status?.toLowerCase() ?? '';
     if (s.includes('landed') || s.includes('completed') || s.includes('diverted')) return true;

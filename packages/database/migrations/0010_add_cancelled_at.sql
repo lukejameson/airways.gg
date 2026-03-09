@@ -1,1 +1,1 @@
-ALTER TABLE "flights" ADD COLUMN "cancelled_at" timestamp;
+ALTER TABLE "flights" ADD COLUMN IF NOT EXISTS "cancelled_at" timestamp;

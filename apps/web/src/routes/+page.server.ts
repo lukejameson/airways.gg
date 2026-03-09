@@ -100,7 +100,6 @@ export const load: PageServerLoad = async ({ url }) => {
         canceled: flights.canceled,
         aircraftType: flights.aircraftType,
         delayMinutes: flights.delayMinutes,
-        cancelledAt: flights.cancelledAt,
         flightDate: flights.flightDate,
       })
       .from(flights)
