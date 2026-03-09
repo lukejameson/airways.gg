@@ -56,7 +56,6 @@ export const flights = pgTable('flights', {
   aircraftRegistration: varchar('aircraft_registration', { length: 20 }),
   aircraftType: varchar('aircraft_type', { length: 20 }),
   delayMinutes: integer('delay_minutes'),
-  cancelledAt: timestamp('cancelled_at'),
   flightDate: date('flight_date').notNull(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),

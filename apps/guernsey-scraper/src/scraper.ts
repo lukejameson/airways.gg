@@ -542,10 +542,6 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
       if (isDelayedCorrection && delayMinutes === 0) {
         updateSet.delayMinutes = 0;
       }
-      if (canceled) {
-        updateSet.cancelledAt = sql`COALESCE(${flights.cancelledAt}, NOW())`;
-      }
-      // When correcting from Delayed to Scheduled, also clear stale delayMinutes
       if (isDelayedCorrection && delayMinutes === 0) {
         updateSet.delayMinutes = 0;
       }

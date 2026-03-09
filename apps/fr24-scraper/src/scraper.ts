@@ -2,7 +2,7 @@ import { connect } from 'puppeteer-real-browser';
 import type { Browser, Page } from 'rebrowser-puppeteer-core';
 import { execSync } from 'child_process';
 import { db, flights as flightsTable, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, isTerminalStatus } from '@airways/database';
-import { eq, and, max, desc, count, sql } from 'drizzle-orm';
+import { eq, and, max, desc, count } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // Timezone utility
@@ -650,7 +650,6 @@ async function upsertFR24Flight(
       }
       if (canceled) {
         updateSet.canceled = canceled;
-        updateSet.cancelledAt = sql`COALESCE(${flightsTable.cancelledAt}, NOW())`;
       }
       if (actualDeparture && ex.actualDeparture == null) {
         updateSet.actualDeparture = actualDeparture;
