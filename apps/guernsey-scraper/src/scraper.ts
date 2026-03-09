@@ -524,7 +524,7 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
     // This catches records created by other scrapers (e.g. numeric unique_ids from fr24)
     // and avoids creating duplicates.
     const existing = await db
-      .select({ id: flights.id, status: flights.status, cancelledAt: flights.cancelledAt })
+      .select({ id: flights.id, status: flights.status })
       .from(flights)
       .where(
         and(
@@ -542,8 +542,8 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
       if (isDelayedCorrection && delayMinutes === 0) {
         updateSet.delayMinutes = 0;
       }
-      if (canceled && !existing[0].cancelledAt) {
-        updateSet.cancelledAt = new Date();
+      if (canceled) {
+        updateSet.cancelledAt = sql`COALESCE(${flights.cancelledAt}, NOW())`;
       }
       // When correcting from Delayed to Scheduled, also clear stale delayMinutes
       if (isDelayedCorrection && delayMinutes === 0) {
