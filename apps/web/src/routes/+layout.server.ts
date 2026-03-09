@@ -23,7 +23,7 @@ export const load: LayoutServerLoad = async (_) => {
 
   return {
     siteUrl: `https://${domain}`,
-    buyMeACoffeeUrl: env.PUBLIC_BUY_ME_A_COFFEE_URL || null,
+    buyMeACoffeeUrl: publicEnv.PUBLIC_BUY_ME_A_COFFEE_URL || null,
     umamiWebsiteId: publicEnv.PUBLIC_UMAMI_WEBSITE_ID || null,
     umamiUrl: publicEnv.PUBLIC_UMAMI_URL || null,
     airports: airportsMap,
