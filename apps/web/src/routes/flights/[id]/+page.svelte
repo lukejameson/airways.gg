@@ -1,12 +1,15 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import { browser } from '$app/environment';
+  import { invalidateAll } from '$app/navigation';
+  import { onDestroy } from 'svelte';
   import { page } from '$app/stores';
   import { airportName, getAirportCoords, getAirportsForNearestSearch } from '$lib/airports';
   import Icon from '$lib/components/Icon.svelte';
   import type { IconName } from '$lib/components/Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
   import { shortenStatus, statusHasDetail, extractDelayReason } from '$lib/status';
+  import DelayCounter from '$lib/components/DelayCounter.svelte';
 
   let { data }: { data: PageData } = $props();
   
@@ -318,6 +321,10 @@
   }
 
   const isEstimate = $derived(!actualTime && !!estimatedTime);
+  const isCompleted = $derived.by(() => {
+    const s = flight.status?.toLowerCase() ?? '';
+    return s.includes('landed') || s.includes('completed') || s.includes('diverted') || flight.canceled === true;
+  });
   const isPreDeparture = $derived(
     !flight.actualDeparture &&
     !['airborne', 'taxiing', 'landed', 'completed', 'cancelled', 'canceled']
@@ -401,6 +408,16 @@
   let shareSuccess = $state(false);
 
   // Save to recently viewed
+  let refreshInterval: ReturnType<typeof setInterval> | null = null;
+  $effect(() => {
+    if (browser) {
+      refreshInterval = setInterval(() => { invalidateAll(); }, 60_000);
+    }
+    return () => {
+      if (refreshInterval) clearInterval(refreshInterval);
+    };
+  });
+
   $effect(() => {
     if (browser) {
       const key = 'recentlyViewedFlights';
@@ -509,9 +526,14 @@
       <span class="text-muted-foreground">{shortDate(flight.flightDate)}</span>
       <span class="opacity-30 hidden sm:inline">·</span>
       {#if !flight.canceled}
-        {#if formattedDelay}
-          <span class="text-sm font-bold text-red-600">+{formattedDelay}</span>
-        {:else if formattedEarly}
+        <DelayCounter
+          scheduledTime={scheduledTime}
+          estimatedTime={estimatedTime}
+          actualTime={actualTime}
+          isCompleted={isCompleted}
+          class="text-sm"
+        />
+        {#if formattedEarly && !isCompleted}
           <span class="text-sm font-bold text-green-600">{formattedEarly}</span>
         {/if}
       {/if}
@@ -626,6 +648,15 @@
         </p>
         <p class="text-3xl font-bold tabular-nums text-muted-foreground">—</p>
         <p class="text-sm text-muted-foreground mt-1">Not yet available</p>
+      {/if}
+      {#if !flight.canceled}
+        <DelayCounter
+          scheduledTime={scheduledTime}
+          estimatedTime={estimatedTime}
+          actualTime={actualTime}
+          isCompleted={isCompleted}
+          class="text-sm mt-2 block"
+        />
       {/if}
     </div>
   </div>

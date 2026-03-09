@@ -103,7 +103,10 @@
   }
 
   const isCompleted = (f: (typeof data.flights)[0]) => {
-    if (f.canceled === true) return new Date(f.scheduledDeparture).getTime() < Date.now() - 3 * 60 * 60_000;
+    if (f.canceled === true) {
+      const cancelledAt = f.cancelledAt ? new Date(f.cancelledAt).getTime() : new Date(f.scheduledDeparture).getTime();
+      return Date.now() > cancelledAt + 60 * 60_000;
+    }
     const s = f.status?.toLowerCase() ?? '';
     if (s.includes('landed') || s.includes('completed') || s.includes('diverted')) return true;
     if (f.actualArrival) return true;
@@ -127,7 +130,7 @@
   const activeFlights = $derived(activeTab === 'departures' ? departures : arrivals);
   const visibleFlights = $derived.by(() => {
     let flights = activeFlights;
-    if (!showCompleted) flights = flights.filter((f: (typeof data.flights)[0]) => !isCompleted(f) || f.canceled === true);
+    if (!showCompleted) flights = flights.filter((f: (typeof data.flights)[0]) => !isCompleted(f));
     // Hide airborne GCI departures from the departures tab — the plane has already left.
     // They remain visible in the arrivals tab so inbound tracking still works.
     // Exception: if a flight is completed (past scheduled arrival + 45 min), it should

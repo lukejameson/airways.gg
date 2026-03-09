@@ -4,6 +4,7 @@
   import Icon, { type IconName } from './Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
   import { shortenStatus } from '$lib/status';
+  import DelayCounter from './DelayCounter.svelte';
 
   type Flight = typeof flights.$inferSelect & {
     estimatedDeparture?: string | null;
@@ -107,10 +108,10 @@
   
   // Use estimated time only if it hasn't expired, otherwise fall back to scheduled
   const effectiveEstimatedTime = $derived(estimatedTime && scheduledTime && new Date(estimatedTime).getTime() !== new Date(scheduledTime).getTime() ? estimatedTime : null);
-  const displayTime = $derived(actualTime ?? (estimatedTimeExpired ? null : effectiveEstimatedTime));
+  const displayTime = $derived(actualTime ?? effectiveEstimatedTime);
   const otherAirport = $derived(isDeparture ? flight.arrivalAirport : flight.departureAirport);
   const delayMinutes = $derived(flight.delayMinutes ?? 0);
-  const isEstimate = $derived(!actualTime && !!effectiveEstimatedTime && !estimatedTimeExpired);
+  const isEstimate = $derived(!actualTime && !!effectiveEstimatedTime && !estimatedTimeExpired && new Date(effectiveEstimatedTime).getTime() > Date.now());
 
   const isCompleted = $derived.by(() => {
     const s = flight.status?.toLowerCase() ?? '';
@@ -245,9 +246,14 @@
 
       <!-- Status & Delay - fixed width on mobile to prevent jumping -->
       <div class="flex items-center gap-2 shrink-0 ml-auto">
-        {#if formattedDelay}
-          <span class="text-sm font-bold text-red-600">+{formattedDelay}</span>
-        {:else if formattedEarly}
+        <DelayCounter
+          scheduledTime={scheduledTime}
+          estimatedTime={estimatedTime}
+          actualTime={actualTime}
+          isCompleted={isCompleted}
+          class="text-sm"
+        />
+        {#if !isCompleted && formattedEarly}
           <span class="text-sm font-bold text-green-600">{formattedEarly}</span>
         {/if}
 

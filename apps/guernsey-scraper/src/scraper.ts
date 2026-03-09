@@ -498,14 +498,15 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
   const actualArrival = scrapedFlight.type === 'arrivals'
     ? extractActualTime(scrapedFlight.statusUpdates, 'Landed')
     : null;
-
   const status = deriveStatus(scrapedFlight.statusUpdates, scrapedFlight.scheduledTime);
   const canceled = extractCanceled(scrapedFlight.statusUpdates);
-  // For departures, "Delayed To HH:MM" / "Approx HH:MM" refers to the new departure time.
-  // For arrivals, it refers to the new arrival time.
   const delayBaseTime = scrapedFlight.type === 'departures' ? scheduledDeparture : scheduledArrival;
-  const delayMinutes = extractDelayMinutes(scrapedFlight.statusUpdates, delayBaseTime);
   const estimatedTime = extractEstimatedTime(scrapedFlight.statusUpdates, delayBaseTime);
+  const delayMinutes = actualDeparture
+    ? Math.round((actualDeparture.getTime() - scheduledDeparture.getTime()) / 60_000)
+    : actualArrival
+      ? Math.round((actualArrival.getTime() - scheduledArrival.getTime()) / 60_000)
+      : extractDelayMinutes(scrapedFlight.statusUpdates, delayBaseTime);
 
   // Build the update set — only include fields that have data to avoid
   // overwriting richer data from other scrapers with nulls.
@@ -523,7 +524,7 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
     // This catches records created by other scrapers (e.g. numeric unique_ids from fr24)
     // and avoids creating duplicates.
     const existing = await db
-      .select({ id: flights.id, status: flights.status })
+      .select({ id: flights.id, status: flights.status, cancelledAt: flights.cancelledAt })
       .from(flights)
       .where(
         and(
@@ -532,16 +533,17 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
         ),
       )
       .limit(1);
-
     let flightId: number | null;
-
     if (existing.length > 0) {
-      // Safety net: don't downgrade status (e.g. stale re-parse overwriting Landed)
-      // Exception: allow "Delayed" → "Scheduled" when the approx time shows the flight
-      // is actually on-time (corrects earlier mis-classification)
       const isDelayedCorrection = existing[0].status === 'Delayed' && status === 'Scheduled';
       if (status && !isDelayedCorrection && !canUpgradeStatus(existing[0].status, status)) {
         delete updateSet.status;
+      }
+      if (isDelayedCorrection && delayMinutes === 0) {
+        updateSet.delayMinutes = 0;
+      }
+      if (canceled && !existing[0].cancelledAt) {
+        updateSet.cancelledAt = new Date();
       }
       // When correcting from Delayed to Scheduled, also clear stale delayMinutes
       if (isDelayedCorrection && delayMinutes === 0) {

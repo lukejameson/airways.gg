@@ -619,6 +619,7 @@ async function upsertFR24Flight(
         actualDeparture: flightsTable.actualDeparture,
         actualArrival: flightsTable.actualArrival,
         delayMinutes: flightsTable.delayMinutes,
+        cancelledAt: flightsTable.cancelledAt,
       })
       .from(flightsTable)
       .where(
@@ -647,7 +648,10 @@ async function upsertFR24Flight(
       if (status && (isDelayedCorrection || canUpgradeStatus(ex.status, status))) {
         updateSet.status = status;
       }
-      if (canceled) updateSet.canceled = canceled;
+      if (canceled) {
+        updateSet.canceled = canceled;
+        if (!ex.cancelledAt) updateSet.cancelledAt = new Date();
+      }
       if (actualDeparture && ex.actualDeparture == null) {
         updateSet.actualDeparture = actualDeparture;
       }
@@ -704,7 +708,7 @@ async function upsertFR24Flight(
       } else {
         console.log(`[FR24] Skipping EstimatedBlockOff/On write for flight ${flightId} — Guernsey airport has a newer estimate still in the future`);
       }
-    } else {
+    } else if (actualDeparture || actualArrival || isTerminalStatus(status ?? '')) {
       await db
         .delete(flightTimes)
         .where(
