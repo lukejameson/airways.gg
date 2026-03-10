@@ -219,6 +219,26 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
   index('push_subscriptions_flight_date_idx').on(table.flightDate),
 ]);
 
+export const historicalWeather = pgTable('historical_weather', {
+  id: serial('id').primaryKey(),
+  airportCode: varchar('airport_code', { length: 10 }).notNull(),
+  timestamp: timestamp('timestamp').notNull(),
+  temperature: real('temperature'),
+  windSpeed: real('wind_speed'),
+  windDirection: integer('wind_direction'),
+  visibility: real('visibility'),
+  cloudCover: integer('cloud_cover'),
+  precipitation: real('precipitation'),
+  pressure: real('pressure'),
+  weatherCode: integer('weather_code'),
+  source: varchar('source', { length: 50 }).notNull().default('open_meteo'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('historical_weather_unique_idx').on(table.airportCode, table.timestamp),
+  index('historical_weather_airport_idx').on(table.airportCode),
+  index('historical_weather_timestamp_idx').on(table.timestamp),
+]);
+
 export const notificationWatermark = pgTable('notification_watermark', {
   id: serial('id').primaryKey(),
   lastProcessedId: integer('last_processed_id').notNull().default(0),
