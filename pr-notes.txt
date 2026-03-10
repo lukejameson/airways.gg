@@ -11,9 +11,21 @@
 - FR24 estimated times no longer overwrite a Guernsey-sourced estimate that is still in the future
 
 ---
+## Weather Backfill Command
+DATABASE_URL=postgresql://... node scripts/weather-backfill.mjs --start YYYY-MM-DD --end YYYY-MM-DD
 
+# Specific airports only:
+DATABASE_URL=postgresql://... node scripts/weather-backfill.mjs --start YYYY-MM-DD --end YYYY-MM-DD --airports GCI,JER
+
+---
+## Backfill Command
+docker compose --profile backfill up guernsey-backfill
+
+# With date range:
+BACKFILL_START_DATE=2024-01-01 BACKFILL_END_DATE=2024-06-30 docker compose --profile backfill up guernsey-backfill
+
+---
 ## Social Post
-
 airways.gg just got smarter about delays
 
 When Guernsey Airport posts a status like "Flight Delayed Due Weather — Next Info 09:30", the flight page now shows exactly that in plain English, with the next update time front and centre. Low visibility and fog warnings also show up automatically when conditions are poor at either end of the route.

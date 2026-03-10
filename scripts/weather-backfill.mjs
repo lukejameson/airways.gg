@@ -1,5 +1,11 @@
 #!/usr/bin/env node
-import { Pool } from 'pg';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(resolve(__dirname, '../packages/database/package.json'));
+const { Pool } = require('pg');
 
 const AIRPORTS = {
   GCI: { lat: 49.4350, lon: -2.6014 },
