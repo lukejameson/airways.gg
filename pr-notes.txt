@@ -11,6 +11,10 @@
 - FR24 estimated times no longer overwrite a Guernsey-sourced estimate that is still in the future
 
 ---
+## Patch Visibility Command
+docker run --rm --network web -e DATABASE_URL=postgresql://... weather-backfill --start 2026-01-01 --end 2026-03-01 --airports GCI --patch-visibility
+
+---
 ## Weather Backfill Command
 # Build:
 docker build -f apps/weather-backfill/Dockerfile -t weather-backfill .
