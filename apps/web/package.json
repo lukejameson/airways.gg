@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "@airways/database": "*",
+    "chart.js": "^4.5.1",
     "dotenv": "^16.0.0",
     "leaflet": "^1.9.4",
     "pg": "^8.18.0"

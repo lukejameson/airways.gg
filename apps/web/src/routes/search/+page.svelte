@@ -29,10 +29,16 @@
     goto('/search');
   }
 
-  const hasSearch = $derived(!!data.query || !!data.date);
+  const hasSearch = $derived(!!data.query || !!data.date || !!data.from || !!data.to);
   const resultLabel = $derived(
     data.results.length === 1 ? '1 flight found' : `${data.results.length} flights found`,
   );
+  function clearRouteFilter() {
+    const params = new URLSearchParams();
+    if (queryInput) params.set('q', queryInput);
+    if (dateInput) params.set('date', dateInput);
+    goto(`/search${params.toString() ? '?' + params.toString() : ''}`);
+  }
 </script>
 
 <svelte:head>
@@ -90,9 +96,17 @@
   </form>
 
   {#if hasSearch}
-    <div class="flex items-center justify-between mb-4">
+    <div class="flex flex-wrap items-center gap-2 mb-4">
+      {#if data.from || data.to}
+        <span class="inline-flex items-center gap-1.5 rounded-full border bg-muted px-3 py-1 text-sm font-medium">
+          {data.from || '—'} → {data.to || '—'}
+          <button onclick={clearRouteFilter} class="ml-0.5 hover:text-foreground text-muted-foreground transition-colors" aria-label="Clear route filter">
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </span>
+      {/if}
       <p class="text-sm text-muted-foreground">
-        {#if data.query}Showing results for <strong class="text-foreground">"{data.query}"</strong>{/if}
+        {#if data.query}Results for <strong class="text-foreground">"{data.query}"</strong>{/if}
         {#if data.query && data.date} on {/if}
         {#if data.date}<strong class="text-foreground">{data.date}</strong>{/if}
         {#if data.results.length > 0} — {resultLabel}{/if}

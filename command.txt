@@ -1,0 +1,3 @@
+docker run --add-host=host.docker.internal:host-gateway \
+  -e DATABASE_URL=postgres://manga_user:manga_password@host.docker.internal:5432/airwaysgg \
+  weather-backfill --start 2026-01-01 --end 2026-03-01

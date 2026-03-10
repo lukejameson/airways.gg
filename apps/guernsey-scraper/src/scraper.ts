@@ -547,27 +547,56 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
   }
 }
 
+const SINGLETON_STATUS_PREFIXES = [
+  'landed',
+  'airborne',
+  'diverted',
+  'returned to stand',
+];
+
+function statusSingletonPrefix(msg: string): string | null {
+  const lower = msg.toLowerCase();
+  for (const prefix of SINGLETON_STATUS_PREFIXES) {
+    if (lower.startsWith(prefix)) return prefix;
+  }
+  return null;
+}
+
 function normaliseStatusMessage(msg: string): string {
   return msg.replace(/\bNext Info\s+(\d{2})(\d{2})\b/gi, (_, h, m) => `Next Info ${h}:${m}`);
 }
-
 async function saveStatusUpdates(updates: StatusUpdate[], flightId: number | null): Promise<number> {
   let saved = 0;
   for (const u of updates) {
     const statusMessage = normaliseStatusMessage(u.statusMessage);
     try {
       if (flightId !== null) {
-        const [{ n }] = await db
-          .select({ n: count() })
-          .from(flightStatusHistory)
-          .where(
-            and(
-              eq(flightStatusHistory.flightId, flightId),
-              eq(flightStatusHistory.source, 'guernsey_airport'),
-              eq(flightStatusHistory.statusMessage, statusMessage),
-            ),
-          );
-        if (n > 0) continue;
+        const singletonPrefix = statusSingletonPrefix(statusMessage);
+        if (singletonPrefix !== null) {
+          const existing = await db
+            .select({ msg: flightStatusHistory.statusMessage })
+            .from(flightStatusHistory)
+            .where(
+              and(
+                eq(flightStatusHistory.flightId, flightId),
+                eq(flightStatusHistory.source, 'guernsey_airport'),
+              ),
+            );
+          const alreadyHas = existing.some(r => r.msg.toLowerCase().startsWith(singletonPrefix));
+          if (alreadyHas) continue;
+        } else {
+          const [{ n }] = await db
+            .select({ n: count() })
+            .from(flightStatusHistory)
+            .where(
+              and(
+                eq(flightStatusHistory.flightId, flightId),
+                eq(flightStatusHistory.source, 'guernsey_airport'),
+                eq(flightStatusHistory.statusMessage, statusMessage),
+              ),
+            );
+          if (n > 0) continue;
+        }
       }
       await db
         .insert(flightStatusHistory)

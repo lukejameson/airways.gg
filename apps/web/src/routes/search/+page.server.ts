@@ -1,18 +1,16 @@
 import type { PageServerLoad } from './$types';
 import { db, flights } from '$lib/server/db';
-import { or, ilike, gte, lte, and } from 'drizzle-orm';
-
+import { or, ilike, gte, lte, and, eq } from 'drizzle-orm';
 export const load: PageServerLoad = async ({ url }) => {
   const query = url.searchParams.get('q')?.trim() ?? '';
   const dateParam = url.searchParams.get('date')?.trim() ?? '';
-
-  if (!query && !dateParam) {
-    return { results: [], query: '', date: '' };
+  const fromParam = url.searchParams.get('from')?.trim().toUpperCase() ?? '';
+  const toParam = url.searchParams.get('to')?.trim().toUpperCase() ?? '';
+  if (!query && !dateParam && !fromParam && !toParam) {
+    return { results: [], query: '', date: '', from: '', to: '' };
   }
-
   try {
     const conditions = [];
-
     if (query) {
       conditions.push(
         or(
@@ -23,7 +21,8 @@ export const load: PageServerLoad = async ({ url }) => {
         )!,
       );
     }
-
+    if (fromParam) conditions.push(eq(flights.departureAirport, fromParam));
+    if (toParam) conditions.push(eq(flights.arrivalAirport, toParam));
     if (dateParam) {
       const date = new Date(dateParam);
       if (!isNaN(date.getTime())) {
@@ -38,17 +37,15 @@ export const load: PageServerLoad = async ({ url }) => {
         );
       }
     }
-
     const results = await db
       .select()
       .from(flights)
       .where(conditions.length === 1 ? conditions[0] : and(...conditions))
       .orderBy(flights.scheduledDeparture)
-      .limit(50);
-
-    return { results, query, date: dateParam };
+      .limit(100);
+    return { results, query, date: dateParam, from: fromParam, to: toParam };
   } catch (err) {
     console.error('Search error:', err);
-    return { results: [], query, date: dateParam };
+    return { results: [], query, date: dateParam, from: fromParam, to: toParam };
   }
 };
