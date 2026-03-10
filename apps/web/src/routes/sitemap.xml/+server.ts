@@ -1,8 +1,9 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { db, flights } from '$lib/server/db';
 import { desc, gte } from 'drizzle-orm';
+import { env } from '$env/dynamic/private';
 
-const SITE_URL = 'https://airways.gg';
+const SITE_URL = `https://${env.DOMAIN ?? 'airways.gg'}`;
 
 // Cache the sitemap for 1 hour to avoid a DB query on every bot crawl
 let cachedSitemap: string | null = null;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invalidateAll, replaceState, goto } from '$app/navigation';
+  import { invalidateAll, goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { FlightBoard } from '$lib/components';
@@ -7,6 +7,7 @@
   import { airportName } from '$lib/airports';
   import Icon, { type IconName } from '$lib/components/Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
+  import { isFlightCompleted } from '$lib/status';
 
   let { data } = $props();
 
@@ -16,23 +17,25 @@
   let showCompleted = $state($page.url.searchParams.get('completed') === '1');
   let searchQuery = $state('');
   let isLoading = $state(true);
-  
+
   // Date navigation
   const displayDate = $derived(data.displayDate);
   const isViewingTomorrow = $derived(displayDate === data.tomorrowStr);
-  
+
   function navigateToDate(dateStr: string) {
-    // Clear "Next hour" filter when navigating to tomorrow (since it won't make sense)
     if (dateStr === data.tomorrowStr && activeFilters.includes('next-hour')) {
       activeFilters = activeFilters.filter(f => f !== 'next-hour');
     }
-    goto(`/?date=${dateStr}`);
+    const params = new URLSearchParams();
+    params.set('date', dateStr);
+    if (activeTab !== 'departures') params.set('tab', activeTab);
+    if (showCompleted) params.set('completed', '1');
+    goto(`/?${params.toString()}`);
   }
-  
   function goToToday() {
     navigateToDate(data.todayStr);
   }
-  
+
   function goToTomorrow() {
     navigateToDate(data.tomorrowStr);
   }
@@ -56,14 +59,13 @@
   );
 
   // Sync state from URL only when the URL path/search actually changes (back/forward nav)
-  let lastSeenUrl = $state($page.url.href);
+  let updatingUrl = false;
   $effect(() => {
-    const currentUrl = $page.url.href;
-    if (currentUrl === lastSeenUrl) return;
-    lastSeenUrl = currentUrl;
     const tab = $page.url.searchParams.get('tab');
+    const completed = $page.url.searchParams.get('completed');
+    if (updatingUrl) return;
     activeTab = tab === 'arrivals' ? 'arrivals' : 'departures';
-    showCompleted = $page.url.searchParams.get('completed') === '1';
+    showCompleted = completed === '1';
   });
 
   // Simulate loading state — resolves as soon as server data arrives,
@@ -86,24 +88,16 @@
 
   function updateUrl() {
     const params = new URLSearchParams();
-    // Preserve date parameter if not viewing today and displayDate is valid
     if (displayDate && displayDate !== data.todayStr) params.set('date', displayDate);
     if (activeTab !== 'departures') params.set('tab', activeTab);
     if (showCompleted) params.set('completed', '1');
     const query = params.toString();
-    replaceState(query ? `?${query}` : '/', {});
+    updatingUrl = true;
+    goto(query ? `?${query}` : '/', { replaceState: true, keepFocus: true, noScroll: true });
+    Promise.resolve().then(() => { updatingUrl = false; });
   }
 
-  const isCompleted = (f: (typeof data.flights)[0]) => {
-    if (f.canceled === true) return true;
-    const s = f.status?.toLowerCase() ?? '';
-    if (s.includes('landed') || s.includes('completed') || s.includes('diverted')) return true;
-    // Has a recorded actual arrival time — definitely on the ground
-    if (f.actualArrival) return true;
-    // Scheduled arrival was > 45 min ago — almost certainly landed even without a status update
-    if (new Date(f.scheduledArrival).getTime() < Date.now() - 45 * 60_000) return true;
-    return false;
-  };
+  const isCompleted = (f: (typeof data.flights)[0]) => isFlightCompleted(f);
 
   // An airborne departure has left GCI — hide it from the departures tab
   // (the plane is gone) but keep it visible in arrivals (it's en route).
@@ -323,7 +317,7 @@
       </svg>
       <span>Today</span>
     </button>
-    
+
     <span class="text-sm font-semibold text-foreground px-3">
       {#if isViewingTomorrow}
         Tomorrow
@@ -331,7 +325,7 @@
         Today
       {/if}
     </span>
-    
+
     <button
       onclick={goToTomorrow}
       disabled={displayDate === data.tomorrowStr}

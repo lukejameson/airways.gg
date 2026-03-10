@@ -3,6 +3,9 @@
   import { airportName } from '$lib/airports';
   import Icon, { type IconName } from './Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
+  import { shortenStatus, isFlightCompleted } from '$lib/status';
+  import { getStatusTone, STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from '$lib/statusConfig';
+  import DelayCounter from './DelayCounter.svelte';
 
   type Flight = typeof flights.$inferSelect & {
     estimatedDeparture?: string | null;
@@ -34,7 +37,7 @@
   function findClosestWeather(airportCode: string, targetTime: Date) {
     const weatherArray = weatherMap[airportCode];
     if (!weatherArray || weatherArray.length === 0) return null;
-    
+
     return weatherArray.reduce((closest: WeatherRow, current: WeatherRow) => {
       const closestDiff = Math.abs(new Date(closest.timestamp).getTime() - targetTime.getTime());
       const currentDiff = Math.abs(new Date(current.timestamp).getTime() - targetTime.getTime());
@@ -46,9 +49,9 @@
   function findDaylight(airportCode: string, targetTime: Date): DaylightData | null {
     const daylightArray = daylightMap[airportCode];
     if (!daylightArray || daylightArray.length === 0) return null;
-    
+
     const target = new Date(targetTime);
-    
+
     // Find the daylight data closest to the target time
     return daylightArray.reduce((closest: DaylightData | null, current: DaylightData) => {
       if (!closest) return current;
@@ -91,7 +94,7 @@
   const scheduledTime = $derived(isDeparture ? flight.scheduledDeparture : flight.scheduledArrival);
   const actualTime = $derived(isDeparture ? flight.actualDeparture : flight.actualArrival);
   const estimatedTime = $derived(isDeparture ? flight.estimatedDeparture : flight.estimatedArrival);
-  
+
   // Check if estimated time has passed but flight hasn't landed yet
   const estimatedTimeExpired = $derived.by(() => {
     if (!estimatedTime || actualTime) return false;
@@ -101,17 +104,14 @@
     // Check if estimated time has passed
     return new Date(estimatedTime).getTime() < Date.now();
   });
-  
+
   // Use estimated time only if it hasn't expired, otherwise fall back to scheduled
   const displayTime = $derived(actualTime ?? (estimatedTimeExpired ? null : estimatedTime));
   const otherAirport = $derived(isDeparture ? flight.arrivalAirport : flight.departureAirport);
   const delayMinutes = $derived(flight.delayMinutes ?? 0);
   const isEstimate = $derived(!actualTime && !!estimatedTime && !estimatedTimeExpired);
 
-  const isCompleted = $derived.by(() => {
-    const s = flight.status?.toLowerCase() ?? '';
-    return s === 'landed' || s === 'completed' || s.includes('diverted') || flight.canceled === true;
-  });
+  const isCompleted = $derived(isFlightCompleted(flight));
 
   // Calculate delay from available data (display time takes precedence over stored delayMinutes)
   const calculatedDelayMinutes = $derived.by(() => {
@@ -165,26 +165,7 @@
     return `${mins}m`;
   });
 
-  type BadgeTone = 'green' | 'yellow' | 'red' | 'blue' | 'purple' | 'orange' | 'gray';
-  const tone = $derived.by((): BadgeTone => {
-    const s = calculatedStatus?.toLowerCase() ?? '';
-    // Delayed: explicit delay, approx times, new ETD, expected, indefinite
-    if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
-        s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'yellow';
-    if (s.includes('cancel'))    return 'red';
-    // Diverted is a distinct state — not just landed
-    if (s.includes('diverted') || s.includes('diverting')) return 'orange';
-    if (s.includes('landed') || s.includes('airborne') || s.includes('completed')) return 'blue';
-    // Boarding: check-in, go to gate/departures, final call, door closed, wait in lounge
-    if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
-        s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
-        s.includes('door and gate') || s.includes('wait in lounge')) return 'purple';
-    if (s.includes('holding')) return 'blue'; // holding overhead = airborne
-    if (s.includes('on time') || s === 'scheduled') return 'green';
-    // PAX transfer messages are informational
-    if (s.includes('pax') || s.includes('passengers')) return 'green';
-    return 'gray';
-  });
+  const tone = $derived(getStatusTone(calculatedStatus, flight.canceled));
 
   // Weather for dep and arr airports - find closest to scheduled times
   const depWeather = $derived(findClosestWeather(flight.departureAirport, flight.scheduledDeparture));
@@ -247,35 +228,9 @@
 
         <!-- Status badge -->
         <div class="shrink-0">
-          {#if tone === 'yellow'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
-              <span class="h-2 w-2 rounded-full bg-amber-500"></span>{calculatedStatus}
-            </span>
-          {:else if tone === 'red'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-red-100 text-red-800 border border-red-300">
-              <span class="h-2 w-2 rounded-full bg-red-500"></span>{calculatedStatus}
-            </span>
-          {:else if tone === 'orange'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-orange-100 text-orange-800 border border-orange-300">
-              <span class="h-2 w-2 rounded-full bg-orange-500"></span>{calculatedStatus}
-            </span>
-          {:else if tone === 'blue'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300">
-              <span class="h-2 w-2 rounded-full bg-blue-500"></span>{calculatedStatus}
-            </span>
-          {:else if tone === 'purple'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-300">
-              <span class="h-2 w-2 rounded-full bg-purple-500"></span>{calculatedStatus}
-            </span>
-          {:else if tone === 'green'}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
-              <span class="h-2 w-2 rounded-full bg-green-500"></span>{calculatedStatus}
-            </span>
-          {:else}
-            <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-300">
-              <span class="h-2 w-2 rounded-full bg-gray-400"></span>{calculatedStatus}
-            </span>
-          {/if}
+          <span class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold border {STATUS_BADGE_CLASSES[tone]}">
+            <span class="h-2 w-2 rounded-full {STATUS_DOT_CLASSES[tone]}"></span>{shortenStatus(calculatedStatus)}
+          </span>
         </div>
       </div>
     </div>

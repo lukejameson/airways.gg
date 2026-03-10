@@ -12,7 +12,6 @@ services:
       dockerfile: apps/web/Dockerfile
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
       - ADDRESS_HEADER=CF-Connecting-IP
       - BODY_SIZE_LIMIT=10M
       - ML_SERVICE_URL=http://ml-service:8000
@@ -28,7 +27,6 @@ services:
     networks:
       - web
     restart: unless-stopped
-
   notification-service:
     build:
       context: .

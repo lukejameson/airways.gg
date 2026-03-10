@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
-import { db, flights, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus } from '@airways/database';
-import { eq, and, isNull, sql } from 'drizzle-orm';
+import { db, flights, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, routeFlightMinutes, locationToIata } from '@airways/database';
+import { eq, and, isNull, sql, count } from 'drizzle-orm';
 
 interface StatusUpdate {
   flightCode: string;
@@ -19,62 +19,91 @@ interface ScrapedFlight {
 }
 
 const BASE_URL = process.env.GUERNSEY_AIRPORT_URL || 'https://www.airport.gg';
+const API_URL = process.env.GUERNSEY_API_URL || 'https://www.airport.gg/arr-dep/json';
+const API_KEY = process.env.GUERNSEY_API_KEY;
+if (!API_KEY) throw new Error('GUERNSEY_API_KEY environment variable is required');
+
+interface ApiFlightEntry {
+  flight_time: string;
+  flight_comment: string;
+  flight_date: string;
+  last_updated: string;
+  flight_numbers: string[];
+  flight_locations: string[];
+  airlines: string[];
+}
+
+interface ApiResponse {
+  arrivals: ApiFlightEntry[];
+  departures: ApiFlightEntry[];
+}
+
+async function fetchApiData(): Promise<ApiResponse> {
+  const url = `${API_URL}?key=${API_KEY}`;
+  console.log(`[Guernsey] Fetching API data → ${url}`);
+  const response = await fetch(url, {
+    headers: {
+      'Accept': 'application/json',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} from Guernsey API`);
+  }
+  return response.json() as Promise<ApiResponse>;
+}
+
+function mapApiEntriesToScrapedFlights(
+  entries: ApiFlightEntry[],
+  type: 'arrivals' | 'departures',
+  filterDate?: string,
+): ScrapedFlight[] {
+  const results: ScrapedFlight[] = [];
+  for (const entry of entries) {
+    if (filterDate && entry.flight_date !== filterDate) continue;
+    if (!entry.flight_numbers || entry.flight_numbers.length === 0) continue;
+
+    const timeParts = entry.flight_time.match(/^(\d{1,2}):(\d{2})$/);
+    if (!timeParts) continue;
+    const hh = parseInt(timeParts[1]);
+    const mm = parseInt(timeParts[2]);
+
+    const scheduledTime = new Date(`${entry.flight_date}T00:00:00Z`);
+    scheduledTime.setUTCHours(hh, mm, 0, 0);
+
+    const location = entry.flight_locations.join(', ');
+    const codes = entry.flight_numbers;
+    const statusUpdates: StatusUpdate[] = [];
+
+    if (entry.flight_comment) {
+      const lastUpdated = parseInt(entry.last_updated, 10);
+      const statusTimestamp = isNaN(lastUpdated) ? new Date() : new Date(lastUpdated * 1000);
+      for (const flightCode of codes) {
+        statusUpdates.push({
+          flightCode,
+          flightDate: entry.flight_date,
+          statusTimestamp,
+          statusMessage: entry.flight_comment,
+        });
+      }
+    }
+
+    results.push({
+      location,
+      codes,
+      scheduledTime,
+      flightDate: entry.flight_date,
+      type,
+      statusUpdates,
+    });
+  }
+  return results;
+}
 
 // Known typical flight times in minutes for routes from/to GCI.
 // Used to estimate scheduledDeparture/scheduledArrival when only one end is known.
-const ROUTE_FLIGHT_MINUTES: Record<string, number> = {
-  ACI: 10,
-  JER: 15,
-  LGW: 55,
-  LCY: 55,
-  MAN: 60,
-  BRS: 40,
-  SOU: 30,
-  EXT: 40,
-  BHX: 65,
-  CDG: 45,
-  EMA: 65,
-  DUB: 60,
-  EDI: 75,
-};
 
-function routeFlightMinutes(iata: string): number {
-  return ROUTE_FLIGHT_MINUTES[iata] ?? 60;
-}
 
 // Map Guernsey Airport location display names → IATA codes
-const LOCATION_TO_IATA: Record<string, string> = {
-  'Alderney': 'ACI',
-  'Jersey': 'JER',
-  'London Gatwick': 'LGW',
-  'Gatwick': 'LGW',
-  'London City': 'LCY',
-  'Manchester': 'MAN',
-  'Bristol': 'BRS',
-  'Bristol, Exeter': 'BRS',
-  'Exeter, Bristol': 'BRS',
-  'Exeter': 'EXT',
-  'Birmingham': 'BHX',
-  'Southampton': 'SOU',
-  'Paris': 'CDG',
-  'Paris - Charles De Gaulle': 'CDG',
-  'Paris Charles De Gaulle': 'CDG',
-  'East Midlands': 'EMA',
-  'Dublin': 'DUB',
-  'Edinburgh': 'EDI',
-  'Guernsey': 'GCI',
-};
-
-function locationToIata(location: string): string {
-  // Exact match first
-  if (LOCATION_TO_IATA[location]) return LOCATION_TO_IATA[location];
-  // Partial match — handles multi-stop strings like "Bristol, Exeter"
-  for (const [name, iata] of Object.entries(LOCATION_TO_IATA)) {
-    if (location.toLowerCase().includes(name.toLowerCase())) return iata;
-  }
-  // Unknown — return a truncated slug so it still stores
-  return location.slice(0, 10).toUpperCase().replace(/\s+/g, '');
-}
 
 // Derive airline code from the primary flight code (first two non-numeric chars)
 // Skybus (SI) and Blue Islands AT6 series (AT) are codeshares under Aurigny (GR)
@@ -455,7 +484,6 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
       if (status && !isDelayedCorrection && !canUpgradeStatus(existing[0].status, status)) {
         delete updateSet.status;
       }
-      // When correcting from Delayed to Scheduled, also clear stale delayMinutes
       if (isDelayedCorrection && delayMinutes === 0) {
         updateSet.delayMinutes = 0;
       }

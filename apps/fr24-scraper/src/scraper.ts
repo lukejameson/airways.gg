@@ -1,6 +1,6 @@
 import { connect } from 'puppeteer-real-browser';
 import type { Browser, Page } from 'rebrowser-puppeteer-core';
-import { db, flights as flightsTable, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, isTerminalStatus } from '@airways/database';
+import { db, flights as flightsTable, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, isTerminalStatus, routeFlightMinutes, ROUTE_FLIGHT_MINUTES } from '@airways/database';
 import { eq, and } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
@@ -76,14 +76,7 @@ async function simulateHumanBehavior(page: Page): Promise<void> {
 // Guernsey-scraper-style location helpers
 // ---------------------------------------------------------------------------
 
-const ROUTE_FLIGHT_MINUTES: Record<string, number> = {
-  ACI: 10, JER: 15, LGW: 55, LCY: 55, MAN: 60, BRS: 40, SOU: 30,
-  EXT: 40, BHX: 65, CDG: 45, EMA: 65, DUB: 60, EDI: 75,
-};
 
-function routeFlightMinutes(iata: string): number {
-  return ROUTE_FLIGHT_MINUTES[iata] ?? 60;
-}
 
 // ---------------------------------------------------------------------------
 // Parsed flight type

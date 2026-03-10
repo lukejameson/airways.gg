@@ -5,6 +5,7 @@ import * as schema from './schema';
 // Re-export schema types and table objects — safe to import anywhere
 export * from './schema';
 export { canUpgradeStatus, isTerminalStatus } from './statusPriority';
+export { ROUTE_FLIGHT_MINUTES, LOCATION_TO_IATA, routeFlightMinutes, locationToIata } from './constants';
 
 export type DbClient = ReturnType<typeof drizzle<typeof schema>>;
 

@@ -6,9 +6,12 @@
   import Icon from '$lib/components/Icon.svelte';
   import type { IconName } from '$lib/components/Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
+  import { shortenStatus, statusHasDetail, extractDelayReason, isFlightCompleted } from '$lib/status';
+  import { getStatusTone, STATUS_TEXT_CLASSES, STATUS_DOT_CLASSES, STATUS_PILL_CLASSES } from '$lib/statusConfig';
+  import DelayCounter from '$lib/components/DelayCounter.svelte';
 
   let { data }: { data: PageData } = $props();
-  
+
   // Get return tab from URL query param
   const returnTab = $derived($page.url.searchParams.get('tab') ?? '');
 
@@ -45,7 +48,7 @@
   const displayTime = $derived(actualTime ?? estimatedTime);
   const otherAirport = $derived(isDeparture ? flight.arrivalAirport : flight.departureAirport);
   const delayMinutes = $derived(flight.delayMinutes ?? 0);
-  
+
   // Calculate delay from times if available
   const calculatedDelayMinutes = $derived.by(() => {
     if (delayMinutes > 0) return delayMinutes;
@@ -133,19 +136,16 @@
     }
   }
 
-  function rotationStatusTone(status: string | null): string {
-    const s = status?.toLowerCase() ?? '';
-    if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
-        s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'yellow';
-    if (s.includes('cancel')) return 'red';
-    if (s.includes('diverted') || s.includes('diverting')) return 'orange';
-    if (s.includes('landed') || s.includes('completed')) return 'blue';
-    if (s.includes('airborne') || s.includes('holding')) return 'green';
-    if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
-        s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
-        s.includes('door and gate') || s.includes('wait in lounge')) return 'purple';
-    return 'gray';
+  function rotationDelayDelta(delayMinutes: number | null): string | null {
+    if (!delayMinutes || delayMinutes <= 0) return null;
+    const hrs = Math.floor(delayMinutes / 60);
+    const mins = delayMinutes % 60;
+    if (hrs > 0 && mins > 0) return `+${hrs}h ${mins}m`;
+    if (hrs > 0) return `+${hrs}h`;
+    return `+${mins}m`;
   }
+  const rotationStatusTone = (status: string | null, canceled?: boolean | null) =>
+    getStatusTone(status, canceled);
 
   $effect(() => {
     if (browser && hasPosition && !FlightMapComponent) {
@@ -172,15 +172,15 @@
     return bestDist < 30 ? best : null;
   }
 
-  /** 
+  /**
    * Find the most recently landed flight in the rotation before the current flight.
    * Uses actual_arrival if available, otherwise falls back to scheduled_arrival for ordering.
    */
   function getMostRecentLandedRotationFlight() {
     if (!rotationFlights || rotationFlights.length === 0) return null;
-    
+
     const currentFlightDep = new Date(flight.scheduledDeparture).getTime();
-    
+
     const landedBefore = rotationFlights.filter(f => {
       const status = f.status?.toLowerCase() || '';
       const isLanded = status.includes('landed') || status.includes('completed');
@@ -188,9 +188,9 @@
       const depTime = new Date(f.scheduledDeparture).getTime();
       return isLanded && depTime < currentFlightDep;
     });
-    
+
     if (landedBefore.length === 0) return null;
-    
+
     // Sort by actual_arrival desc (most recently landed first), fall back to scheduled
     return landedBefore.sort((a, b) => {
       const aTime = a.actualArrival ? new Date(a.actualArrival).getTime() : new Date(a.scheduledArrival).getTime();
@@ -199,7 +199,7 @@
     })[0];
   }
 
-  /** 
+  /**
    * Return the best known location for the aircraft.
    * Rotation data is more up-to-date than stale inferred positions,
    * so if the most recent landed rotation flight arrived AFTER the
@@ -225,21 +225,21 @@
     if (!position) return false;
     // Only applies to inferred positions — live positions are always trusted
     if (!position.fr24Id?.startsWith('INFERRED_')) return false;
-    
+
     const mostRecent = getMostRecentLandedRotationFlight();
     if (!mostRecent) return false;
-    
+
     // Compare arrival time of the rotation's most recent flight vs the inferred position timestamp
     const rotationArrival = mostRecent.actualArrival
       ? new Date(mostRecent.actualArrival).getTime()
       : new Date(mostRecent.scheduledArrival).getTime();
     const inferredAt = new Date(position.positionTimestamp).getTime();
-    
+
     // Rotation is newer if the flight arrived after the inferred position was recorded,
     // OR if the inferred position airport doesn't match the rotation's conclusion
     const rotationAirport = mostRecent.arrivalAirport;
     const inferredAirport = position.destIata ?? null;
-    
+
     return rotationArrival > inferredAt || rotationAirport !== inferredAirport;
   });
 
@@ -307,9 +307,7 @@
   }
 
   const isEstimate = $derived(!actualTime && !!estimatedTime);
-
-  // True when the flight is pre-departure: hasn't taken off and not in a terminal/airborne state.
-  // Used to show a meaningful "on the ground at departure airport" fallback when no position is tracked.
+  const isCompleted = $derived(isFlightCompleted(flight));
   const isPreDeparture = $derived(
     !flight.actualDeparture &&
     !['airborne', 'taxiing', 'landed', 'completed', 'cancelled', 'canceled']
@@ -341,35 +339,10 @@
     });
   }
 
-  function getStatusColor(status: string | null | undefined): string {
-    const s = status?.toLowerCase() || '';
-    if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
-        s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'text-yellow-600';
-    if (s.includes('cancelled') || s.includes('canceled')) return 'text-red-600';
-    if (s.includes('diverted') || s.includes('diverting')) return 'text-orange-600';
-    if (s.includes('landed') || s.includes('airborne') || s.includes('completed') || s.includes('holding')) return 'text-blue-600';
-    if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
-        s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
-        s.includes('door and gate') || s.includes('wait in lounge')) return 'text-purple-600';
-    if (s.includes('on time') || s === 'scheduled') return 'text-green-600';
-    if (s.includes('pax') || s.includes('passengers')) return 'text-green-600';
-    return 'text-muted-foreground';
-  }
-
-  function getStatusDotColor(status: string | null | undefined): string {
-    const s = status?.toLowerCase() || '';
-    if (s.includes('delayed') || s.startsWith('approx') || s.includes('new etd') ||
-        s.includes('expected at') || s.includes('indefini') || s.includes('next info')) return 'bg-yellow-500';
-    if (s.includes('cancelled') || s.includes('canceled')) return 'bg-red-500';
-    if (s.includes('diverted') || s.includes('diverting')) return 'bg-orange-500';
-    if (s.includes('landed') || s.includes('airborne') || s.includes('completed') || s.includes('holding')) return 'bg-blue-500';
-    if (s.includes('boarding') || s.includes('check in open') || s.includes('check-in open') ||
-        s.includes('go to') || s.includes('final call') || s.includes('gate closed') ||
-        s.includes('door and gate') || s.includes('wait in lounge')) return 'bg-purple-500';
-    if (s.includes('on time') || s === 'scheduled') return 'bg-green-500';
-    if (s.includes('pax') || s.includes('passengers')) return 'bg-green-500';
-    return 'bg-gray-400';
-  }
+  const getStatusColor = (status: string | null | undefined, canceled?: boolean | null) =>
+    STATUS_TEXT_CLASSES[getStatusTone(status, canceled)];
+  const getStatusDotColor = (status: string | null | undefined, canceled?: boolean | null) =>
+    STATUS_DOT_CLASSES[getStatusTone(status, canceled)];
 
   let shareSuccess = $state(false);
 
@@ -403,7 +376,7 @@
       text: `Track ${flight.flightNumber} from ${airportName(flight.departureAirport)} to ${airportName(flight.arrivalAirport)}`,
       url: window.location.href,
     };
-    
+
     if (navigator.share) {
       try {
         await navigator.share(shareData);
@@ -478,13 +451,13 @@
         {flight.airlineCode}
       </span>
     </div>
-    
+
     <p class="text-base sm:text-lg text-muted-foreground">
       {isDeparture ? 'to' : 'from'}
       <span class="font-semibold text-foreground">{airportName(otherAirport)}</span>
       <span class="hidden sm:inline text-muted-foreground/50">({otherAirport})</span>
     </p>
-    
+
     <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
       <span class="text-muted-foreground">{shortDate(flight.flightDate)}</span>
       <span class="opacity-30 hidden sm:inline">·</span>
@@ -550,7 +523,7 @@
     {@const isInferred = position.fr24Id?.startsWith('INFERRED_')}
     <div class="rounded-lg border bg-card mb-6 overflow-hidden">
       <!-- Header with toggle -->
-      <button 
+      <button
         class="w-full px-4 py-3 flex items-center justify-between gap-4 hover:bg-muted/50 transition-colors text-left"
         onclick={toggleMap}
       >
@@ -616,15 +589,15 @@
           {#if mapExpanded}
             <span class="text-xs text-muted-foreground">{timeSince(position.positionTimestamp)}</span>
           {/if}
-          <svg 
-            xmlns="http://www.w3.org/2000/svg" 
-            width="20" 
-            height="20" 
-            viewBox="0 0 24 24" 
-            fill="none" 
-            stroke="currentColor" 
-            stroke-width="2" 
-            stroke-linecap="round" 
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
             stroke-linejoin="round"
             class="text-muted-foreground transition-transform duration-200 {mapExpanded ? 'rotate-180' : ''}"
           >
@@ -750,7 +723,8 @@
               <tbody>
                 {#each rotationFlights as rf}
                   {@const isCurrent = rf.id === flight.id}
-                  {@const tone = rotationStatusTone(rf.status)}
+                  {@const tone = rotationStatusTone(rf.status, rf.canceled)}
+                  {@const delayDelta = rotationDelayDelta(rf.delayMinutes)}
                   <tr
                     data-current={isCurrent}
                     class="border-t border-border/50 transition-colors
@@ -795,21 +769,9 @@
                       {/if}
                     </td>
                     <td class="px-4 py-2.5 text-right">
-                      {#if tone === 'blue'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700">{rf.status}</span>
-                      {:else if tone === 'green'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700">{rf.status}</span>
-                      {:else if tone === 'yellow'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">{rf.status}</span>
-                      {:else if tone === 'red'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">{rf.status}</span>
-                      {:else if tone === 'purple'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700">{rf.status}</span>
-                      {:else if tone === 'orange'}
-                        <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">{rf.status}</span>
-                      {:else}
-                        <span class="text-muted-foreground text-xs">{rf.status ?? 'Scheduled'}</span>
-                      {/if}
+                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium {STATUS_PILL_CLASSES[tone]}">
+                        {shortenStatus(rf.status) ?? 'Scheduled'}{#if delayDelta} · {delayDelta}{/if}
+                      </span>
                     </td>
                   </tr>
                 {/each}
@@ -820,7 +782,8 @@
             <div class="md:hidden divide-y divide-border">
               {#each rotationFlights as rf}
                 {@const isCurrent = rf.id === flight.id}
-                {@const tone = rotationStatusTone(rf.status)}
+                {@const tone = rotationStatusTone(rf.status, rf.canceled)}
+                {@const delayDelta = rotationDelayDelta(rf.delayMinutes)}
                 {@const depShort = airportName(rf.departureAirport)}
                 {@const arrShort = airportName(rf.arrivalAirport)}
                 <a
@@ -836,24 +799,12 @@
                         <span class="text-[10px] font-bold uppercase tracking-wide text-primary opacity-70">this flight</span>
                       {/if}
                     </div>
-                    {#if tone === 'blue'}
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700">{rf.status}</span>
-                    {:else if tone === 'green'}
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 text-green-700">{rf.status}</span>
-                    {:else if tone === 'yellow'}
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700">{rf.status}</span>
-                    {:else if tone === 'red'}
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">{rf.status}</span>
-                    {:else if tone === 'purple'}
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700">{rf.status}</span>
-                    {:else if tone === 'orange'}
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">{rf.status}</span>
-                    {:else}
-                      <span class="text-muted-foreground text-xs">{rf.status ?? 'Scheduled'}</span>
-                    {/if}
+                    <div>
+                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium {STATUS_PILL_CLASSES[tone]}">
+                        {shortenStatus(rf.status) ?? 'Scheduled'}{#if delayDelta} · {delayDelta}{/if}
+                      </span>
+                    </div>
                   </div>
-
-                  <!-- Route: From -> To -->
                   <div class="flex items-center gap-2 text-sm mb-2">
                     <span class="font-medium text-foreground">{depShort}</span>
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
