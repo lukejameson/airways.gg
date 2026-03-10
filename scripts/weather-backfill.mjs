@@ -33,21 +33,22 @@ const HOURLY_VARS = [
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  let start, end, airports;
+  let start, end, airports, patchVisibility = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--start') start = args[++i];
     else if (args[i] === '--end') end = args[++i];
     else if (args[i] === '--airports') airports = args[++i].split(',').map(s => s.trim().toUpperCase());
+    else if (args[i] === '--patch-visibility') patchVisibility = true;
   }
   if (!start || !end) {
-    console.error('Usage: node weather-backfill.mjs --start YYYY-MM-DD --end YYYY-MM-DD [--airports GCI,JER,LGW]');
+    console.error('Usage: node weather-backfill.mjs --start YYYY-MM-DD --end YYYY-MM-DD [--airports GCI,JER,LGW] [--patch-visibility]');
     process.exit(1);
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
     console.error('Dates must be in YYYY-MM-DD format');
     process.exit(1);
   }
-  return { start, end, airports: airports || Object.keys(AIRPORTS) };
+  return { start, end, airports: airports || Object.keys(AIRPORTS), patchVisibility };
 }
 
 async function getExistingDates(pool, airportCode) {
@@ -214,12 +215,35 @@ async function insertRows(pool, airportCode, data, visMap) {
   return inserted;
 }
 
+async function patchVisibilityForRange(pool, airportCode, icao, start, end) {
+  console.log(`[${airportCode}] Fetching METAR visibility from IEM for ${start} → ${end}...`);
+  const visMap = await fetchIemVisibility(icao, start, end);
+  if (!visMap.size) {
+    console.log(`[${airportCode}] No visibility data returned from IEM`);
+    return 0;
+  }
+  const entries = [...visMap.entries()];
+  const BATCH = 100;
+  let updated = 0;
+  for (let i = 0; i < entries.length; i += BATCH) {
+    const batch = entries.slice(i, i + BATCH);
+    for (const [tsIso, vis] of batch) {
+      await pool.query(
+        `UPDATE historical_weather SET visibility = $1 WHERE airport_code = $2 AND timestamp = $3`,
+        [vis, airportCode, new Date(tsIso)],
+      );
+      updated++;
+    }
+  }
+  return updated;
+}
+
 async function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
 async function main() {
-  const { start, end, airports } = parseArgs();
+  const { start, end, airports, patchVisibility } = parseArgs();
 
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) { console.error('DATABASE_URL is not set'); process.exit(1); }
@@ -234,6 +258,23 @@ async function main() {
   if (unknown.length) { console.error(`Unknown airports: ${unknown.join(', ')}`); process.exit(1); }
 
   let totalInserted = 0;
+
+  if (patchVisibility) {
+    console.log('Mode: patch visibility only');
+    for (const code of airports) {
+      const { icao } = AIRPORTS[code];
+      try {
+        const updated = await patchVisibilityForRange(pool, code, icao, start, end);
+        console.log(`[${code}] Updated ${updated} rows with visibility`);
+      } catch (err) {
+        console.error(`[${code}] Visibility patch failed: ${err.message}`);
+      }
+      await sleep(500);
+    }
+    console.log('\nDone.');
+    await pool.end();
+    return;
+  }
 
   for (const code of airports) {
     const { icao } = AIRPORTS[code];
