@@ -20,8 +20,11 @@ interface ScrapedFlight {
 
 const BASE_URL = process.env.GUERNSEY_AIRPORT_URL || 'https://www.airport.gg';
 const API_URL = process.env.GUERNSEY_API_URL || 'https://www.airport.gg/arr-dep/json';
-const API_KEY = process.env.GUERNSEY_API_KEY;
-if (!API_KEY) throw new Error('GUERNSEY_API_KEY environment variable is required');
+function getApiKey(): string {
+  const key = process.env.GUERNSEY_API_KEY;
+  if (!key) throw new Error('GUERNSEY_API_KEY environment variable is required');
+  return key;
+}
 
 interface ApiFlightEntry {
   flight_time: string;
@@ -39,7 +42,7 @@ interface ApiResponse {
 }
 
 async function fetchApiData(): Promise<ApiResponse> {
-  const url = `${API_URL}?key=${API_KEY}`;
+  const url = `${API_URL}?key=${getApiKey()}`;
   console.log(`[Guernsey] Fetching API data → ${url}`);
   const response = await fetch(url, {
     headers: {
