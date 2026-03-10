@@ -6,7 +6,6 @@
   import Icon from '$lib/components/Icon.svelte';
   import type { IconName } from '$lib/components/Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
-  import NotifyButton from '$lib/components/NotifyButton.svelte';
 
   let { data }: { data: PageData } = $props();
   
@@ -449,7 +448,7 @@
     </a>
 
     <div class="flex items-center gap-1">
-      <NotifyButton flightId={flight.id} flightCode={flight.flightNumber} flightDate={flight.flightDate} />
+
 
       <button
         onclick={shareFlight}
