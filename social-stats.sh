@@ -3,7 +3,7 @@ CONTAINER=${1:-<container>}
 USER=${2:-<username>}
 
 run() {
-  docker exec -it "$CONTAINER" psql -U "$USER" -c "$1"
+  docker exec -it "$CONTAINER" psql -U "$USER" -d airwaysgg -c "$1"
 }
 
 echo "===== DELAY RECORDS ====="
