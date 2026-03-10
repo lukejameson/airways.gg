@@ -126,18 +126,8 @@ LIMIT 15;
 
 echo "===== DAILY AIRCRAFT ROTATION ====="
 run "
-WITH daily_flights AS (
-  SELECT
-    aircraft_registration,
-    flight_date,
-    COUNT(*) FILTER (WHERE canceled = false) AS legs,
-    MIN(scheduled_departure) AS first_dep,
-    MAX(scheduled_arrival)   AS last_arr,
-    EXTRACT(EPOCH FROM (MAX(scheduled_arrival) - MIN(scheduled_departure))) / 3600 AS day_span_hours,
-    STRING_AGG(
-      departure_airport || '-' || arrival_airport,
-      ' → ' ORDER BY scheduled_departure
-    ) FILTER (WHERE canceled = false) AS rotation
+WITH daily AS (
+  SELECT aircraft_registration, flight_date, COUNT(*) AS legs
   FROM flights
   WHERE flight_date >= CURRENT_DATE - INTERVAL '3 months'
     AND airline_code = 'GR'
@@ -147,36 +137,14 @@ WITH daily_flights AS (
 )
 SELECT
   aircraft_registration,
-  ROUND(AVG(legs), 1)            AS avg_legs_per_day,
-  MAX(legs)                      AS max_legs_in_day,
-  ROUND(AVG(day_span_hours), 1)  AS avg_day_span_hours,
-  COUNT(DISTINCT flight_date)    AS days_operated,
-  MODE() WITHIN GROUP (ORDER BY legs) AS typical_legs
-FROM daily_flights
+  COUNT(DISTINCT flight_date)          AS days_operated,
+  ROUND(AVG(legs), 1)                  AS avg_flights_per_day,
+  MIN(legs)                            AS min_flights_per_day,
+  MAX(legs)                            AS max_flights_per_day,
+  MODE() WITHIN GROUP (ORDER BY legs)  AS most_common_flights_per_day
+FROM daily
 GROUP BY aircraft_registration
-ORDER BY avg_legs_per_day DESC;
-"
-
-echo "===== BUSIEST SINGLE DAY PER AIRCRAFT ====="
-run "
-SELECT
-  aircraft_registration,
-  flight_date,
-  COUNT(*) AS legs,
-  MIN(scheduled_departure)::time AS first_dep,
-  MAX(scheduled_arrival)::time   AS last_arr,
-  STRING_AGG(
-    departure_airport || '-' || arrival_airport,
-    ' → ' ORDER BY scheduled_departure
-  ) AS rotation
-FROM flights
-WHERE flight_date >= CURRENT_DATE - INTERVAL '3 months'
-  AND airline_code = 'GR'
-  AND aircraft_registration IS NOT NULL
-  AND canceled = false
-GROUP BY aircraft_registration, flight_date
-ORDER BY legs DESC
-LIMIT 10;
+ORDER BY avg_flights_per_day DESC;
 "
 
 echo "===== DELAYS BY WIND SPEED (GCI) ====="
