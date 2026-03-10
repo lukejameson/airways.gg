@@ -750,23 +750,38 @@ async function scrapeDateRange(
  * Used by live mode to poll today (and optionally tomorrow).
  */
 export async function scrapeDayFlights(date: Date): Promise<{ flights: number; updates: number }> {
-  const html = await fetchDayHtml(date);
+  const dateStr = date.toISOString().slice(0, 10);
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+  const tomorrowDate = new Date();
+  tomorrowDate.setUTCDate(tomorrowDate.getUTCDate() + 1);
+  const tomorrowStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(tomorrowDate);
+  const isLiveDate = dateStr === todayStr;
   let totalFlights = 0;
   let totalUpdates = 0;
-
+  if (isLiveDate) {
+    const apiData = await fetchApiData();
+    for (const type of ['arrivals', 'departures'] as const) {
+      const entries = type === 'arrivals' ? apiData.arrivals : apiData.departures;
+      const scrapedFlights = mapApiEntriesToScrapedFlights(entries, type, dateStr);
+      totalFlights += scrapedFlights.length;
+      for (const flight of scrapedFlights) {
+        const flightId = await upsertFlight(flight);
+        totalUpdates += await saveStatusUpdates(flight.statusUpdates, flightId);
+      }
+    }
+    return { flights: totalFlights, updates: totalUpdates };
+  }
+  const html = await fetchDayHtml(date);
   for (const type of ['arrivals', 'departures'] as const) {
     const scrapedFlights = parseFlightHtml(html, date, type);
     totalFlights += scrapedFlights.length;
-
     for (const flight of scrapedFlights) {
       const flightId = await upsertFlight(flight);
       totalUpdates += await saveStatusUpdates(flight.statusUpdates, flightId);
     }
   }
-
   return { flights: totalFlights, updates: totalUpdates };
 }
-
 export async function runBackfill(
   startDateStr?: string,
   endDateStr?: string,
