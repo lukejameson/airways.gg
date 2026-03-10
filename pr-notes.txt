@@ -12,10 +12,14 @@
 
 ---
 ## Weather Backfill Command
-DATABASE_URL=postgresql://... node scripts/weather-backfill.mjs --start YYYY-MM-DD --end YYYY-MM-DD
+# Build:
+docker build -f apps/weather-backfill/Dockerfile -t weather-backfill .
+
+# Run:
+docker run --rm --network web -e DATABASE_URL=postgresql://... weather-backfill --start YYYY-MM-DD --end YYYY-MM-DD
 
 # Specific airports only:
-DATABASE_URL=postgresql://... node scripts/weather-backfill.mjs --start YYYY-MM-DD --end YYYY-MM-DD --airports GCI,JER
+docker run --rm --network web -e DATABASE_URL=postgresql://... weather-backfill --start YYYY-MM-DD --end YYYY-MM-DD --airports GCI,JER
 
 ---
 ## Backfill Command
