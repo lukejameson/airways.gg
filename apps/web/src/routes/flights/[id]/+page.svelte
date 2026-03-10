@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import { browser } from '$app/environment';
+  import { invalidateAll } from '$app/navigation';
+  import { onDestroy } from 'svelte';
   import { page } from '$app/stores';
   import { airportName, getAirportCoords, getAirportsForNearestSearch } from '$lib/airports';
   import Icon from '$lib/components/Icon.svelte';
@@ -64,7 +66,8 @@
     // If flight is already landed/airborne/boarding/cancelled, trust that status
     const currentStatus = flight.status?.toLowerCase() ?? '';
     if (currentStatus.includes('landed') || currentStatus.includes('completed') ||
-        currentStatus.includes('airborne') || currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
+        currentStatus.includes('airborne') || currentStatus.includes('taxiing') ||
+        currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
       return flight.status;
     }
 
@@ -313,6 +316,25 @@
     !['airborne', 'taxiing', 'landed', 'completed', 'cancelled', 'canceled']
       .some(s => flight.status?.toLowerCase().includes(s))
   );
+  const delayReason = $derived.by(() => {
+    if (!isDeparture) return null;
+    const s = flight.status?.toLowerCase() ?? '';
+    if (s.includes('airborne') || s.includes('landed') || s.includes('completed') || s.includes('taxiing') || s.includes('diverted') || s.includes('diverting')) return null;
+    const fromStatus = extractDelayReason(flight.status);
+    if (fromStatus) return fromStatus;
+    const guernseyEntries = statusHistory.filter((e: { source: string }) => e.source === 'guernsey_airport');
+    for (const entry of [...guernseyEntries].reverse()) {
+      const r = extractDelayReason((entry as { statusMessage: string }).statusMessage);
+      if (r) return r;
+    }
+    return null;
+  });
+  const fogAirport = $derived.by(() => {
+    if (depWeather?.visibility != null && depWeather.visibility <= 5) return { code: flight.departureAirport, visibility: depWeather.visibility };
+    if (arrWeather?.visibility != null && arrWeather.visibility <= 5) return { code: flight.arrivalAirport, visibility: arrWeather.visibility };
+    return null;
+  });
+  const showFogWarning = $derived(!flight.canceled && fogAirport != null);
 
   function formatTime(date: string | Date | null | undefined): string {
     if (!date) return '--:--';
@@ -347,6 +369,16 @@
   let shareSuccess = $state(false);
 
   // Save to recently viewed
+  let refreshInterval: ReturnType<typeof setInterval> | null = null;
+  $effect(() => {
+    if (browser) {
+      refreshInterval = setInterval(() => { invalidateAll(); }, 60_000);
+    }
+    return () => {
+      if (refreshInterval) clearInterval(refreshInterval);
+    };
+  });
+
   $effect(() => {
     if (browser) {
       const key = 'recentlyViewedFlights';
@@ -461,18 +493,25 @@
     <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
       <span class="text-muted-foreground">{shortDate(flight.flightDate)}</span>
       <span class="opacity-30 hidden sm:inline">·</span>
-      {#if formattedDelay}
-        <span class="text-sm font-bold text-red-600">+{formattedDelay}</span>
-      {:else if formattedEarly}
-        <span class="text-sm font-bold text-green-600">{formattedEarly}</span>
+      {#if !flight.canceled}
+        <DelayCounter
+          scheduledTime={scheduledTime}
+          estimatedTime={estimatedTime}
+          actualTime={actualTime}
+          isCompleted={isCompleted}
+          class="text-sm"
+        />
+        {#if formattedEarly && !isCompleted}
+          <span class="text-sm font-bold text-green-600">{formattedEarly}</span>
+        {/if}
       {/if}
       <div class="flex items-center gap-1.5">
         <span class="h-2 w-2 rounded-full {getStatusDotColor(calculatedStatus)}"></span>
         <span class="font-medium {getStatusColor(calculatedStatus)}">
-          {calculatedStatus}
+          {shortenStatus(calculatedStatus)}
         </span>
       </div>
-      {#if !formattedDelay && !formattedEarly && calculatedDelayMinutes <= 15}
+      {#if !flight.canceled && !formattedDelay && !formattedEarly && calculatedDelayMinutes <= 15}
         <span class="opacity-30 hidden sm:inline">·</span>
         <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
           On Time
@@ -481,7 +520,70 @@
     </div>
   </div>
 
-  <!-- Times grid -->
+  <!-- Full status detail — shown when the status text is longer than the badge label -->
+  {#if statusHasDetail(calculatedStatus)}
+    <div class="mb-4 flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
+      <span class="mt-0.5 h-2 w-2 shrink-0 rounded-full {getStatusDotColor(calculatedStatus)}"></span>
+      <span class="text-foreground">{calculatedStatus}</span>
+    </div>
+  {/if}
+  {#if delayReason && !flight.canceled}
+    <div class="mb-4 flex items-start gap-3 rounded-lg border px-4 py-3
+      {delayReason.reason === 'weather' ? 'border-blue-300 bg-blue-100' :
+       delayReason.reason === 'holding' ? 'border-blue-300 bg-blue-100' :
+       'border-amber-300 bg-amber-100'}">
+      <div class="shrink-0 mt-0.5">
+        {#if delayReason.reason === 'weather'}
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600 dark:text-blue-400">
+            <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
+            <path d="M22 10a3 3 0 0 0-3-3h-2.207a5.502 5.502 0 0 0-10.702.5"/>
+          </svg>
+        {:else if delayReason.reason === 'holding'}
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600 dark:text-blue-400">
+            <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21 4 19 2c-2-2-4-2-5.5-.5L10 5 1.8 6.2l5 5L5 13l2 2 2-2 5 5Z"/>
+          </svg>
+        {:else if delayReason.reason === 'indefinite'}
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-600 dark:text-amber-400">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+        {:else}
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-600 dark:text-amber-400">
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        {/if}
+      </div>
+      <div>
+        <p class="text-sm font-semibold
+          {delayReason.reason === 'weather' || delayReason.reason === 'holding' ? 'text-blue-900' : 'text-amber-900'}">
+          {delayReason.label}
+        </p>
+        {#if delayReason.reason === 'weather' && delayReason.nextInfo}
+          <p class="text-xs mt-0.5 text-blue-700">Next update expected at {delayReason.nextInfo}</p>
+        {/if}
+      </div>
+    </div>
+  {/if}
+  {#if showFogWarning && !flight.canceled}
+    <div class="mb-4 flex items-start gap-3 rounded-lg border border-slate-300 bg-slate-100 px-4 py-3">
+      <div class="shrink-0 mt-0.5">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-500">
+          <line x1="3" y1="10" x2="21" y2="10"/>
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <line x1="3" y1="14" x2="21" y2="14"/>
+          <line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+      </div>
+      <div>
+        <p class="text-sm font-semibold text-slate-900">Low visibility at {airportName(fogAirport!.code)}</p>
+        <p class="text-xs mt-0.5 text-slate-600">
+          Current visibility {Math.round(fogAirport!.visibility * 10) / 10}km — fog or low cloud may affect operations
+        </p>
+      </div>
+    </div>
+  {/if}
   <div class="grid grid-cols-2 gap-4 mb-6">
     <div class="rounded-lg border bg-card p-4">
       <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Scheduled {isDeparture ? 'Departure' : 'Arrival'}</p>
@@ -514,6 +616,15 @@
         </p>
         <p class="text-3xl font-bold tabular-nums text-muted-foreground">—</p>
         <p class="text-sm text-muted-foreground mt-1">Not yet available</p>
+      {/if}
+      {#if !flight.canceled}
+        <DelayCounter
+          scheduledTime={scheduledTime}
+          estimatedTime={estimatedTime}
+          actualTime={actualTime}
+          isCompleted={isCompleted}
+          class="text-sm mt-2 block"
+        />
       {/if}
     </div>
   </div>
@@ -728,10 +839,11 @@
                   <tr
                     data-current={isCurrent}
                     class="border-t border-border/50 transition-colors
-                      {isCurrent ? 'bg-primary/8 border-l-2 border-l-primary' : 'hover:bg-muted/30'}"
+                      {isCurrent ? 'bg-primary/8 border-l-2 border-l-primary' : 'hover:bg-muted/30'}
+                      {rf.canceled ? 'opacity-60' : ''}"
                   >
                     <td class="px-4 py-2.5">
-                      <a href="/flights/{rf.id}" class="font-semibold {isCurrent ? 'text-primary' : 'hover:text-primary transition-colors'}">
+                      <a href="/flights/{rf.id}" class="font-semibold {isCurrent ? 'text-primary' : 'hover:text-primary transition-colors'} {rf.canceled ? 'line-through' : ''}">
                         {rf.flightNumber}
                       </a>
                       {#if isCurrent}
@@ -789,12 +901,11 @@
                 <a
                   href="/flights/{rf.id}"
                   data-current={isCurrent}
-                  class="block px-4 py-3 transition-colors {isCurrent ? 'bg-primary/8' : 'hover:bg-muted/30'}"
+                  class="block px-4 py-3 transition-colors {isCurrent ? 'bg-primary/8' : 'hover:bg-muted/30'} {rf.canceled ? 'opacity-60' : ''}"
                 >
-                  <!-- Header: Flight + Status -->
                   <div class="flex items-center justify-between mb-2">
                     <div class="flex items-center gap-2">
-                      <span class="font-semibold {isCurrent ? 'text-primary' : 'text-foreground'}">{rf.flightNumber}</span>
+                      <span class="font-semibold {isCurrent ? 'text-primary' : 'text-foreground'} {rf.canceled ? 'line-through' : ''}">{rf.flightNumber}</span>
                       {#if isCurrent}
                         <span class="text-[10px] font-bold uppercase tracking-wide text-primary opacity-70">this flight</span>
                       {/if}

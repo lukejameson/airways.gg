@@ -37,12 +37,14 @@
   function findClosestWeather(airportCode: string, targetTime: Date) {
     const weatherArray = weatherMap[airportCode];
     if (!weatherArray || weatherArray.length === 0) return null;
-
-    return weatherArray.reduce((closest: WeatherRow, current: WeatherRow) => {
-      const closestDiff = Math.abs(new Date(closest.timestamp).getTime() - targetTime.getTime());
-      const currentDiff = Math.abs(new Date(current.timestamp).getTime() - targetTime.getTime());
-      return currentDiff < closestDiff ? current : closest;
-    });
+    const targetMs = targetTime.getTime();
+    const past = weatherArray.filter(w => new Date(w.timestamp).getTime() <= targetMs);
+    if (past.length > 0) {
+      return past.reduce((a, b) => new Date(a.timestamp).getTime() > new Date(b.timestamp).getTime() ? a : b);
+    }
+    return weatherArray.reduce((a: WeatherRow, b: WeatherRow) =>
+      Math.abs(new Date(a.timestamp).getTime() - targetMs) <= Math.abs(new Date(b.timestamp).getTime() - targetMs) ? a : b
+    );
   }
 
   // Find daylight data for a specific date
@@ -106,10 +108,11 @@
   });
 
   // Use estimated time only if it hasn't expired, otherwise fall back to scheduled
-  const displayTime = $derived(actualTime ?? (estimatedTimeExpired ? null : estimatedTime));
+  const effectiveEstimatedTime = $derived(estimatedTime && scheduledTime && new Date(estimatedTime).getTime() !== new Date(scheduledTime).getTime() ? estimatedTime : null);
+  const displayTime = $derived(actualTime ?? effectiveEstimatedTime);
   const otherAirport = $derived(isDeparture ? flight.arrivalAirport : flight.departureAirport);
   const delayMinutes = $derived(flight.delayMinutes ?? 0);
-  const isEstimate = $derived(!actualTime && !!estimatedTime && !estimatedTimeExpired);
+  const isEstimate = $derived(!actualTime && !!effectiveEstimatedTime && !estimatedTimeExpired && new Date(effectiveEstimatedTime).getTime() > Date.now());
 
   const isCompleted = $derived(isFlightCompleted(flight));
 
@@ -126,7 +129,8 @@
     // If flight is already landed/airborne/boarding/cancelled, trust that status
     const currentStatus = flight.status?.toLowerCase() ?? '';
     if (currentStatus.includes('landed') || currentStatus.includes('completed') ||
-        currentStatus.includes('airborne') || currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
+        currentStatus.includes('airborne') || currentStatus.includes('taxiing') ||
+        currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
       return flight.status;
     }
 
@@ -220,9 +224,14 @@
 
       <!-- Status & Delay - fixed width on mobile to prevent jumping -->
       <div class="flex items-center gap-2 shrink-0 ml-auto">
-        {#if formattedDelay}
-          <span class="text-sm font-bold text-red-600">+{formattedDelay}</span>
-        {:else if formattedEarly}
+        <DelayCounter
+          scheduledTime={scheduledTime}
+          estimatedTime={estimatedTime}
+          actualTime={actualTime}
+          isCompleted={isCompleted}
+          class="text-sm"
+        />
+        {#if !isCompleted && formattedEarly}
           <span class="text-sm font-bold text-green-600">{formattedEarly}</span>
         {/if}
 

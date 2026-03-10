@@ -204,11 +204,17 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
       estimatedTimesMap.set(t.flightId, existing);
     }
 
-    const flightsForDisplay = displayFlights.map(f => ({
-      ...f,
-      estimatedDeparture: estimatedTimesMap.get(f.id)?.estimatedDeparture ?? null,
-      estimatedArrival: estimatedTimesMap.get(f.id)?.estimatedArrival ?? null,
-    }));
+    const flightsForDisplay = displayFlights
+      .map(f => ({
+        ...f,
+        estimatedDeparture: estimatedTimesMap.get(f.id)?.estimatedDeparture ?? null,
+        estimatedArrival: estimatedTimesMap.get(f.id)?.estimatedArrival ?? null,
+      }))
+      .sort((a, b) => {
+        const aTime = new Date(a.estimatedDeparture ?? a.scheduledDeparture).getTime();
+        const bTime = new Date(b.estimatedDeparture ?? b.scheduledDeparture).getTime();
+        return aTime - bTime;
+      });
 
     // Build weatherMap
     const weatherMap: Record<string, { airportCode: string; timestamp: Date; temperature: number | null; windSpeed: number | null; windDirection: number | null; weatherCode: number | null }[]> = {};
@@ -227,11 +233,17 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
     // Current GCI weather for the header — find the record closest to now
     let currentGciWeather: { airportCode: string; timestamp: Date; temperature: number | null; windSpeed: number | null; windDirection: number | null; weatherCode: number | null } | null = null;
     if (weatherMap['GCI'] && weatherMap['GCI'].length > 0) {
-      currentGciWeather = weatherMap['GCI'].reduce((closest, current) => {
-        const closestDiff = Math.abs(new Date(closest.timestamp).getTime() - now.getTime());
-        const currentDiff = Math.abs(new Date(current.timestamp).getTime() - now.getTime());
-        return currentDiff < closestDiff ? current : closest;
-      });
+      const gciRows = weatherMap['GCI'];
+      const past = gciRows.filter(w => new Date(w.timestamp).getTime() <= now.getTime());
+      if (past.length > 0) {
+        currentGciWeather = past.reduce((a, b) => new Date(a.timestamp).getTime() > new Date(b.timestamp).getTime() ? a : b);
+      } else {
+        currentGciWeather = gciRows.reduce((a, b) => {
+          const aDiff = Math.abs(new Date(a.timestamp).getTime() - now.getTime());
+          const bDiff = Math.abs(new Date(b.timestamp).getTime() - now.getTime());
+          return aDiff <= bDiff ? a : b;
+        });
+      }
     }
 
     // Read recently-viewed from cookie so SSR can render the section without a pop-in

@@ -1,7 +1,8 @@
 import { connect } from 'puppeteer-real-browser';
 import type { Browser, Page } from 'rebrowser-puppeteer-core';
+import { execSync } from 'child_process';
 import { db, flights as flightsTable, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, isTerminalStatus, routeFlightMinutes, ROUTE_FLIGHT_MINUTES } from '@airways/database';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, max, desc, count } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // Timezone utility
@@ -54,6 +55,26 @@ function getRandomProxy(proxies: ProxyConfig[]): ProxyConfig | null {
 function randomDelay(min: number, max: number): Promise<void> {
   const ms = Math.floor(Math.random() * (max - min + 1)) + min;
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function forceKillBrowser(browser: Browser | null): Promise<void> {
+  if (!browser) return;
+  const proc = (browser as any).process?.() ?? null;
+  const pid = proc?.pid ?? null;
+  await Promise.race([
+    browser.close(),
+    new Promise<void>(resolve => setTimeout(resolve, 5000)),
+  ]).catch(() => {});
+  if (pid != null) {
+    try {
+      execSync(`kill -9 -$(ps -o pgid= -p ${pid} | tr -d ' ') 2>/dev/null || kill -9 ${pid} 2>/dev/null`, { stdio: 'ignore' });
+    } catch {
+    }
+  }
+  try {
+    execSync(`pkill -9 -f 'chrome.*remote-debugging' 2>/dev/null || true`, { stdio: 'ignore' });
+  } catch {
+  }
 }
 
 async function simulateHumanBehavior(page: Page): Promise<void> {
@@ -225,12 +246,66 @@ async function extractFlightRows(page: Page, type: 'arrival' | 'departure', targ
   }
 
   return filtered as ParsedFR24Flight[];
-  /* eslint-enable @typescript-eslint/no-explicit-any */
 }
 
-// ---------------------------------------------------------------------------
-// Click "Load earlier flights" button
-// ---------------------------------------------------------------------------
+interface FlightDetailTimes {
+  std: string | null;
+  sta: string | null;
+}
+
+async function fetchFlightDetailTimes(
+  page: Page,
+  flightNumber: string,
+  targetDate: string,
+): Promise<FlightDetailTimes> {
+  const detailUrl = `https://www.flightradar24.com/data/flights/${flightNumber.toLowerCase()}`;
+  console.log(`[FR24] Fetching details for ${flightNumber} from ${detailUrl}`);
+
+  try {
+    await page.goto(detailUrl, { waitUntil: 'networkidle0', timeout: 30000 });
+    await page.waitForSelector('table tbody tr.data-row', { timeout: 10000 }).catch(() => {});
+    await randomDelay(2000, 4000);
+    await simulateHumanBehavior(page);
+    const times = await page.evaluate((targetDateStr: string) => {
+      const doc = (globalThis as any).document;
+      const targetMidnight = new Date(targetDateStr);
+      targetMidnight.setUTCHours(0, 0, 0, 0);
+      const dayStart = targetMidnight.getTime() / 1000;
+      const dayEnd = dayStart + 86400;
+      const rows = doc.querySelectorAll('table tbody tr.data-row');
+      const rowTimestamps = Array.from(rows).map((r: any) => parseInt(r.getAttribute('data-timestamp') || '0', 10));
+      for (const row of rows) {
+        const rowTs = parseInt((row as any).getAttribute('data-timestamp') || '0', 10);
+        if (rowTs < dayStart || rowTs >= dayEnd) continue;
+        const allCells = Array.from(row.querySelectorAll('td')) as any[];
+        const timeCells = allCells.filter((td: any) => td.hasAttribute('data-timestamp'));
+        const timeCellDebug = timeCells.map((td: any) => ({ ts: td.getAttribute('data-timestamp'), text: td.innerText?.trim() }));
+        const extractTime = (td: any) => {
+          const text = (td.innerText?.trim().replace(/\s+/g, ' ') || '');
+          return /^\d{1,2}:\d{2}(\s*(AM|PM))?$/i.test(text) ? text : null;
+        };
+        let std: string | null = timeCells.length > 1 ? extractTime(timeCells[1]) : null;
+        let sta: string | null = timeCells.length > 3 ? extractTime(timeCells[3]) : null;
+        if (std || sta) return { std, sta, _debug: null, _timeCells: timeCellDebug };
+      }
+      const matchedRow = Array.from(rows).find((r: any) => {
+        const ts = parseInt(r.getAttribute('data-timestamp') || '0', 10);
+        return ts >= dayStart && ts < dayEnd;
+      }) as any;
+      const matchedCells = matchedRow ? Array.from(matchedRow.querySelectorAll('td')).map((td: any) => ({ cls: td.className, ts: td.getAttribute('data-timestamp'), text: td.innerText?.trim().slice(0, 20) })) : [];
+      return { std: null, sta: null, _debug: { totalRows: rows.length, dayStart, dayEnd, rowTimestamps, matchedCells } };
+    }, targetDate);
+
+    if (times._debug) {
+      console.log(`[FR24] Detail parse debug for ${flightNumber}:`, JSON.stringify(times._debug));
+    }
+    console.log(`[FR24] Found times for ${flightNumber}: STD=${times.std}, STA=${times.sta}`);
+    return times;
+  } catch (error) {
+    console.error(`[FR24] Error fetching details for ${flightNumber}:`, error);
+    return { std: null, sta: null };
+  }
+}
 
 async function clickLoadEarlierFlights(page: Page): Promise<void> {
   // FR24 loads ~80 rows per click; GCI typically has <30 flights/day.
@@ -364,9 +439,42 @@ function getLondonOffsetMs(d: Date): number {
 // DB upsert
 // ---------------------------------------------------------------------------
 
+async function guernseyEstimatedTimeHasPriority(
+  flightId: number,
+  timeType: string,
+  fr24EstimatedTime: Date,
+): Promise<boolean> {
+  const [latestGuernsey] = await db
+    .select({ ts: max(flightStatusHistory.statusTimestamp) })
+    .from(flightStatusHistory)
+    .where(
+      and(
+        eq(flightStatusHistory.flightId, flightId),
+        eq(flightStatusHistory.source, 'guernsey_airport'),
+      ),
+    );
+  const [existing] = await db
+    .select({ timeValue: flightTimes.timeValue })
+    .from(flightTimes)
+    .where(
+      and(
+        eq(flightTimes.flightId, flightId),
+        eq(flightTimes.timeType, timeType),
+      ),
+    );
+  if (!latestGuernsey?.ts || !existing?.timeValue) return false;
+  const guernseyTs = new Date(latestGuernsey.ts);
+  const existingEstimate = new Date(existing.timeValue);
+  const now = new Date();
+  const guernseyEstimateStillFuture = existingEstimate > now;
+  const guernseyIsNewer = guernseyTs > fr24EstimatedTime;
+  return guernseyEstimateStillFuture && guernseyIsNewer;
+}
+
 async function upsertFR24Flight(
   flight: ParsedFR24Flight,
   flightDate: string,
+  detailTimes?: FlightDetailTimes,
 ): Promise<number | null> {
   const flightNumber = cleanFlightNumber(flight.flightNumber);
   if (!flightNumber || flightNumber.length < 3) return null;
@@ -414,12 +522,32 @@ async function upsertFR24Flight(
   let scheduledDeparture: Date;
   let scheduledArrival: Date;
 
-  if (flight.type === 'departure') {
-    scheduledDeparture = scheduledTimeDate;
-    scheduledArrival = new Date(scheduledTimeDate.getTime() + flightMins * 60_000);
+  if (detailTimes?.std && detailTimes?.sta) {
+    const stdDate = parseTimeToDate(detailTimes.std, flightDate);
+    const staDate = parseTimeToDate(detailTimes.sta, flightDate);
+
+    if (stdDate && staDate) {
+      scheduledDeparture = stdDate;
+      scheduledArrival = staDate;
+      console.log(`[FR24] Using detail page times for ${flightNumber}: STD=${detailTimes.std}, STA=${detailTimes.sta}`);
+    } else {
+      console.warn(`[FR24] Failed to parse detail times for ${flightNumber}, falling back to route calculation`);
+      if (flight.type === 'departure') {
+        scheduledDeparture = scheduledTimeDate;
+        scheduledArrival = new Date(scheduledTimeDate.getTime() + flightMins * 60_000);
+      } else {
+        scheduledArrival = scheduledTimeDate;
+        scheduledDeparture = new Date(scheduledTimeDate.getTime() - flightMins * 60_000);
+      }
+    }
   } else {
-    scheduledArrival = scheduledTimeDate;
-    scheduledDeparture = new Date(scheduledTimeDate.getTime() - flightMins * 60_000);
+    if (flight.type === 'departure') {
+      scheduledDeparture = scheduledTimeDate;
+      scheduledArrival = new Date(scheduledTimeDate.getTime() + flightMins * 60_000);
+    } else {
+      scheduledArrival = scheduledTimeDate;
+      scheduledDeparture = new Date(scheduledTimeDate.getTime() - flightMins * 60_000);
+    }
   }
 
   // Parse actual/estimated time from FR24 status column
@@ -479,9 +607,12 @@ async function upsertFR24Flight(
         id: flightsTable.id,
         uniqueId: flightsTable.uniqueId,
         status: flightsTable.status,
+        scheduledDeparture: flightsTable.scheduledDeparture,
+        scheduledArrival: flightsTable.scheduledArrival,
         actualDeparture: flightsTable.actualDeparture,
         actualArrival: flightsTable.actualArrival,
         delayMinutes: flightsTable.delayMinutes,
+
       })
       .from(flightsTable)
       .where(
@@ -504,41 +635,44 @@ async function upsertFR24Flight(
       updateSet.aircraftRegistration = aircraftReg;
       console.log(`[FR24] Writing registration ${aircraftReg} for ${flightNumber}`);
     }
-
     if (existing.length > 0) {
       const ex = existing[0];
-
-      // Bug fix #1: Status guard — only upgrade status, never downgrade.
-      // FR24 "Estimated HH:MM" normalises to "Scheduled" which would overwrite
-      // "Landed" or "Airborne" set by the guernsey scraper or ADSB service.
-      // Exception: allow "Delayed" → "Scheduled" when FR24 confirms the flight
-      // is on-time (corrects guernsey scraper's earlier mis-classification).
       const isDelayedCorrection = ex.status === 'Delayed' && status === 'Scheduled';
       if (status && (isDelayedCorrection || canUpgradeStatus(ex.status, status))) {
         updateSet.status = status;
       }
-      if (canceled) updateSet.canceled = canceled;
-
-      // Bug fix #2: Actual time guard — only write if DB value is null.
-      // Guernsey scraper extracts precise times from "Landed 12:14" etc.
-      // FR24's times are often less accurate, so don't overwrite.
+      if (canceled) {
+        updateSet.canceled = canceled;
+      }
       if (actualDeparture && ex.actualDeparture == null) {
         updateSet.actualDeparture = actualDeparture;
       }
       if (actualArrival && ex.actualArrival == null) {
         updateSet.actualArrival = actualArrival;
       }
-
-      // Bug fix #3: Delay clearing — clear stale delayMinutes when FR24 shows
-      // on-time AND the flight is not in a terminal status.
       if (delayMinutes !== null) {
         updateSet.delayMinutes = delayMinutes;
       } else if (ex.delayMinutes != null && !isTerminalStatus(ex.status)) {
-        // FR24 computed no delay → clear the stale value
         updateSet.delayMinutes = null;
       }
-
-      // Update existing record from guernsey-scraper
+      if (detailTimes?.std && detailTimes?.sta) {
+        const currentDepMs = ex.scheduledDeparture?.getTime() ?? 0;
+        const currentArrMs = ex.scheduledArrival?.getTime() ?? 0;
+        const newDepMs = scheduledDeparture.getTime();
+        const newArrMs = scheduledArrival.getTime();
+        const depDriftMs = Math.abs(currentDepMs - newDepMs);
+        const maxAllowedDriftMs = 30 * 60_000;
+        if (depDriftMs > 60000 && depDriftMs <= maxAllowedDriftMs) {
+          updateSet.scheduledDeparture = scheduledDeparture;
+          console.log(`[FR24] Updating scheduledDeparture for ${flightNumber}: ${ex.scheduledDeparture} -> ${scheduledDeparture}`);
+        } else if (depDriftMs > maxAllowedDriftMs) {
+          console.warn(`[FR24] Rejecting scheduledDeparture update for ${flightNumber}: drift ${Math.round(depDriftMs / 60000)}min exceeds 30min limit (${ex.scheduledDeparture} -> ${scheduledDeparture})`);
+        }
+        if (Math.abs(currentArrMs - newArrMs) > 60000) {
+          updateSet.scheduledArrival = scheduledArrival;
+          console.log(`[FR24] Updating scheduledArrival for ${flightNumber}: ${ex.scheduledArrival} -> ${scheduledArrival}`);
+        }
+      }
       flightId = existing[0].id;
       if (Object.keys(updateSet).length > 1) {
         await db
@@ -547,25 +681,26 @@ async function upsertFR24Flight(
           .where(eq(flightsTable.id, flightId));
       }
     } else {
-      // Flight not on Guernsey Airport website — skip it
       return null;
     }
-
     if (flightId === null) return null;
 
     // Write estimated time to flightTimes (or remove stale estimate if on-time)
     const estTimeType = flight.type === 'departure' ? 'EstimatedBlockOff' : 'EstimatedBlockOn';
     if (estimatedTime) {
-      await db
-        .insert(flightTimes)
-        .values({ flightId, timeType: estTimeType, timeValue: estimatedTime })
-        .onConflictDoUpdate({
-          target: [flightTimes.flightId, flightTimes.timeType],
-          set: { timeValue: estimatedTime },
-        });
-    } else {
-      // No meaningful estimate — remove any stale estimated time entry
-      // so the UI doesn't show "Estimated — subject to change" with same time as scheduled
+      const guernseyHasPriority = await guernseyEstimatedTimeHasPriority(flightId, estTimeType, estimatedTime);
+      if (!guernseyHasPriority) {
+        await db
+          .insert(flightTimes)
+          .values({ flightId, timeType: estTimeType, timeValue: estimatedTime })
+          .onConflictDoUpdate({
+            target: [flightTimes.flightId, flightTimes.timeType],
+            set: { timeValue: estimatedTime },
+          });
+      } else {
+        console.log(`[FR24] Skipping EstimatedBlockOff/On write for flight ${flightId} — Guernsey airport has a newer estimate still in the future`);
+      }
+    } else if (actualDeparture || actualArrival || isTerminalStatus(status ?? '')) {
       await db
         .delete(flightTimes)
         .where(
@@ -600,19 +735,38 @@ async function upsertFR24Flight(
 
     // Insert status history
     try {
-      await db
-        .insert(flightStatusHistory)
-        .values({
-          flightCode: flightNumber,
-          flightDate,
-          statusTimestamp: new Date(),
-          statusMessage: flight.status || status,
-          source: 'fr24',
-          flightId,
-        })
-        .onConflictDoNothing();
+      const rawMessage = flight.status || status;
+      let skipHistory = false;
+      if (rawMessage.toLowerCase().startsWith('estimated dep')) {
+        const timeMatch = rawMessage.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+        if (timeMatch) {
+          let hh = parseInt(timeMatch[1]);
+          const mm = parseInt(timeMatch[2]);
+          const ampm = timeMatch[3].toUpperCase();
+          if (ampm === 'PM' && hh !== 12) hh += 12;
+          if (ampm === 'AM' && hh === 12) hh = 0;
+          const ex = existing[0];
+          const scheduledMs = ex?.scheduledDeparture ? new Date(ex.scheduledDeparture).getTime() : null;
+          if (scheduledMs !== null) {
+            const estMs = new Date(ex.scheduledDeparture!).setHours(hh, mm, 0, 0);
+            if (estMs <= scheduledMs) skipHistory = true;
+          }
+        }
+      }
+      if (!skipHistory) {
+        await db
+          .insert(flightStatusHistory)
+          .values({
+            flightCode: flightNumber,
+            flightDate,
+            statusTimestamp: new Date(),
+            statusMessage: rawMessage,
+            source: 'fr24',
+            flightId,
+          })
+          .onConflictDoNothing();
+      }
     } catch {
-      // Status history insert is best-effort
     }
 
     return flightId;
@@ -718,7 +872,7 @@ async function runBrowserSession(
       console.log(`[FR24] Parsed ${arrivalFlights.length} arrival rows`);
 
       for (const flight of arrivalFlights) {
-        const id = await upsertFR24Flight(flight, flightDate);
+        const id = await upsertFR24Flight(flight, flightDate, undefined);
         if (id !== null) totalUpserted++;
       }
 
@@ -751,9 +905,32 @@ async function runBrowserSession(
 
       const departureFlights = await extractFlightRows(page, 'departure', flightDate);
       console.log(`[FR24] Parsed ${departureFlights.length} departure rows`);
-
+      const detailFetchedThisRun = new Set<string>();
       for (const flight of departureFlights) {
-        const id = await upsertFR24Flight(flight, flightDate);
+        const flightNumber = flight.flightNumber.replace(/\s+/g, '').toUpperCase();
+        const isKnownRoute = flight.destination in ROUTE_FLIGHT_MINUTES;
+        const isGR = flightNumber.startsWith('GR');
+        let needsDetailFetch = false;
+        if (isGR && isKnownRoute && !detailFetchedThisRun.has(flightNumber)) {
+          const existing = await db.select({ scheduledDeparture: flightsTable.scheduledDeparture, scheduledArrival: flightsTable.scheduledArrival })
+            .from(flightsTable)
+            .where(and(eq(flightsTable.flightNumber, flightNumber), eq(flightsTable.flightDate, flightDate)))
+            .limit(1);
+          if (existing.length > 0) {
+            const ex = existing[0];
+            const calculatedArrival = ex.scheduledDeparture.getTime() + routeFlightMinutes(flight.destination) * 60_000;
+            const storedArrival = ex.scheduledArrival.getTime();
+            needsDetailFetch = Math.abs(storedArrival - calculatedArrival) < 60_000;
+          }
+        }
+        if (needsDetailFetch) detailFetchedThisRun.add(flightNumber);
+        const detailTimes = needsDetailFetch
+          ? await fetchFlightDetailTimes(page, flight.flightNumber, flightDate)
+          : undefined;
+        if (needsDetailFetch) {
+          await randomDelay(3000, 5000);
+        }
+        const id = await upsertFR24Flight(flight, flightDate, detailTimes);
         if (id !== null) totalUpserted++;
       }
 
@@ -767,24 +944,16 @@ async function runBrowserSession(
         page.close(),
         new Promise(resolve => setTimeout(resolve, 2000)),
       ]).catch(() => {});
-      await Promise.race([
-        browser.close(),
-        new Promise(resolve => setTimeout(resolve, 3000)),
-      ]);
+      await forceKillBrowser(browser);
+      browser = null;
       console.log('[FR24] Browser closed');
-
       if (global.gc) global.gc();
-
       return { success: true, count: totalUpserted };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[FR24] Attempt ${attempt} failed: ${message}`);
-      if (browser) {
-        await Promise.race([
-          browser.close(),
-          new Promise(resolve => setTimeout(resolve, 3000)),
-        ]).catch(() => {});
-      }
+      await forceKillBrowser(browser);
+      browser = null;
 
       if (attempt < maxRetries) {
         const backoff = Math.pow(2, attempt) * 5000 + Math.random() * 5000;

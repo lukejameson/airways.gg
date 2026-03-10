@@ -11,9 +11,11 @@
 
   let { data } = $props();
 
-  let activeTab = $state<'departures' | 'arrivals'>(
-    $page.url.searchParams.get('tab') === 'arrivals' ? 'arrivals' : 'departures'
-  );
+  function tabFromUrl(url: URL): 'departures' | 'arrivals' {
+    return url.searchParams.get('tab') === 'arrivals' ? 'arrivals' : 'departures';
+  }
+
+  let activeTab = $state<'departures' | 'arrivals'>(tabFromUrl($page.url));
   let showCompleted = $state($page.url.searchParams.get('completed') === '1');
   let searchQuery = $state('');
   let isLoading = $state(true);
@@ -119,9 +121,7 @@
     // They remain visible in the arrivals tab so inbound tracking still works.
     // Exception: if a flight is completed (past scheduled arrival + 45 min), it should
     // still appear when "show done" is active — the scraper just hasn't updated its status yet.
-    if (activeTab === 'departures') {
-      flights = flights.filter((f: (typeof data.flights)[0]) => !isAirborneFromGCI(f) || isCompleted(f));
-    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       flights = flights.filter((f: (typeof data.flights)[0]) => {

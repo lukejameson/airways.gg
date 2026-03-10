@@ -498,7 +498,6 @@ async function runLiveScrape(includeTomorrow: boolean): Promise<void> {
     const todayResult = await scrapeDayFlights(todayDate);
     totalFlights += todayResult.flights;
     totalUpdates += todayResult.updates;
-
     if (includeTomorrow) {
       const tomorrowStr = guernseyTomorrowStr();
       const tomorrowDate = new Date(tomorrowStr);
@@ -537,7 +536,6 @@ async function runBackgroundPrefetch(): Promise<void> {
   try {
     const todayDate = new Date(todayStr);
     const tomorrowDate = new Date(tomorrowStr);
-
     const todayResult = await scrapeDayFlights(todayDate);
     const tomorrowResult = await scrapeDayFlights(tomorrowDate);
     lastTomorrowScrapeAt = new Date();

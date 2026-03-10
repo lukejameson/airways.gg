@@ -97,13 +97,6 @@
         {#if data.date}<strong class="text-foreground">{data.date}</strong>{/if}
         {#if data.results.length > 0} — {resultLabel}{/if}
       </p>
-      <button
-        type="button"
-        onclick={clearSearch}
-        class="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors"
-      >
-        Clear
-      </button>
     </div>
 
     {#if data.results.length === 0}
