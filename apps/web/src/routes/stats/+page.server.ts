@@ -5,16 +5,39 @@ import { sql } from 'drizzle-orm';
 
 export const load: PageServerLoad = async ({ url }) => {
   const range = url.searchParams.get('range') ?? '90';
+
+  // Thresholds: routes must have at least this many flights in the period to be included.
+  // Excludes true one-off charters and bad data rows; keeps infrequent scheduled routes (EDI, DUB, Grenoble).
+  const minFlightsPerRoute = range === '30' ? 2 : range === '90' ? 3 : 5;
+
   const airlineFilter = sql`(f.flight_number ILIKE 'GR%' OR f.flight_number ILIKE 'BA%')`;
-  let sinceClause = airlineFilter;
-  if (range === '30') sinceClause = sql`${airlineFilter} AND f.flight_date >= CURRENT_DATE - INTERVAL '30 days'`;
-  else if (range === '90') sinceClause = sql`${airlineFilter} AND f.flight_date >= CURRENT_DATE - INTERVAL '90 days'`;
+  const dateFilter =
+    range === '30'
+      ? sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '30 days'`
+      : range === '90'
+        ? sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '90 days'`
+        : sql``;
+
+  // Subquery (alias f2) computes the set of regular routes for this period.
+  // departure != arrival removes GCI-GCI bad data rows regardless of count.
+  const routeMinFilter = sql`AND (f.departure_airport, f.arrival_airport) IN (
+    SELECT f2.departure_airport, f2.arrival_airport FROM flights f2
+    WHERE (f2.flight_number ILIKE 'GR%' OR f2.flight_number ILIKE 'BA%')
+      AND f2.departure_airport != f2.arrival_airport
+      ${range === '30' ? sql`AND f2.flight_date >= CURRENT_DATE - INTERVAL '30 days'` : range === '90' ? sql`AND f2.flight_date >= CURRENT_DATE - INTERVAL '90 days'` : sql``}
+    GROUP BY f2.departure_airport, f2.arrival_airport
+    HAVING COUNT(*) >= ${minFlightsPerRoute}
+  )`;
+
+  const sinceClause = sql`${airlineFilter} ${dateFilter} ${routeMinFilter}`;
   const wxDateFilter =
     range === '30'
       ? sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '30 days'`
       : range === '90'
         ? sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '90 days'`
         : sql``;
+  // Combined filter for weather JOIN queries (use same route exclusion)
+  const wxFilter = sql`${airlineFilter} ${wxDateFilter} ${routeMinFilter}`;
 
   const [
     heroStats,
@@ -238,7 +261,7 @@ export const load: PageServerLoad = async ({ url }) => {
       JOIN historical_weather hw
         ON hw.airport_code = 'GCI'
         AND hw.timestamp = DATE_TRUNC('hour', f.scheduled_departure)
-      WHERE f.flight_date IS NOT NULL AND ${airlineFilter} ${wxDateFilter}
+      WHERE f.flight_date IS NOT NULL AND ${wxFilter}
       GROUP BY 1
       ORDER BY MIN(hw.wind_speed)
     `),
@@ -262,7 +285,7 @@ export const load: PageServerLoad = async ({ url }) => {
       JOIN historical_weather hw
         ON hw.airport_code = 'GCI'
         AND hw.timestamp = DATE_TRUNC('hour', f.scheduled_departure)
-      WHERE f.flight_date IS NOT NULL AND ${airlineFilter} ${wxDateFilter}
+      WHERE f.flight_date IS NOT NULL AND ${wxFilter}
       GROUP BY 1
       ORDER BY MIN(hw.visibility)
     `),
@@ -286,7 +309,7 @@ export const load: PageServerLoad = async ({ url }) => {
       JOIN historical_weather hw
         ON hw.airport_code = 'GCI'
         AND hw.timestamp = DATE_TRUNC('hour', f.scheduled_departure)
-      WHERE f.flight_date IS NOT NULL AND ${airlineFilter} ${wxDateFilter}
+      WHERE f.flight_date IS NOT NULL AND ${wxFilter}
       GROUP BY 1
       ORDER BY MIN(hw.precipitation)
     `),
@@ -304,7 +327,7 @@ export const load: PageServerLoad = async ({ url }) => {
       JOIN historical_weather hw
         ON hw.airport_code = 'GCI'
         AND hw.timestamp = DATE_TRUNC('hour', f.scheduled_departure)
-      WHERE f.flight_date IS NOT NULL AND ${airlineFilter} ${wxDateFilter}
+      WHERE f.flight_date IS NOT NULL AND ${wxFilter}
       GROUP BY 1
       ORDER BY delay_pct DESC NULLS LAST
     `),
@@ -323,7 +346,7 @@ export const load: PageServerLoad = async ({ url }) => {
       JOIN historical_weather hw
         ON hw.airport_code = 'GCI'
         AND hw.timestamp = DATE_TRUNC('hour', f.scheduled_departure)
-      WHERE f.flight_date IS NOT NULL AND ${airlineFilter} ${wxDateFilter}
+      WHERE f.flight_date IS NOT NULL AND ${wxFilter}
       GROUP BY 1
       ORDER BY cancelled DESC, delayed DESC
       LIMIT 10
