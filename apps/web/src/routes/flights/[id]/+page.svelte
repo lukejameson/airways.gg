@@ -108,7 +108,7 @@
   });
 
   // SEO
-  const seoTitle = $derived(`${flight.flightNumber} · ${flight.departureAirport} → ${flight.arrivalAirport} — airways.gg`);
+  const seoTitle = $derived(`${flight.flightNumber}: ${airportName(flight.departureAirport)} → ${airportName(flight.arrivalAirport)} | airways.gg`);
   const seoDate = $derived(
     flight.scheduledDeparture
       ? new Date(flight.scheduledDeparture).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -436,10 +436,19 @@
   <meta property="og:title" content={seoTitle} />
   <meta property="og:description" content={seoDescription} />
   <meta property="og:url" content={seoCanonical} />
-  <meta property="og:type" content="website" />
+  <meta property="og:type" content="article" />
 
   <meta name="twitter:title" content={seoTitle} />
   <meta name="twitter:description" content={seoDescription} />
+
+  {@html `<script type="application/ld+json">${JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      { "@type": "ListItem", "position": 1, "name": "Guernsey Airport Flights", "item": data.siteUrl },
+      { "@type": "ListItem", "position": 2, "name": flight.flightNumber, "item": seoCanonical }
+    ]
+  })}</script>`}
 </svelte:head>
 
 <div class="container py-4 sm:py-6 max-w-3xl">

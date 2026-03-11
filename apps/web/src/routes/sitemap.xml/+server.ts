@@ -44,9 +44,19 @@ export const GET: RequestHandler = async () => {
     <priority>1.0</priority>
   </url>
   <url>
+    <loc>${SITE_URL}/stats</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>${SITE_URL}/search</loc>
     <changefreq>daily</changefreq>
-    <priority>0.5</priority>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>${SITE_URL}/contact</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.3</priority>
   </url>${flightUrls}
 </urlset>`;
 

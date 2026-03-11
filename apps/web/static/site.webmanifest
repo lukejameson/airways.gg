@@ -1,7 +1,7 @@
 {
-  "name": "airways.gg",
+  "name": "airways.gg — Guernsey Airport Flights",
   "short_name": "airways.gg",
-  "description": "Guernsey Airport flight delay predictions",
+  "description": "Live flight departures and arrivals at Guernsey Airport (GCI) with real-time delays and AI predictions.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

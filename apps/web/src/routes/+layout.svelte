@@ -25,7 +25,6 @@
 
   <!-- Default SEO — individual pages override title/description/og:* via their own <svelte:head> -->
   <meta name="robots" content="index, follow" />
-  <link rel="canonical" href={siteUrl} />
 
   <!-- Open Graph defaults -->
   <meta property="og:site_name" content="airways.gg" />
@@ -34,11 +33,47 @@
   <meta property="og:image" content="{siteUrl}/android-chrome-512x512.webp" />
   <meta property="og:image:width" content="512" />
   <meta property="og:image:height" content="512" />
-  <meta property="og:image:alt" content="airways.gg logo" />
+  <meta property="og:image:alt" content="airways.gg — Guernsey Airport flight tracker" />
 
   <!-- Twitter / X Card defaults -->
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:image" content="{siteUrl}/android-chrome-512x512.webp" />
+
+  <!-- Structured data: Organisation + WebSite with SearchAction -->
+  {@html `<script type="application/ld+json">${JSON.stringify({
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": siteUrl + "/#organization",
+        "name": "airways.gg",
+        "url": siteUrl,
+        "logo": {
+          "@type": "ImageObject",
+          "url": siteUrl + "/android-chrome-512x512.webp",
+          "width": 512,
+          "height": 512
+        },
+        "description": "Live flight tracker for Guernsey Airport (GCI) — real-time delays, cancellations, and AI-powered predictions."
+      },
+      {
+        "@type": "WebSite",
+        "@id": siteUrl + "/#website",
+        "url": siteUrl,
+        "name": "airways.gg",
+        "description": "Live flight tracker for Guernsey Airport (GCI)",
+        "publisher": { "@id": siteUrl + "/#organization" },
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": {
+            "@type": "EntryPoint",
+            "urlTemplate": siteUrl + "/search?q={search_term_string}"
+          },
+          "query-input": "required name=search_term_string"
+        }
+      }
+    ]
+  })}</script>`}
 
   {#if umamiWebsiteId && umamiUrl}
     <script

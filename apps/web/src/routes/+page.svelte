@@ -198,19 +198,19 @@
 
 <svelte:head>
   {#if isViewingTomorrow}
-    <title>airways.gg — Tomorrow's Flights (Guernsey)</title>
-    <meta name="description" content="Tomorrow's departures and arrivals for Guernsey Airport (GCI) with AI-powered delay predictions." />
-    <meta property="og:title" content="airways.gg — Tomorrow's Flights" />
-    <meta property="og:description" content="Tomorrow's departures and arrivals for Guernsey Airport (GCI) with AI-powered delay predictions." />
-    <meta name="twitter:title" content="airways.gg — Tomorrow's Flights" />
-    <meta name="twitter:description" content="Tomorrow's departures and arrivals for Guernsey Airport (GCI) with AI-powered delay predictions." />
+    <title>Guernsey Airport Tomorrow's Flights — Departures & Arrivals | airways.gg</title>
+    <meta name="description" content="Tomorrow's flight departures and arrivals at Guernsey Airport (GCI). Live status, delay predictions, and cancellation alerts for Aurigny and Blue Islands." />
+    <meta property="og:title" content="Guernsey Airport — Tomorrow's Flights | airways.gg" />
+    <meta property="og:description" content="Tomorrow's departures and arrivals at Guernsey Airport (GCI) with AI-powered delay predictions." />
+    <meta name="twitter:title" content="Guernsey Airport — Tomorrow's Flights | airways.gg" />
+    <meta name="twitter:description" content="Tomorrow's departures and arrivals at Guernsey Airport (GCI) with AI-powered delay predictions." />
   {:else}
-    <title>airways.gg — Live Flight Board</title>
-    <meta name="description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
-    <meta property="og:title" content="airways.gg — Live Flight Board" />
-    <meta property="og:description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
-    <meta name="twitter:title" content="airways.gg — Live Flight Board" />
-    <meta name="twitter:description" content="Live departures and arrivals for Guernsey Airport (GCI) with real-time delay tracking and AI-powered delay predictions." />
+    <title>Guernsey Airport Flights — Live Departures, Arrivals & Delays | airways.gg</title>
+    <meta name="description" content="Live departures and arrivals at Guernsey Airport (GCI). Real-time delay tracking, cancellation alerts, and AI-powered delay predictions for Aurigny and Blue Islands flights." />
+    <meta property="og:title" content="Guernsey Airport Flights — Live Board & Delay Tracker | airways.gg" />
+    <meta property="og:description" content="Live departures and arrivals at Guernsey Airport (GCI) with real-time delay tracking and AI-powered predictions." />
+    <meta name="twitter:title" content="Guernsey Airport Flights — Live Board & Delay Tracker | airways.gg" />
+    <meta name="twitter:description" content="Live departures and arrivals at Guernsey Airport (GCI) with real-time delay tracking and AI-powered predictions." />
   {/if}
   <link rel="canonical" href={data.siteUrl} />
   <meta property="og:url" content={data.siteUrl} />

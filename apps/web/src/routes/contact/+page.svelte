@@ -10,8 +10,9 @@
 </script>
 
 <svelte:head>
-  <title>Contact — airways.gg</title>
-  <meta name="description" content="Get in touch with the airways.gg team." />
+  <title>Contact — airways.gg | Guernsey Airport Flight Tracker</title>
+  <meta name="description" content="Get in touch with the airways.gg team — questions, feedback, or data corrections about Guernsey Airport flight information." />
+  <link rel="canonical" href="{data.siteUrl}/contact" />
 </svelte:head>
 
 <div class="container max-w-lg py-12 px-4">

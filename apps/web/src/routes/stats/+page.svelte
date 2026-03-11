@@ -494,10 +494,15 @@
 </script>
 
 <svelte:head>
-  <title>Flight Statistics — airways.gg</title>
-  <meta name="description" content="Guernsey Airport flight statistics: delays, cancellations, routes, weather impact and more." />
+  <title>Guernsey Airport Flight Statistics — Delays, Cancellations & Routes | airways.gg</title>
+  <meta name="description" content="Guernsey Airport (GCI) flight statistics: on-time performance, delay rates, cancellations by route, weather impact, and monthly breakdowns for Aurigny and Blue Islands." />
   <link rel="canonical" href="{data.siteUrl}/stats" />
   <meta name="robots" content="index, follow" />
+  <meta property="og:title" content="Guernsey Airport Flight Statistics | airways.gg" />
+  <meta property="og:description" content="On-time rates, delay stats, cancellation data, and weather impact for Guernsey Airport (GCI) flights." />
+  <meta property="og:url" content="{data.siteUrl}/stats" />
+  <meta name="twitter:title" content="Guernsey Airport Flight Statistics | airways.gg" />
+  <meta name="twitter:description" content="On-time rates, delay stats, cancellation data, and weather impact for Guernsey Airport (GCI) flights." />
 </svelte:head>
 
 {#if showDisclaimer}
