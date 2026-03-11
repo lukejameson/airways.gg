@@ -5,12 +5,26 @@ import { sql } from 'drizzle-orm';
 
 export const load: PageServerLoad = async ({ url }) => {
   const range = url.searchParams.get('range') ?? '90';
+  const activeAirline = url.searchParams.get('airline') ?? '';
+  const activeRoute = url.searchParams.get('route') ?? '';
+  const activeDirection = url.searchParams.get('direction') ?? ''; // 'dep' | 'arr'
+  const activeDow = url.searchParams.get('dow') ?? '';             // '0'-'6'
+  const activeSeason = url.searchParams.get('season') ?? '';       // 'summer'|'winter'|'spring'|'autumn'
+  const activeMonth = url.searchParams.get('month') ?? '';         // '1'-'12'
+  const thresholdParam = parseInt(url.searchParams.get('threshold') ?? '15', 10);
+  const threshold = [0, 15, 30].includes(thresholdParam) ? thresholdParam : 15;
 
-  // Thresholds: routes must have at least this many flights in the period to be included.
-  // Excludes true one-off charters and bad data rows; keeps infrequent scheduled routes (EDI, DUB, Grenoble).
+  // Parse route into dep/arr
+  const routeParts = activeRoute ? activeRoute.split('-') : [];
+  const routeDep = routeParts[0] ?? '';
+  const routeArr = routeParts.slice(1).join('-');
+
   const minFlightsPerRoute = range === '30' ? 2 : range === '90' ? 3 : 5;
 
-  const airlineFilter = sql`(f.flight_number ILIKE 'GR%' OR f.flight_number ILIKE 'BA%')`;
+  const airlineFilter = activeAirline === 'GR'
+    ? sql`(f.flight_number ILIKE 'GR%')`
+    : sql`(f.flight_number ILIKE 'GR%' OR f.flight_number ILIKE 'BA%')`;
+
   const dateFilter =
     range === '30'
       ? sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '30 days'`
@@ -19,7 +33,6 @@ export const load: PageServerLoad = async ({ url }) => {
         : sql``;
 
   // Subquery (alias f2) computes the set of regular routes for this period.
-  // departure != arrival removes GCI-GCI bad data rows regardless of count.
   const routeMinFilter = sql`AND (f.departure_airport, f.arrival_airport) IN (
     SELECT f2.departure_airport, f2.arrival_airport FROM flights f2
     WHERE (f2.flight_number ILIKE 'GR%' OR f2.flight_number ILIKE 'BA%')
@@ -29,15 +42,45 @@ export const load: PageServerLoad = async ({ url }) => {
     HAVING COUNT(*) >= ${minFlightsPerRoute}
   )`;
 
-  const sinceClause = sql`${airlineFilter} ${dateFilter} ${routeMinFilter}`;
+  const routeFilter = routeDep && routeArr
+    ? sql`AND f.departure_airport = ${routeDep} AND f.arrival_airport = ${routeArr}`
+    : sql``;
+
+  const directionFilter = activeDirection === 'dep'
+    ? sql`AND f.departure_airport = 'GCI'`
+    : activeDirection === 'arr'
+    ? sql`AND f.arrival_airport = 'GCI'`
+    : sql``;
+
+  const dowNum = parseInt(activeDow, 10);
+  const dowFilter = activeDow !== '' && !isNaN(dowNum) && dowNum >= 0 && dowNum <= 6
+    ? sql`AND EXTRACT(DOW FROM f.flight_date::date) = ${dowNum}`
+    : sql``;
+
+  const monthNum = parseInt(activeMonth, 10);
+  let periodFilter = sql``;
+  if (activeMonth !== '' && !isNaN(monthNum) && monthNum >= 1 && monthNum <= 12) {
+    periodFilter = sql`AND EXTRACT(MONTH FROM f.flight_date::date) = ${monthNum}`;
+  } else if (activeSeason === 'summer') {
+    periodFilter = sql`AND EXTRACT(MONTH FROM f.flight_date::date) IN (6, 7, 8)`;
+  } else if (activeSeason === 'winter') {
+    periodFilter = sql`AND EXTRACT(MONTH FROM f.flight_date::date) IN (12, 1, 2)`;
+  } else if (activeSeason === 'spring') {
+    periodFilter = sql`AND EXTRACT(MONTH FROM f.flight_date::date) IN (3, 4, 5)`;
+  } else if (activeSeason === 'autumn') {
+    periodFilter = sql`AND EXTRACT(MONTH FROM f.flight_date::date) IN (9, 10, 11)`;
+  }
+
+  const sinceClause = sql`${airlineFilter} ${dateFilter} ${routeMinFilter} ${routeFilter} ${directionFilter} ${dowFilter} ${periodFilter}`;
+  const routesSince  = sql`${airlineFilter} ${dateFilter} ${routeMinFilter} ${directionFilter} ${dowFilter} ${periodFilter}`;
+
   const wxDateFilter =
     range === '30'
       ? sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '30 days'`
       : range === '90'
         ? sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '90 days'`
         : sql``;
-  // Combined filter for weather JOIN queries (use same route exclusion)
-  const wxFilter = sql`${airlineFilter} ${wxDateFilter} ${routeMinFilter}`;
+  const wxFilter = sql`${airlineFilter} ${wxDateFilter} ${routeMinFilter} ${routeFilter} ${directionFilter} ${dowFilter} ${periodFilter}`;
 
   const [
     heroStats,
@@ -66,9 +109,9 @@ export const load: PageServerLoad = async ({ url }) => {
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS total_cancelled,
         COUNT(*) FILTER (WHERE NOT f.canceled) AS operated,
         COUNT(*) FILTER (WHERE NOT f.canceled AND f.delay_minutes IS NOT NULL) AS with_outcome,
-        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes IS NOT NULL AND f.delay_minutes <= 15 THEN 1 ELSE 0 END) AS on_time,
-        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END) AS delayed,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay_mins,
+        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes IS NOT NULL AND f.delay_minutes <= ${threshold} THEN 1 ELSE 0 END) AS on_time,
+        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END) AS delayed,
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay_mins,
         MIN(f.flight_date) AS earliest_date,
         MAX(f.flight_date) AS latest_date
       FROM flights f
@@ -94,7 +137,7 @@ export const load: PageServerLoad = async ({ url }) => {
         TO_CHAR(f.flight_date::date, 'Day') AS day_name,
         COUNT(*) AS flights,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay
       FROM flights f
       WHERE ${sinceClause}
       GROUP BY 1, 2
@@ -105,9 +148,9 @@ export const load: PageServerLoad = async ({ url }) => {
       SELECT
         EXTRACT(HOUR FROM f.scheduled_departure)::int AS hour,
         COUNT(*) AS flights,
-        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END) AS delayed,
+        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END) AS delayed,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay
       FROM flights f
       WHERE ${sinceClause} AND f.scheduled_departure IS NOT NULL
       GROUP BY 1
@@ -147,21 +190,21 @@ export const load: PageServerLoad = async ({ url }) => {
         f.departure_airport,
         f.arrival_airport,
         COUNT(*) AS flights,
-        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END) AS delayed,
+        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END) AS delayed,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay,
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay,
         MAX(CASE WHEN NOT f.canceled THEN f.delay_minutes END) AS max_delay,
-        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END)::numeric * 100
+        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END)::numeric * 100
           / NULLIF(COUNT(*) - SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END), 0), 1) AS delay_pct,
         ROUND(SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END)::numeric * 100 / NULLIF(COUNT(*), 0), 1) AS cancel_pct,
         ROUND((
-          COALESCE(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END)::numeric * 100
+          COALESCE(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END)::numeric * 100
             / NULLIF(COUNT(*) - SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END), 0), 0) * 0.5
           +
           SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END)::numeric * 100 / NULLIF(COUNT(*), 0) * 0.5
         ), 1) AS reliability_score
       FROM flights f
-      WHERE ${sinceClause}
+      WHERE ${routesSince}
       GROUP BY 1, 2, 3
       ORDER BY avg_delay DESC NULLS LAST
     `),
@@ -170,11 +213,11 @@ export const load: PageServerLoad = async ({ url }) => {
       SELECT
         f.flight_number,
         COUNT(*) AS operated,
-        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END) AS delayed,
+        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END) AS delayed,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
-        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END)::numeric * 100
+        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END)::numeric * 100
           / NULLIF(COUNT(*) - SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END), 0), 1) AS delay_pct,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay,
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay,
         MAX(CASE WHEN NOT f.canceled THEN f.delay_minutes END) AS worst_delay
       FROM flights f
       WHERE ${sinceClause}
@@ -190,8 +233,8 @@ export const load: PageServerLoad = async ({ url }) => {
         f.aircraft_type,
         COUNT(*) AS flights,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
-        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END) AS delayed,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay
+        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END) AS delayed,
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay
       FROM flights f
       WHERE ${sinceClause} AND f.aircraft_registration IS NOT NULL
       GROUP BY 1, 2
@@ -218,8 +261,8 @@ export const load: PageServerLoad = async ({ url }) => {
         COUNT(*) AS flights,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
         COUNT(*) FILTER (WHERE NOT f.canceled AND f.delay_minutes IS NOT NULL) AS with_outcome,
-        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes IS NOT NULL AND f.delay_minutes <= 15 THEN 1 ELSE 0 END) AS on_time,
-        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes IS NOT NULL AND f.delay_minutes <= 15 THEN 1 ELSE 0 END)::numeric * 100
+        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes IS NOT NULL AND f.delay_minutes <= ${threshold} THEN 1 ELSE 0 END) AS on_time,
+        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes IS NOT NULL AND f.delay_minutes <= ${threshold} THEN 1 ELSE 0 END)::numeric * 100
           / NULLIF(COUNT(*) FILTER (WHERE NOT f.canceled AND f.delay_minutes IS NOT NULL), 0), 1) AS otp_pct,
         ROUND(SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END)::numeric * 100 / NULLIF(COUNT(*), 0), 1) AS cancel_pct
       FROM flights f
@@ -235,7 +278,7 @@ export const load: PageServerLoad = async ({ url }) => {
         COUNT(*) AS flights,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
         ROUND(SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END)::numeric * 100 / NULLIF(COUNT(*), 0), 1) AS cancel_pct,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay
       FROM flights f
       WHERE ${sinceClause}
       GROUP BY 1, 2
@@ -252,11 +295,11 @@ export const load: PageServerLoad = async ({ url }) => {
         END AS wind_band,
         MIN(hw.wind_speed) AS band_min,
         COUNT(f.id) AS flights,
-        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END) AS delayed,
+        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END) AS delayed,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
-        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END)::numeric * 100
+        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END)::numeric * 100
           / NULLIF(COUNT(f.id) - SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END), 0), 1) AS delay_pct,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay
       FROM flights f
       JOIN historical_weather hw
         ON hw.airport_code = 'GCI'
@@ -276,11 +319,11 @@ export const load: PageServerLoad = async ({ url }) => {
         END AS vis_band,
         MIN(hw.visibility) AS band_min,
         COUNT(f.id) AS flights,
-        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END) AS delayed,
+        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END) AS delayed,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
-        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END)::numeric * 100
+        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END)::numeric * 100
           / NULLIF(COUNT(f.id) - SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END), 0), 1) AS delay_pct,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay
       FROM flights f
       JOIN historical_weather hw
         ON hw.airport_code = 'GCI'
@@ -300,11 +343,11 @@ export const load: PageServerLoad = async ({ url }) => {
         END AS precip_band,
         MIN(hw.precipitation) AS band_min,
         COUNT(f.id) AS flights,
-        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END) AS delayed,
+        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END) AS delayed,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
-        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END)::numeric * 100
+        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END)::numeric * 100
           / NULLIF(COUNT(f.id) - SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END), 0), 1) AS delay_pct,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay
       FROM flights f
       JOIN historical_weather hw
         ON hw.airport_code = 'GCI'
@@ -318,11 +361,11 @@ export const load: PageServerLoad = async ({ url }) => {
       SELECT
         hw.weather_code,
         COUNT(f.id) AS flights,
-        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END) AS delayed,
+        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END) AS delayed,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
-        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END)::numeric * 100
+        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END)::numeric * 100
           / NULLIF(COUNT(f.id) - SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END), 0), 1) AS delay_pct,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay
       FROM flights f
       JOIN historical_weather hw
         ON hw.airport_code = 'GCI'
@@ -337,8 +380,8 @@ export const load: PageServerLoad = async ({ url }) => {
         f.flight_date::text,
         COUNT(f.id) AS flights,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
-        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END) AS delayed,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay,
+        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END) AS delayed,
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay,
         ROUND(AVG(hw.wind_speed)::numeric, 1) AS wind_kn,
         ROUND(SUM(hw.precipitation)::numeric, 1) AS precip_mm,
         ROUND(AVG(hw.visibility)::numeric, 1) AS vis_km
@@ -364,7 +407,10 @@ export const load: PageServerLoad = async ({ url }) => {
         ROUND(
           SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 5 THEN f.delay_minutes ELSE 0 END)::numeric
           / NULLIF(COUNT(*) FILTER (WHERE NOT f.canceled), 0), 1
-        ) AS avg_delay_all_operated
+        ) AS avg_delay_all_operated,
+        SUM(CASE WHEN f.delay_minutes > 5 AND NOT f.canceled THEN
+          f.delay_minutes * CASE WHEN f.departure_airport = 'ACI' OR f.arrival_airport = 'ACI' THEN 15 ELSE 50 END
+        ELSE 0 END) AS pax_weighted_delay_mins
       FROM flights f
       WHERE ${sinceClause}
     `),
@@ -374,7 +420,10 @@ export const load: PageServerLoad = async ({ url }) => {
         f.flight_date::text,
         COUNT(*) AS flights,
         SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 5 THEN f.delay_minutes ELSE 0 END) AS total_delay_mins,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 5 THEN f.delay_minutes END), 0) AS avg_delay
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 5 THEN f.delay_minutes END), 0) AS avg_delay,
+        SUM(CASE WHEN f.delay_minutes > 5 AND NOT f.canceled THEN
+          f.delay_minutes * CASE WHEN f.departure_airport = 'ACI' OR f.arrival_airport = 'ACI' THEN 15 ELSE 50 END
+        ELSE 0 END) AS pax_weighted_delay_mins
       FROM flights f
       WHERE ${sinceClause}
       GROUP BY 1
@@ -393,6 +442,13 @@ export const load: PageServerLoad = async ({ url }) => {
 
   return {
     range,
+    activeAirline,
+    activeRoute,
+    activeDirection,
+    activeDow,
+    activeSeason,
+    activeMonth,
+    threshold,
     heroStats: heroStats.rows[0] as Record<string, unknown>,
     delayDistribution: delayDistribution.rows[0] as Record<string, unknown>,
     dayOfWeek: dayOfWeek.rows as Record<string, unknown>[],

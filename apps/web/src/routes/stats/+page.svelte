@@ -2,6 +2,7 @@
   import { browser } from '$app/environment';
   import { goto } from '$app/navigation';
   import { page, navigating } from '$app/stores';
+  import { slide } from 'svelte/transition';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -101,6 +102,46 @@
   const distTotal = $derived(
     n(dist.on_time) + n(dist.d1_15) + n(dist.d16_30) + n(dist.d31_60) + n(dist.d1_2h) + n(dist.d2hplus) + n(dist.cancelled)
   );
+
+  function routeKey(r: Record<string, unknown>): string {
+    return `${r.departure_airport}-${r.arrival_airport}`;
+  }
+
+  // Filters come from URL params — server re-runs all queries on change
+  const filterRoute     = $derived(data.activeRoute     || null);
+  const filterAirline   = $derived(data.activeAirline   || null);
+  const filterDirection = $derived(data.activeDirection || null);
+  const filterDow       = $derived(data.activeDow       || null);
+  const filterSeason    = $derived(data.activeSeason    || null);
+  const filterMonth     = $derived(data.activeMonth     || null);
+  const filterThreshold = $derived(data.threshold ?? 15);
+
+  function filterUrl(updates: Record<string, string | null>): string {
+    const p = new URLSearchParams($page.url.searchParams);
+    for (const [k, v] of Object.entries(updates)) {
+      if (v === null || v === '') p.delete(k); else p.set(k, v);
+    }
+    return `/stats?${p}`;
+  }
+
+  function setRouteFilter(key: string) {
+    goto(filterUrl({ route: filterRoute === key ? null : key }));
+  }
+
+  function clearAllFilters() {
+    goto(filterUrl({ route: null, airline: null, direction: null, dow: null, season: null, month: null, threshold: null }));
+  }
+
+  const activeFilterCount = $derived([
+    filterAirline, filterRoute, filterDirection, filterDow,
+    filterSeason, filterMonth, filterThreshold !== 15 ? 'thr' : null,
+  ].filter(Boolean).length);
+  const hasActiveFilters = $derived(activeFilterCount > 0);
+
+  let panelOpen = $state(false);
+
+  const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   type SortDir = 'asc' | 'desc';
   let routeSort = $state<{ col: string; dir: SortDir }>({ col: 'avg_delay', dir: 'desc' });
@@ -362,6 +403,11 @@
   const isLoading = $derived(!!$navigating && $navigating.to?.url.pathname === '/stats');
   const sk = 'animate-pulse rounded bg-muted';
 
+  const topRouteOptions = $derived.by(() => {
+    const routes = data.worstRoutes as Record<string, unknown>[];
+    return [...routes].sort((a, b) => n(b.flights) - n(a.flights)).slice(0, 8);
+  });
+
   type InsightTone = 'green' | 'amber' | 'red' | 'neutral';
   interface Insight {
     label: string;
@@ -463,8 +509,8 @@
   const impactMins = $derived(n(impactData.total_delay_mins_gt5));
   const impactHours = $derived(Math.round(impactMins / 60));
   const impactDays = $derived((impactMins / 60 / 24).toFixed(1));
-  const avgPax = 50;
-  const paxHours = $derived(Math.round(impactMins * avgPax / 60));
+  // pax-weighted: ACI routes = 15 pax, all others = 50 pax (calculated server-side)
+  const paxHours = $derived(Math.round(n(impactData.pax_weighted_delay_mins) / 60));
   const costLow = $derived(Math.round(paxHours * 11.5));
   const costHigh = $derived(Math.round(paxHours * 25));
 
@@ -533,7 +579,7 @@
 <div class="container max-w-5xl px-4 py-6 sm:py-8">
 
   <!-- Header -->
-  <div class="flex flex-col gap-3 mb-6 sm:flex-row sm:items-end sm:justify-between">
+  <div class="flex flex-col gap-3 mb-4 sm:flex-row sm:items-end sm:justify-between">
     <div>
       <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Flight Statistics</h1>
       <p class="text-sm text-muted-foreground mt-1">
@@ -542,12 +588,105 @@
         · {totalFlights.toLocaleString()} flights
       </p>
     </div>
-    <div class="flex items-center self-start sm:self-auto gap-1 rounded-lg border bg-muted/40 p-1">
-      {#each [['all', 'All time'], ['90', '90 days'], ['30', '30 days']] as [val, label]}
-        <a href="/stats?range={val}" class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors {currentRange === val ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}">{label}</a>
-      {/each}
+    <div class="flex items-center self-start sm:self-auto gap-2">
+      <div class="flex items-center gap-1 rounded-lg border bg-muted/40 p-1">
+        {#each [['all', 'All time'], ['90', '90 days'], ['30', '30 days']] as [val, label]}
+          <a href="/stats?range={val}" class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors {currentRange === val ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}">{label}</a>
+        {/each}
+      </div>
+      <button
+        onclick={() => panelOpen = !panelOpen}
+        class="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors {panelOpen || hasActiveFilters ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/40 text-muted-foreground hover:text-foreground'}"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
+        Filters{#if activeFilterCount > 0}&nbsp;({activeFilterCount}){/if}
+      </button>
     </div>
   </div>
+
+  <!-- Collapsible filter panel -->
+  {#if panelOpen}
+  <div transition:slide={{ duration: 180 }} class="rounded-xl border bg-card p-4 mb-5 space-y-4">
+
+    <!-- Row 1: Airline + Direction + Delay threshold -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Airline</p>
+        <div class="flex flex-wrap gap-1.5">
+          {#each [['', 'All'], ['GR', 'Aurigny']] as [val, label]}
+            <a href="{filterUrl({ airline: val || null })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {(val === '' ? filterAirline === null : filterAirline === val) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</a>
+          {/each}
+        </div>
+      </div>
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Direction</p>
+        <div class="flex flex-wrap gap-1.5">
+          {#each [['', 'All'], ['dep', 'Departures'], ['arr', 'Arrivals']] as [val, label]}
+            <a href="{filterUrl({ direction: val || null })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {(val === '' ? filterDirection === null : filterDirection === val) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</a>
+          {/each}
+        </div>
+      </div>
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Delay threshold (on-time)</p>
+        <div class="flex flex-wrap gap-1.5">
+          {#each [[0, '0 min'], [15, '15 min'], [30, '30 min']] as [val, label]}
+            <a href="{filterUrl({ threshold: val === 15 ? null : String(val) })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {filterThreshold === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</a>
+          {/each}
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 2: Routes -->
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Route</p>
+      <div class="flex flex-wrap gap-1.5">
+        {#each topRouteOptions as route}
+          {@const key = routeKey(route)}
+          <button onclick={() => setRouteFilter(key)} class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {filterRoute === key ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{fmtRoute(String(route.departure_airport), String(route.arrival_airport))}</button>
+        {/each}
+      </div>
+    </div>
+
+    <!-- Row 3: Day of week -->
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Day of week</p>
+      <div class="flex flex-wrap gap-1.5">
+        <a href="{filterUrl({ dow: null })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {filterDow === null ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">All</a>
+        {#each DOW_LABELS as label, i}
+          <a href="{filterUrl({ dow: filterDow === String(i) ? null : String(i) })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {filterDow === String(i) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</a>
+        {/each}
+      </div>
+    </div>
+
+    <!-- Row 4: Season + Month -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Season</p>
+        <div class="flex flex-wrap gap-1.5">
+          {#each [['', 'All'], ['spring', 'Spring'], ['summer', 'Summer'], ['autumn', 'Autumn'], ['winter', 'Winter']] as [val, label]}
+            <a href="{filterUrl({ season: val || null, month: null, range: val ? 'all' : null })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {(val === '' ? filterSeason === null && filterMonth === null : filterSeason === val && filterMonth === null) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</a>
+          {/each}
+        </div>
+      </div>
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Month</p>
+        <div class="flex flex-wrap gap-1.5">
+          {#each MONTH_LABELS as label, i}
+            {@const m = String(i + 1)}
+            <a href="{filterUrl({ month: filterMonth === m ? null : m, season: null, range: filterMonth === m ? null : 'all' })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {filterMonth === m ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</a>
+          {/each}
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer: clear -->
+    {#if hasActiveFilters}
+    <div class="pt-1 border-t flex justify-end">
+      <button onclick={clearAllFilters} class="text-xs text-muted-foreground hover:text-foreground">Clear all filters ×</button>
+    </div>
+    {/if}
+  </div>
+  {/if}
 
   <!-- Hero stats -->
   <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
@@ -562,7 +701,7 @@
     {:else}
       {#each [
         { label: 'Total Flights', value: totalFlights.toLocaleString(), sub: `${(data.dailyOtp as []).length} days tracked`, color: '' },
-        { label: 'On-Time Rate', value: `${onTimePct}%`, sub: `delay ≤ 15 min · ${n(hero.with_outcome)} flights with data`, color: Number(onTimePct) > 80 ? 'text-green-600' : Number(onTimePct) > 60 ? 'text-amber-600' : 'text-red-600' },
+        { label: 'On-Time Rate', value: `${onTimePct}%`, sub: `delay ≤ ${filterThreshold} min · ${n(hero.with_outcome)} flights with data`, color: Number(onTimePct) > 80 ? 'text-green-600' : Number(onTimePct) > 60 ? 'text-amber-600' : 'text-red-600' },
         { label: 'Cancellation Rate', value: `${cancelPct}%`, sub: `${totalCancelled} cancelled`, color: Number(cancelPct) > 15 ? 'text-red-600' : Number(cancelPct) > 8 ? 'text-amber-600' : 'text-green-600' },
         { label: 'Avg Delay (when late)', value: fmt(avgDelay), sub: 'exact from records', color: avgDelay > 120 ? 'text-red-600' : avgDelay > 60 ? 'text-amber-600' : '' },
       ] as card}
@@ -604,7 +743,7 @@
   <div class="rounded-xl border bg-card mb-6 overflow-hidden">
     <div class="px-4 pt-4 pb-3 border-b">
       <h2 class="text-sm font-semibold text-foreground">Cumulative Delay Impact</h2>
-      <p class="text-xs text-muted-foreground mt-0.5">Based on exact recorded delay minutes for flights delayed &gt;5 min · passenger estimates assume {avgPax} pax/flight average</p>
+      <p class="text-xs text-muted-foreground mt-0.5">Based on exact recorded delay minutes for flights delayed &gt;5 min · 15 pax (Alderney routes) · 50 pax (all other routes)</p>
     </div>
     {#if isLoading}
       <div class="grid grid-cols-2 sm:grid-cols-4">
@@ -631,7 +770,7 @@
         <div class="p-3 sm:p-4 border-r">
           <p class="text-xs font-medium text-muted-foreground mb-1">Est. pax-hours lost</p>
           <p class="text-xl sm:text-2xl font-bold tabular-nums text-amber-600">{fmtBig(paxHours)}</p>
-          <p class="text-xs text-muted-foreground mt-1">~{avgPax} pax/flight</p>
+          <p class="text-xs text-muted-foreground mt-1">15 pax (ACI) / 50 pax (other)</p>
         </div>
         <div class="p-3 sm:p-4">
           <p class="text-xs font-medium text-muted-foreground mb-1">Est. economic cost</p>
@@ -665,7 +804,7 @@
               <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                 <span>{row.flights} flights</span>
                 <span>avg {fmt(row.avg_delay)}</span>
-                <span class="text-amber-600">{Math.round(n(row.total_delay_mins) * avgPax / 60).toLocaleString()} pax-hrs</span>
+                <span class="text-amber-600">{Math.round(n(row.pax_weighted_delay_mins) / 60).toLocaleString()} pax-hrs</span>
               </div>
             </button>
           {/each}
@@ -700,7 +839,7 @@
                   <td class="{tdBase} tabular-nums">{row.flights}</td>
                   <td class="{tdBase} tabular-nums">{fmt(row.avg_delay)}</td>
                   <td class="{tdBase} tabular-nums font-semibold text-red-600">{Math.round(n(row.total_delay_mins) / 60)}h {n(row.total_delay_mins) % 60}m</td>
-                  <td class="{tdBase} pr-4 tabular-nums text-amber-600">{Math.round(n(row.total_delay_mins) * avgPax / 60).toLocaleString()}</td>
+                  <td class="{tdBase} pr-4 tabular-nums text-amber-600">{Math.round(n(row.pax_weighted_delay_mins) / 60).toLocaleString()}</td>
                 </tr>
               {/each}
             {/if}
@@ -747,7 +886,7 @@
   <div class="rounded-xl border bg-card mb-4 overflow-hidden">
     <div class="flex items-center justify-between px-4 pt-4 pb-2">
       <h2 class="text-sm font-semibold text-foreground">Routes</h2>
-      <span class="text-xs text-muted-foreground hidden sm:block">Tap row to browse flights</span>
+      <span class="text-xs text-muted-foreground hidden sm:block">{filterRoute ? 'Click row to deselect · ↗ to browse' : 'Click row to filter · ↗ to browse'}</span>
     </div>
     {#if isLoading}
       <div class="divide-y sm:hidden">
@@ -765,10 +904,13 @@
     {:else}
       <div class="divide-y sm:hidden">
         {#each sortedRoutes as row}
-          <button onclick={() => nav(`/search?from=${row.departure_airport}&to=${row.arrival_airport}`)} class="w-full text-left px-4 py-3 hover:bg-muted/30 active:bg-muted/50 transition-colors">
+          <button onclick={() => setRouteFilter(routeKey(row))} class="w-full text-left px-4 py-3 transition-colors {filterRoute === routeKey(row) ? 'bg-primary/5' : 'hover:bg-muted/30 active:bg-muted/50'}">
             <div class="flex items-center justify-between gap-2 mb-1">
               <span class="font-semibold text-sm truncate">{fmtRoute(String(row.departure_airport), String(row.arrival_airport))}</span>
-              <span class="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium {reliabilityBadge(row.reliability_score)}">{row.reliability_score ?? '—'}</span>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {reliabilityBadge(row.reliability_score)}">{row.reliability_score ?? '—'}</span>
+                <a href="/search?from={row.departure_airport}&to={row.arrival_airport}" onclick={(e) => e.stopPropagation()} class="text-xs text-muted-foreground hover:text-foreground">↗</a>
+              </div>
             </div>
             <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
               <span>{row.flights} flights</span>
@@ -800,8 +942,11 @@
             {/each}
           {:else}
             {#each sortedRoutes as row}
-              <tr onclick={() => nav(`/search?from=${row.departure_airport}&to=${row.arrival_airport}`)} class="hover:bg-muted/30 active:bg-muted/50 transition-colors cursor-pointer">
-                <td class="{tdBase} pl-4 font-semibold whitespace-nowrap">{fmtRoute(String(row.departure_airport), String(row.arrival_airport))}</td>
+              <tr onclick={() => setRouteFilter(routeKey(row))} class="transition-colors cursor-pointer {filterRoute === routeKey(row) ? 'bg-primary/5' : 'hover:bg-muted/30 active:bg-muted/50'}">
+                <td class="{tdBase} pl-4 font-semibold whitespace-nowrap">
+                  {fmtRoute(String(row.departure_airport), String(row.arrival_airport))}
+                  <a href="/search?from={row.departure_airport}&to={row.arrival_airport}" onclick={(e) => e.stopPropagation()} class="ml-1.5 text-xs font-normal text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity">↗</a>
+                </td>
                 <td class="{tdBase} tabular-nums">{row.flights}</td>
                 <td class="{tdBase} tabular-nums" style="{cellBg(row.delay_pct)}"><span class="{delayColor(row.delay_pct)}">{row.delay_pct ?? '—'}%</span></td>
                 <td class="{tdBase} tabular-nums">{fmt(row.avg_delay)}</td>
@@ -819,7 +964,7 @@
   <!-- Flight numbers -->
   <div class="rounded-xl border bg-card mb-4 overflow-hidden">
     <div class="flex items-center justify-between px-4 pt-4 pb-2">
-      <h2 class="text-sm font-semibold text-foreground">Most Delayed Flights</h2>
+      <h2 class="text-sm font-semibold text-foreground">Most Delayed Flights{#if filterAirline}&nbsp;<span class="text-xs font-normal text-muted-foreground">· Aurigny only</span>{/if}</h2>
       <span class="text-xs text-muted-foreground hidden sm:block">Tap row to search</span>
     </div>
     {#if isLoading}
@@ -961,7 +1106,7 @@
       </div>
     {:else}
       <div class="divide-y sm:hidden">
-        {#each data.topDelays as row}
+        {#each (data.topDelays as Record<string, unknown>[]) as row}
           <button onclick={() => nav(`/flights/${row.id}`)} class="w-full text-left px-4 py-3 hover:bg-muted/30 active:bg-muted/50 transition-colors">
             <div class="flex items-center justify-between gap-2 mb-1">
               <span class="font-semibold text-sm">{row.flight_number}</span>
@@ -987,7 +1132,7 @@
           {#if isLoading}
             {#each [1,2,3,4,5] as _}<tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-14"></div></td><td class="{tdBase}"><div class="{sk} h-4 w-24"></div></td><td class="{tdBase}"><div class="{sk} h-4 w-16"></div></td><td class="{tdBase} pr-4"><div class="{sk} h-4 w-10"></div></td></tr>{/each}
           {:else}
-            {#each data.topDelays as row}
+            {#each (data.topDelays as Record<string, unknown>[]) as row}
               <tr onclick={() => nav(`/flights/${row.id}`)} class="hover:bg-muted/30 active:bg-muted/50 transition-colors cursor-pointer">
                 <td class="{tdBase} pl-4 font-semibold">{row.flight_number}</td>
                 <td class="{tdBase}">{fmtDate(row.flight_date)}</td>
