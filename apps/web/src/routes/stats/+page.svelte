@@ -44,7 +44,9 @@
   }
   function fmtDate(d: unknown): string {
     if (!d) return '—';
-    return new Date(String(d)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    const s = String(d).slice(0, 10); // "YYYY-MM-DD" — strip time/tz before parsing
+    const [y, m, day] = s.split('-').map(Number);
+    return new Date(y, m - 1, day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   }
   function delayColor(pct: unknown): string {
     const p = Number(pct) || 0;
@@ -495,7 +497,7 @@
   <title>Flight Statistics — airways.gg</title>
   <meta name="description" content="Guernsey Airport flight statistics: delays, cancellations, routes, weather impact and more." />
   <link rel="canonical" href="{data.siteUrl}/stats" />
-  <meta name="robots" content="noindex, follow" />
+  <meta name="robots" content="index, follow" />
 </svelte:head>
 
 {#if showDisclaimer}

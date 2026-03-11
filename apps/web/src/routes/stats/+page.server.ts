@@ -1,3 +1,4 @@
+import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { sql } from 'drizzle-orm';
@@ -70,7 +71,7 @@ export const load: PageServerLoad = async ({ url }) => {
         TO_CHAR(f.flight_date::date, 'Day') AS day_name,
         COUNT(*) AS flights,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 0 THEN f.delay_minutes END), 0) AS avg_delay
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay
       FROM flights f
       WHERE ${sinceClause}
       GROUP BY 1, 2
@@ -314,7 +315,7 @@ export const load: PageServerLoad = async ({ url }) => {
         COUNT(f.id) AS flights,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
         SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN 1 ELSE 0 END) AS delayed,
-        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 0 THEN f.delay_minutes END), 0) AS avg_delay,
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > 15 THEN f.delay_minutes END), 0) AS avg_delay,
         ROUND(AVG(hw.wind_speed)::numeric, 1) AS wind_kn,
         ROUND(SUM(hw.precipitation)::numeric, 1) AS precip_mm,
         ROUND(AVG(hw.visibility)::numeric, 1) AS vis_km
@@ -357,7 +358,10 @@ export const load: PageServerLoad = async ({ url }) => {
       ORDER BY total_delay_mins DESC
       LIMIT 10
     `),
-  ]);
+  ]).catch((e) => {
+    console.error('Stats queries failed:', e);
+    error(503, 'Statistics temporarily unavailable');
+  });
 
   const wxFlightCount = (windDelays.rows as { flights: unknown }[]).reduce(
     (s, r) => s + Number(r.flights),

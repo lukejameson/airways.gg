@@ -3,6 +3,10 @@ node_modules/
 alpha_testing/
 orignal_scraper/
 
+.claude-flow
+.claude
+.swarm
+
 # Build outputs
 .svelte-kit/
 build/
