@@ -528,7 +528,7 @@
   <!-- Header -->
   <div class="flex flex-col gap-3 mb-6 sm:flex-row sm:items-end sm:justify-between">
     <div>
-      <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Network Statistics</h1>
+      <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Flight Statistics</h1>
       <p class="text-sm text-muted-foreground mt-1">
         Guernsey Airport (GCI)
         {#if hero.earliest_date && hero.latest_date}· {earliestDate} – {latestDate}{/if}
@@ -600,9 +600,9 @@
       <p class="text-xs text-muted-foreground mt-0.5">Based on exact recorded delay minutes for flights delayed &gt;5 min · passenger estimates assume {avgPax} pax/flight average</p>
     </div>
     {#if isLoading}
-      <div class="grid grid-cols-4 divide-x overflow-x-auto">
-        {#each [1,2,3,4] as _}
-          <div class="p-3 sm:p-4 min-w-[120px]">
+      <div class="grid grid-cols-2 sm:grid-cols-4">
+        {#each [1,2,3,4] as i}
+          <div class="p-3 sm:p-4 {i % 2 !== 0 ? 'border-r' : ''} {i <= 2 ? 'border-b sm:border-b-0' : ''} {i < 4 ? 'sm:border-r' : ''}">
             <div class="{sk} h-3 w-20 mb-2"></div>
             <div class="{sk} h-7 w-16 mb-2"></div>
             <div class="{sk} h-3 w-24"></div>
@@ -610,23 +610,23 @@
         {/each}
       </div>
     {:else}
-      <div class="grid grid-cols-4 divide-x overflow-x-auto">
-        <div class="p-3 sm:p-4 min-w-[120px]">
+      <div class="grid grid-cols-2 sm:grid-cols-4">
+        <div class="p-3 sm:p-4 border-r border-b sm:border-b-0">
           <p class="text-xs font-medium text-muted-foreground mb-1">Total delay time</p>
           <p class="text-xl sm:text-2xl font-bold tabular-nums text-red-600">{impactHours.toLocaleString()}<span class="text-sm sm:text-base font-semibold ml-0.5">h</span></p>
           <p class="text-xs text-muted-foreground mt-1">{impactDays} days</p>
         </div>
-        <div class="p-3 sm:p-4 min-w-[120px]">
+        <div class="p-3 sm:p-4 border-b sm:border-b-0 sm:border-r">
           <p class="text-xs font-medium text-muted-foreground mb-1">Flights delayed &gt;5 min</p>
           <p class="text-xl sm:text-2xl font-bold tabular-nums">{fmtBig(n(impactData.flights_delayed_gt5))}</p>
           <p class="text-xs text-muted-foreground mt-1">of {fmtBig(n(impactData.operated))} operated</p>
         </div>
-        <div class="p-3 sm:p-4 min-w-[120px]">
+        <div class="p-3 sm:p-4 border-r">
           <p class="text-xs font-medium text-muted-foreground mb-1">Est. pax-hours lost</p>
           <p class="text-xl sm:text-2xl font-bold tabular-nums text-amber-600">{fmtBig(paxHours)}</p>
           <p class="text-xs text-muted-foreground mt-1">~{avgPax} pax/flight</p>
         </div>
-        <div class="p-3 sm:p-4 min-w-[120px]">
+        <div class="p-3 sm:p-4">
           <p class="text-xs font-medium text-muted-foreground mb-1">Est. economic cost</p>
           <p class="text-xl sm:text-2xl font-bold tabular-nums">{fmtMoney(costLow)}<span class="text-sm font-normal text-muted-foreground">–</span>{fmtMoney(costHigh)}</p>
           <p class="text-xs text-muted-foreground mt-1">£11.50–£25/hr</p>

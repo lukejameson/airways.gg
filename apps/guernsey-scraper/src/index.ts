@@ -22,7 +22,7 @@ if (envPath) {
   console.warn('[Guernsey] Warning: .env file not found, relying on environment variables');
 }
 
-import { runBackfill, linkOrphanedStatusHistory, deduplicateFlights } from './scraper';
+import { runBackfill, linkOrphanedStatusHistory, deduplicateFlights, fixActualTimes } from './scraper';
 import { runLiveMode } from './live';
 
 async function main() {
@@ -45,6 +45,15 @@ async function main() {
     console.log('[Guernsey] Running dedup mode...');
     await deduplicateFlights();
     console.log('[Guernsey] Dedup completed. Exiting...');
+    process.exit(0);
+  }
+
+  if (mode === 'fix-actual-times') {
+    // Correct actual_departure/actual_arrival/delay_minutes for flights where the
+    // status timestamp date was used instead of the flight date (bug now fixed in scraper).
+    console.log('[Guernsey] Running fix-actual-times mode...');
+    await fixActualTimes();
+    console.log('[Guernsey] Fix completed. Exiting...');
     process.exit(0);
   }
 

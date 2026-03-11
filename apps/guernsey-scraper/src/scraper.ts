@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { db, flights, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, routeFlightMinutes, locationToIata } from '@airways/database';
-import { eq, and, isNull, sql, count } from 'drizzle-orm';
+import { eq, and, isNull, sql, count, or, isNotNull } from 'drizzle-orm';
 
 interface StatusUpdate {
   flightCode: string;
@@ -333,13 +333,18 @@ function deriveStatus(updates: StatusUpdate[], scheduledTime: Date): string | nu
 
 /**
  * Extract actual time from status messages like "Landed 12:14" or "Airborne at 06:49".
+ *
+ * Uses referenceDate (the flight's scheduled time) as the base date rather than the
+ * status update's timestamp. This prevents false large delays when airports.gg posts
+ * "Airborne at 22:30" the following morning (e.g. 07:03 next day) — without this fix,
+ * building the Date from the next-day timestamp produces a ~24-hour apparent delay.
  */
-function extractActualTime(updates: StatusUpdate[], keyword: string): Date | null {
+function extractActualTime(updates: StatusUpdate[], keyword: string, referenceDate: Date): Date | null {
   for (const u of [...updates].reverse()) {
     if (u.statusMessage.toLowerCase().includes(keyword.toLowerCase())) {
       const parsed = parseHHMM(u.statusMessage);
       if (parsed) {
-        const t = new Date(u.statusTimestamp);
+        const t = new Date(referenceDate);
         t.setHours(parsed.hh, parsed.mm, 0, 0);
         return t;
       }
@@ -447,10 +452,10 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
   }
 
   const actualDeparture = scrapedFlight.type === 'departures'
-    ? extractActualTime(scrapedFlight.statusUpdates, 'Airborne')
+    ? extractActualTime(scrapedFlight.statusUpdates, 'Airborne', scheduledDeparture)
     : null;
   const actualArrival = scrapedFlight.type === 'arrivals'
-    ? extractActualTime(scrapedFlight.statusUpdates, 'Landed')
+    ? extractActualTime(scrapedFlight.statusUpdates, 'Landed', scheduledArrival)
     : null;
   const status = deriveStatus(scrapedFlight.statusUpdates, scrapedFlight.scheduledTime);
   const canceled = extractCanceled(scrapedFlight.statusUpdates);
@@ -827,6 +832,166 @@ export async function scrapeDayFlights(date: Date): Promise<{ flights: number; u
   }
   return { flights: totalFlights, updates: totalUpdates };
 }
+// Guernsey routes are at most ~2h flight time. Any delay exceeding this threshold
+// is impossible in practice and indicates corrupted data from airport.gg.
+const MAX_REALISTIC_DELAY_MINUTES = 360; // 6 hours
+
+/**
+ * One-shot fixer: corrects actual_departure, actual_arrival, and delay_minutes for
+ * flights where airport.gg's late-posting behaviour produced bad values.
+ *
+ * Two passes:
+ *
+ * Pass 1 — next-day timestamp bug:
+ *   actual_departure::date > flight_date  OR  actual_arrival::date > flight_date
+ *   Re-derives correct time from status history anchored to scheduled time.
+ *
+ * Pass 2 — same-day late-timestamp bug:
+ *   Historical flights with delay_minutes > MAX_REALISTIC_DELAY_MINUTES that were
+ *   missed by pass 1 (status was posted same day but many hours after the flight).
+ *   Nulls out actual times and delay_minutes that are clearly impossible.
+ */
+export async function fixActualTimes(): Promise<number> {
+  let fixed = 0;
+
+  // ── Pass 1: actual time is on a different date than flight_date ───────────
+  console.log('[Guernsey] Pass 1: scanning for next-day timestamp corruptions...');
+
+  const nextDayCorrupted = await db
+    .select({
+      id: flights.id,
+      flightNumber: flights.flightNumber,
+      flightDate: flights.flightDate,
+      departureAirport: flights.departureAirport,
+      scheduledDeparture: flights.scheduledDeparture,
+      scheduledArrival: flights.scheduledArrival,
+      actualDeparture: flights.actualDeparture,
+      actualArrival: flights.actualArrival,
+    })
+    .from(flights)
+    .where(
+      or(
+        and(
+          isNotNull(flights.actualDeparture),
+          sql`${flights.actualDeparture}::date > ${flights.flightDate}::date`,
+        ),
+        and(
+          isNotNull(flights.actualArrival),
+          sql`${flights.actualArrival}::date > ${flights.flightDate}::date`,
+        ),
+      ),
+    );
+
+  console.log(`[Guernsey] Pass 1: found ${nextDayCorrupted.length} flights`);
+
+  for (const flight of nextDayCorrupted) {
+    const history = await db
+      .select({
+        flightCode: flightStatusHistory.flightCode,
+        flightDate: flightStatusHistory.flightDate,
+        statusTimestamp: flightStatusHistory.statusTimestamp,
+        statusMessage: flightStatusHistory.statusMessage,
+      })
+      .from(flightStatusHistory)
+      .where(
+        and(
+          eq(flightStatusHistory.flightId, flight.id),
+          eq(flightStatusHistory.source, 'guernsey_airport'),
+        ),
+      );
+
+    if (history.length === 0) {
+      console.log(`  [skip] ${flight.flightNumber} ${flight.flightDate} — no guernsey status history`);
+      continue;
+    }
+
+    const updates: StatusUpdate[] = history.map(h => ({
+      flightCode: h.flightCode,
+      flightDate: typeof h.flightDate === 'string' ? h.flightDate : (h.flightDate as Date).toISOString().split('T')[0],
+      statusTimestamp: h.statusTimestamp,
+      statusMessage: h.statusMessage,
+    }));
+
+    const isDeparture = flight.departureAirport === 'GCI';
+    const correctedDeparture = isDeparture
+      ? extractActualTime(updates, 'Airborne', flight.scheduledDeparture)
+      : null;
+    const correctedArrival = !isDeparture
+      ? extractActualTime(updates, 'Landed', flight.scheduledArrival)
+      : null;
+
+    const correctedDelay = correctedDeparture
+      ? Math.round((correctedDeparture.getTime() - flight.scheduledDeparture.getTime()) / 60_000)
+      : correctedArrival
+        ? Math.round((correctedArrival.getTime() - flight.scheduledArrival.getTime()) / 60_000)
+        : null;
+
+    const updateSet: Record<string, unknown> = { updatedAt: new Date() };
+    if (correctedDeparture) updateSet.actualDeparture = correctedDeparture;
+    if (correctedArrival) updateSet.actualArrival = correctedArrival;
+    if (correctedDelay !== null) updateSet.delayMinutes = correctedDelay;
+
+    if (Object.keys(updateSet).length > 1) {
+      await db.update(flights).set(updateSet as any).where(eq(flights.id, flight.id));
+      const oldTime = (flight.actualDeparture ?? flight.actualArrival)?.toISOString();
+      const newTime = (correctedDeparture ?? correctedArrival)?.toISOString();
+      console.log(`  [fix-p1] ${flight.flightNumber} ${flight.flightDate}: ${oldTime} → ${newTime} (delay: ${correctedDelay ?? '—'} min)`);
+      fixed++;
+    }
+  }
+
+  // ── Pass 2: same-day late-timestamp — delay exceeds realistic maximum ─────
+  // Airport.gg sometimes posts "Landed HH:MM" or "Delayed To HH:MM" hours after
+  // the flight on the same calendar day, producing an impossible delay figure.
+  // These were NOT caught by pass 1 because actual::date == flight_date.
+  // Only process historical flights (flight_date < today) to avoid touching live data.
+  console.log(`[Guernsey] Pass 2: scanning for same-day corruptions (delay > ${MAX_REALISTIC_DELAY_MINUTES} min)...`);
+
+  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+
+  const largeDelay = await db
+    .select({
+      id: flights.id,
+      flightNumber: flights.flightNumber,
+      flightDate: flights.flightDate,
+      departureAirport: flights.departureAirport,
+      delayMinutes: flights.delayMinutes,
+      actualDeparture: flights.actualDeparture,
+      actualArrival: flights.actualArrival,
+    })
+    .from(flights)
+    .where(
+      and(
+        isNotNull(flights.delayMinutes),
+        sql`${flights.delayMinutes} > ${MAX_REALISTIC_DELAY_MINUTES}`,
+        sql`${flights.flightDate}::date < ${todayStr}::date`,
+      ),
+    );
+
+  console.log(`[Guernsey] Pass 2: found ${largeDelay.length} flights`);
+
+  for (const flight of largeDelay) {
+    const isDeparture = flight.departureAirport === 'GCI';
+    const updateSet: Record<string, unknown> = {
+      delayMinutes: null,
+      updatedAt: new Date(),
+    };
+    // Only null the actual time that drove the bad delay — leave the other side untouched
+    if (isDeparture && flight.actualDeparture !== null) {
+      updateSet.actualDeparture = null;
+    } else if (!isDeparture && flight.actualArrival !== null) {
+      updateSet.actualArrival = null;
+    }
+
+    await db.update(flights).set(updateSet as any).where(eq(flights.id, flight.id));
+    console.log(`  [fix-p2] ${flight.flightNumber} ${flight.flightDate}: cleared ${flight.delayMinutes} min delay`);
+    fixed++;
+  }
+
+  console.log(`[Guernsey] Total fixed: ${fixed}`);
+  return fixed;
+}
+
 export async function runBackfill(
   startDateStr?: string,
   endDateStr?: string,
