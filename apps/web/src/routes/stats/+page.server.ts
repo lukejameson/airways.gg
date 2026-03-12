@@ -7,22 +7,28 @@ export const load: PageServerLoad = async ({ url }) => {
   const range = url.searchParams.get('range') ?? '90';
   const activeAirline = url.searchParams.get('airline') ?? '';
   const activeRoute = url.searchParams.get('route') ?? '';
-  const activeDirection = url.searchParams.get('direction') ?? ''; // 'dep' | 'arr'
-  const activeDow = url.searchParams.get('dow') ?? '';             // '0'-'6'
-  const activeSeason = url.searchParams.get('season') ?? '';       // 'summer'|'winter'|'spring'|'autumn'
-  const activeMonth = url.searchParams.get('month') ?? '';         // '1'-'12'
+  const activeDirection = url.searchParams.get('direction') ?? '';
+  const activeDow = url.searchParams.get('dow') ?? '';
+  const activeSeason = url.searchParams.get('season') ?? '';
+  const activeMonth = url.searchParams.get('month') ?? '';
+  const activeYear = url.searchParams.get('year') ?? '';
   const thresholdParam = parseInt(url.searchParams.get('threshold') ?? '15', 10);
   const threshold = [0, 15, 30].includes(thresholdParam) ? thresholdParam : 15;
-
-  // Parse route into dep/arr
   const routeParts = activeRoute ? activeRoute.split('-') : [];
   const routeDep = routeParts[0] ?? '';
   const routeArr = routeParts.slice(1).join('-');
-
   const minFlightsPerRoute = range === '30' ? 2 : range === '90' ? 3 : 5;
 
-  const airlineFilter = activeAirline === 'GR'
-    ? sql`(f.flight_number ILIKE 'GR%')`
+  // Get available years and airlines for filters
+  const [yearsResult, airlinesResult] = await Promise.all([
+    db.execute(sql`SELECT DISTINCT EXTRACT(YEAR FROM flight_date)::int as year FROM flights WHERE flight_date IS NOT NULL ORDER BY year DESC`),
+    db.execute(sql`SELECT DISTINCT UPPER(SUBSTRING(flight_number FROM 1 FOR 2)) as code FROM flights WHERE flight_number IS NOT NULL AND flight_number ~ '^[A-Za-z]{2}' ORDER BY code`)
+  ]);
+  const availableYears = (yearsResult.rows as { year: number }[]).map(r => r.year);
+  const availableAirlines = (airlinesResult.rows as { code: string }[]).map(r => r.code);
+
+  const airlineFilter = activeAirline
+    ? sql`(UPPER(SUBSTRING(f.flight_number FROM 1 FOR 2)) = ${activeAirline})`
     : sql`(f.flight_number ILIKE 'GR%' OR f.flight_number ILIKE 'BA%')`;
 
   const dateFilter =
@@ -70,17 +76,20 @@ export const load: PageServerLoad = async ({ url }) => {
   } else if (activeSeason === 'autumn') {
     periodFilter = sql`AND EXTRACT(MONTH FROM f.flight_date::date) IN (9, 10, 11)`;
   }
+  const yearNum = parseInt(activeYear, 10);
+  const yearFilter = activeYear !== '' && !isNaN(yearNum) && yearNum >= 2000 && yearNum <= 2100
+    ? sql`AND EXTRACT(YEAR FROM f.flight_date::date) = ${yearNum}`
+    : sql``;
 
-  const sinceClause = sql`${airlineFilter} ${dateFilter} ${routeMinFilter} ${routeFilter} ${directionFilter} ${dowFilter} ${periodFilter}`;
-  const routesSince  = sql`${airlineFilter} ${dateFilter} ${routeMinFilter} ${directionFilter} ${dowFilter} ${periodFilter}`;
-
+  const sinceClause = sql`${airlineFilter} ${dateFilter} ${routeMinFilter} ${routeFilter} ${directionFilter} ${dowFilter} ${periodFilter} ${yearFilter}`;
+  const routesSince  = sql`${airlineFilter} ${dateFilter} ${routeMinFilter} ${directionFilter} ${dowFilter} ${periodFilter} ${yearFilter}`;
   const wxDateFilter =
     range === '30'
       ? sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '30 days'`
       : range === '90'
         ? sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '90 days'`
         : sql``;
-  const wxFilter = sql`${airlineFilter} ${wxDateFilter} ${routeMinFilter} ${routeFilter} ${directionFilter} ${dowFilter} ${periodFilter}`;
+  const wxFilter = sql`${airlineFilter} ${wxDateFilter} ${routeMinFilter} ${routeFilter} ${directionFilter} ${dowFilter} ${periodFilter} ${yearFilter}`;
 
   const [
     heroStats,
@@ -448,7 +457,10 @@ export const load: PageServerLoad = async ({ url }) => {
     activeDow,
     activeSeason,
     activeMonth,
+    activeYear,
     threshold,
+    availableYears,
+    availableAirlines,
     heroStats: heroStats.rows[0] as Record<string, unknown>,
     delayDistribution: delayDistribution.rows[0] as Record<string, unknown>,
     dayOfWeek: dayOfWeek.rows as Record<string, unknown>[],

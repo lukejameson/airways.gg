@@ -114,7 +114,16 @@
   const filterDow       = $derived(data.activeDow       || null);
   const filterSeason    = $derived(data.activeSeason    || null);
   const filterMonth     = $derived(data.activeMonth     || null);
+  const filterYear      = $derived(data.activeYear      || null);
   const filterThreshold = $derived(data.threshold ?? 15);
+  
+  // Airline options: All, Aurigny, British Airways, Loganair
+  const AIRLINE_OPTIONS = [
+    ['', 'All'],
+    ['GR', 'Aurigny'],
+    ['BA', 'British Airways'],
+    ['LM', 'Loganair']
+  ] as const;
 
   function filterUrl(updates: Record<string, string | null>): string {
     const p = new URLSearchParams($page.url.searchParams);
@@ -128,12 +137,11 @@
     goto(filterUrl({ route: filterRoute === key ? null : key }), { noScroll: true });
   }
   function clearAllFilters() {
-    goto(filterUrl({ route: null, airline: null, direction: null, dow: null, season: null, month: null, threshold: null }), { noScroll: true });
+    goto(filterUrl({ route: null, airline: null, direction: null, dow: null, season: null, month: null, year: null, threshold: null }), { noScroll: true });
   }
-
   const activeFilterCount = $derived([
     filterAirline, filterRoute, filterDirection, filterDow,
-    filterSeason, filterMonth, filterThreshold !== 15 ? 'thr' : null,
+    filterSeason, filterMonth, filterYear, filterThreshold !== 15 ? 'thr' : null,
   ].filter(Boolean).length);
   const hasActiveFilters = $derived(activeFilterCount > 0);
 
@@ -606,13 +614,11 @@
   <!-- Collapsible filter panel -->
   {#if panelOpen}
   <div transition:slide={{ duration: 180 }} class="rounded-xl border bg-card p-4 mb-5 space-y-4">
-
-    <!-- Row 1: Airline + Direction + Delay threshold -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       <div>
         <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Airline</p>
         <div class="flex flex-wrap gap-1.5">
-          {#each [['', 'All'], ['GR', 'Aurigny']] as [val, label]}
+          {#each AIRLINE_OPTIONS as [val, label]}
             <button onclick={() => goto(filterUrl({ airline: val || null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {(val === '' ? filterAirline === null : filterAirline === val) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</button>
           {/each}
         </div>
@@ -634,8 +640,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Row 2: Routes -->
     <div>
       <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Route</p>
       <div class="flex flex-wrap gap-1.5">
@@ -645,20 +649,16 @@
         {/each}
       </div>
     </div>
-
-    <!-- Row 3: Day of week -->
-    <div>
-      <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Day of week</p>
-      <div class="flex flex-wrap gap-1.5">
-        <button onclick={() => goto(filterUrl({ dow: null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterDow === null ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">All</button>
-        {#each DOW_LABELS as label, i}
-          <button onclick={() => goto(filterUrl({ dow: filterDow === String(i) ? null : String(i) }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterDow === String(i) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</button>
-        {/each}
-      </div>
-    </div>
-
-    <!-- Row 4: Season + Month -->
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Year</p>
+        <div class="flex flex-wrap gap-1.5">
+          <button onclick={() => goto(filterUrl({ year: null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterYear === null ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">All</button>
+          {#each data.availableYears as year}
+            <button onclick={() => goto(filterUrl({ year: filterYear === String(year) ? null : String(year) }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterYear === String(year) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{year}</button>
+          {/each}
+        </div>
+      </div>
       <div>
         <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Season</p>
         <div class="flex flex-wrap gap-1.5">
@@ -667,6 +667,8 @@
           {/each}
         </div>
       </div>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <div>
         <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Month</p>
         <div class="flex flex-wrap gap-1.5">
@@ -676,9 +678,16 @@
           {/each}
         </div>
       </div>
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Day of week</p>
+        <div class="flex flex-wrap gap-1.5">
+          <button onclick={() => goto(filterUrl({ dow: null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterDow === null ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">All</button>
+          {#each DOW_LABELS as label, i}
+            <button onclick={() => goto(filterUrl({ dow: filterDow === String(i) ? null : String(i) }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterDow === String(i) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</button>
+          {/each}
+        </div>
+      </div>
     </div>
-
-    <!-- Footer: clear -->
     {#if hasActiveFilters}
     <div class="pt-1 border-t flex justify-end">
       <button onclick={clearAllFilters} class="text-xs text-muted-foreground hover:text-foreground">Clear all filters ×</button>
@@ -686,8 +695,6 @@
     {/if}
   </div>
   {/if}
-
-  <!-- Hero stats -->
   <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
     {#if isLoading}
       {#each [1,2,3,4] as _}
