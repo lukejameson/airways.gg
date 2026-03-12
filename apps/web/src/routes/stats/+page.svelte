@@ -125,11 +125,10 @@
   }
 
   function setRouteFilter(key: string) {
-    goto(filterUrl({ route: filterRoute === key ? null : key }));
+    goto(filterUrl({ route: filterRoute === key ? null : key }), { noScroll: true });
   }
-
   function clearAllFilters() {
-    goto(filterUrl({ route: null, airline: null, direction: null, dow: null, season: null, month: null, threshold: null }));
+    goto(filterUrl({ route: null, airline: null, direction: null, dow: null, season: null, month: null, threshold: null }), { noScroll: true });
   }
 
   const activeFilterCount = $derived([
@@ -591,12 +590,12 @@
     <div class="flex items-center self-start sm:self-auto gap-2">
       <div class="flex items-center gap-1 rounded-lg border bg-muted/40 p-1">
         {#each [['all', 'All time'], ['90', '90 days'], ['30', '30 days']] as [val, label]}
-          <a href="/stats?range={val}" class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors {currentRange === val ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}">{label}</a>
+          <button onclick={() => goto(`/stats?range=${val}`, { noScroll: true })} class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap h-[36px] flex items-center {currentRange === val ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}">{label}</button>
         {/each}
       </div>
       <button
         onclick={() => panelOpen = !panelOpen}
-        class="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors {panelOpen || hasActiveFilters ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/40 text-muted-foreground hover:text-foreground'}"
+        class="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors h-[46px] {panelOpen || hasActiveFilters ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/40 text-muted-foreground hover:text-foreground'}"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
         Filters{#if activeFilterCount > 0}&nbsp;({activeFilterCount}){/if}
@@ -614,7 +613,7 @@
         <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Airline</p>
         <div class="flex flex-wrap gap-1.5">
           {#each [['', 'All'], ['GR', 'Aurigny']] as [val, label]}
-            <a href="{filterUrl({ airline: val || null })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {(val === '' ? filterAirline === null : filterAirline === val) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</a>
+            <button onclick={() => goto(filterUrl({ airline: val || null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {(val === '' ? filterAirline === null : filterAirline === val) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</button>
           {/each}
         </div>
       </div>
@@ -622,7 +621,7 @@
         <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Direction</p>
         <div class="flex flex-wrap gap-1.5">
           {#each [['', 'All'], ['dep', 'Departures'], ['arr', 'Arrivals']] as [val, label]}
-            <a href="{filterUrl({ direction: val || null })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {(val === '' ? filterDirection === null : filterDirection === val) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</a>
+            <button onclick={() => goto(filterUrl({ direction: val || null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {(val === '' ? filterDirection === null : filterDirection === val) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</button>
           {/each}
         </div>
       </div>
@@ -630,7 +629,7 @@
         <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Delay threshold (on-time)</p>
         <div class="flex flex-wrap gap-1.5">
           {#each [[0, '0 min'], [15, '15 min'], [30, '30 min']] as [val, label]}
-            <a href="{filterUrl({ threshold: val === 15 ? null : String(val) })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {filterThreshold === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</a>
+            <button onclick={() => goto(filterUrl({ threshold: val === 15 ? null : String(val) }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterThreshold === val ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</button>
           {/each}
         </div>
       </div>
@@ -642,7 +641,7 @@
       <div class="flex flex-wrap gap-1.5">
         {#each topRouteOptions as route}
           {@const key = routeKey(route)}
-          <button onclick={() => setRouteFilter(key)} class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {filterRoute === key ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{fmtRoute(String(route.departure_airport), String(route.arrival_airport))}</button>
+          <button onclick={() => setRouteFilter(key)} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterRoute === key ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{fmtRoute(String(route.departure_airport), String(route.arrival_airport))}</button>
         {/each}
       </div>
     </div>
@@ -651,9 +650,9 @@
     <div>
       <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Day of week</p>
       <div class="flex flex-wrap gap-1.5">
-        <a href="{filterUrl({ dow: null })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {filterDow === null ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">All</a>
+        <button onclick={() => goto(filterUrl({ dow: null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterDow === null ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">All</button>
         {#each DOW_LABELS as label, i}
-          <a href="{filterUrl({ dow: filterDow === String(i) ? null : String(i) })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {filterDow === String(i) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</a>
+          <button onclick={() => goto(filterUrl({ dow: filterDow === String(i) ? null : String(i) }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterDow === String(i) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</button>
         {/each}
       </div>
     </div>
@@ -664,7 +663,7 @@
         <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Season</p>
         <div class="flex flex-wrap gap-1.5">
           {#each [['', 'All'], ['spring', 'Spring'], ['summer', 'Summer'], ['autumn', 'Autumn'], ['winter', 'Winter']] as [val, label]}
-            <a href="{filterUrl({ season: val || null, month: null, range: val ? 'all' : null })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {(val === '' ? filterSeason === null && filterMonth === null : filterSeason === val && filterMonth === null) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</a>
+            <button onclick={() => goto(filterUrl({ season: val || null, month: null, range: val ? 'all' : null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {(val === '' ? filterSeason === null && filterMonth === null : filterSeason === val && filterMonth === null) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</button>
           {/each}
         </div>
       </div>
@@ -673,7 +672,7 @@
         <div class="flex flex-wrap gap-1.5">
           {#each MONTH_LABELS as label, i}
             {@const m = String(i + 1)}
-            <a href="{filterUrl({ month: filterMonth === m ? null : m, season: null, range: filterMonth === m ? null : 'all' })}" class="px-2.5 py-1 rounded-full border text-xs font-medium transition-colors {filterMonth === m ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</a>
+            <button onclick={() => goto(filterUrl({ month: filterMonth === m ? null : m, season: null, range: filterMonth === m ? null : 'all' }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterMonth === m ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{label}</button>
           {/each}
         </div>
       </div>
