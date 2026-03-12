@@ -142,13 +142,11 @@
   <footer class="border-t py-5">
     <div class="container flex items-center justify-between gap-4">
       <p class="text-sm text-muted-foreground">
-        &copy; {new Date().getFullYear()} airways.gg<span class="hidden sm:inline"> &mdash; Sister site to <a href="https://roads.gg" target="_blank" rel="noopener noreferrer" class="underline underline-offset-4 hover:text-foreground transition-colors">roads.gg</a>. Built by <a href="https://lukejameson.co.uk" target="_blank" rel="noopener noreferrer" class="underline underline-offset-4 hover:text-foreground transition-colors">Luke Jameson</a></span>.
+        &copy; {new Date().getFullYear()} airways.gg<span class="hidden sm:inline"> &mdash; A <a href="https://gyslabs.gg" target="_blank" rel="noopener noreferrer" class="underline underline-offset-4 hover:text-foreground transition-colors">GYSLabs</a> project</span>.
       </p>
       <div class="flex items-center gap-4 text-sm text-muted-foreground">
         <span class="sm:hidden">
-          <a href="https://roads.gg" target="_blank" rel="noopener noreferrer" class="hover:text-foreground transition-colors">roads.gg</a>
-          &middot;
-          <a href="https://lukejameson.co.uk" target="_blank" rel="noopener noreferrer" class="hover:text-foreground transition-colors">Portfolio</a>
+          <a href="https://gyslabs.gg" target="_blank" rel="noopener noreferrer" class="hover:text-foreground transition-colors">GYSLabs</a>
         </span>
         <a
           href="https://www.facebook.com/profile.php?id=61588602583247"
