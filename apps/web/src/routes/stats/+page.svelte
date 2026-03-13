@@ -421,10 +421,20 @@
   const isLoading = $derived(!!$navigating && $navigating.to?.url.pathname === '/stats');
   const sk = 'animate-pulse rounded bg-muted';
 
+  let routeSearch = $state('');
+
   const topRouteOptions = $derived.by(() => {
-    // Use all available routes from the database instead of just worst routes
     const routes = data.availableRoutes as { departure: string; arrival: string; key: string }[];
-    return routes.sort((a, b) => a.departure.localeCompare(b.departure) || a.arrival.localeCompare(b.arrival));
+    return routes.slice(0, 10);
+  });
+
+  const otherRoutes = $derived.by(() => {
+    const routes = data.availableRoutes as { departure: string; arrival: string; key: string }[];
+    const others = routes.slice(10);
+    if (!routeSearch) return others;
+    return others.filter(r =>
+      `${r.departure}${r.arrival}`.toUpperCase().includes(routeSearch.toUpperCase())
+    );
   });
 
   type InsightTone = 'green' | 'amber' | 'red' | 'neutral';
@@ -654,13 +664,41 @@
     </div>
     <div>
       <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Route</p>
-      <div class="flex flex-wrap gap-1.5">
+      <div class="flex flex-wrap gap-1.5 items-center">
         {#if filterRoute}
           <button onclick={() => goto(filterUrl({ route: null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors bg-primary text-primary-foreground border-primary">Clear</button>
         {/if}
         {#each topRouteOptions as route}
           <button onclick={() => setRouteFilter(route.key)} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterRoute === route.key ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{fmtRoute(route.departure, route.arrival)}</button>
         {/each}
+        {#if otherRoutes.length > 0}
+          <div class="relative">
+            <input
+              type="text"
+              placeholder="Search other routes..."
+              bind:value={routeSearch}
+              class="px-3 py-1.5 sm:px-2.5 sm:py-1 rounded-full border border-border bg-background text-xs placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            {#if routeSearch || otherRoutes.length > 0}
+              <div class="absolute top-full mt-1 left-0 right-0 max-h-48 overflow-y-auto bg-background border border-border rounded-lg shadow-lg z-10">
+                {#each otherRoutes as route}
+                  <button
+                    onclick={() => {
+                      setRouteFilter(route.key);
+                      routeSearch = '';
+                    }}
+                    class="w-full px-4 py-2 text-left text-xs hover:bg-muted transition-colors {filterRoute === route.key ? 'bg-muted text-primary font-medium' : ''}"
+                  >
+                    {fmtRoute(route.departure, route.arrival)}
+                  </button>
+                {/each}
+                {#if otherRoutes.length === 0 && routeSearch}
+                  <div class="px-4 py-2 text-xs text-muted-foreground">No routes found</div>
+                {/if}
+              </div>
+            {/if}
+          </div>
+        {/if}
       </div>
     </div>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">

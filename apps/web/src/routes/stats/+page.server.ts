@@ -24,13 +24,15 @@ export const load: PageServerLoad = async ({ url }) => {
     db.execute(sql`SELECT DISTINCT EXTRACT(YEAR FROM flight_date)::int as year FROM flights WHERE flight_date IS NOT NULL ORDER BY year DESC`),
     db.execute(sql`SELECT DISTINCT UPPER(SUBSTRING(flight_number FROM 1 FOR 2)) as code FROM flights WHERE flight_number IS NOT NULL AND flight_number ~ '^[A-Za-z]{2}' ORDER BY code`),
     db.execute(sql`
-      SELECT DISTINCT
+      SELECT
         f.departure_airport,
         f.arrival_airport,
-        f.departure_airport || '-' || f.arrival_airport AS route_key
+        f.departure_airport || '-' || f.arrival_airport AS route_key,
+        COUNT(*) AS flight_count
       FROM flights f
       WHERE f.departure_airport != f.arrival_airport AND f.departure_airport IS NOT NULL AND f.arrival_airport IS NOT NULL
-      ORDER BY f.departure_airport, f.arrival_airport
+      GROUP BY f.departure_airport, f.arrival_airport
+      ORDER BY flight_count DESC
     `)
   ]);
   const availableYears = (yearsResult.rows as { year: number }[]).map(r => r.year);
