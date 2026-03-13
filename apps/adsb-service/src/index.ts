@@ -314,6 +314,7 @@ async function pollRegistrations(): Promise<void> {
             aircraftRegistration: aircraft.registration,
             aircraftType: aircraft.type,
             status: 'Airborne',
+            actualDeparture: sql`COALESCE(${flights.actualDeparture}, NOW())`,
             updatedAt: new Date(),
           })
           .where(
@@ -343,7 +344,11 @@ async function pollRegistrations(): Promise<void> {
       const entry = airborneTracker.get(aircraft.icao24)!;
       await db
         .update(flights)
-        .set({ status: 'Airborne', updatedAt: new Date() })
+        .set({
+          status: 'Airborne',
+          actualDeparture: sql`COALESCE(${flights.actualDeparture}, NOW())`,
+          updatedAt: new Date(),
+        })
         .where(
           and(
             eq(flights.id, entry.flightId),
