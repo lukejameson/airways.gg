@@ -679,19 +679,25 @@
           <button onclick={() => setRouteFilter(route.key)} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterRoute === route.key ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{fmtRoute(route.departure, route.arrival)}</button>
         {/each}
         {#if otherRoutes.length > 0}
-          <div class="relative" onmouseleave={() => routeInputElement?.blur()}>
+          <div class="relative">
             <input
               type="text"
               placeholder="Search other routes..."
               bind:value={routeSearch}
               bind:this={routeInputElement}
+              onblur={() => { routeSearch = ''; }}
               class="px-3 py-1.5 sm:px-2.5 sm:py-1 rounded-full border border-border bg-background text-xs placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
             {#if routeSearch}
-              <div class="absolute top-full mt-1 left-0 right-0 max-h-48 overflow-y-auto bg-background border border-border rounded-lg shadow-lg z-50">
+              <div class="absolute top-full mt-1 left-0 right-0 max-h-48 overflow-y-auto bg-background border border-border rounded-lg shadow-lg z-50 pointer-events-auto">
                 {#each otherRoutes as route}
                   <button
-                    onmousedown={(e) => { e.preventDefault(); selectRoute(route.key); }}
+                    type="button"
+                    onmousedown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      selectRoute(route.key);
+                    }}
                     class="w-full px-4 py-2 text-left text-xs hover:bg-muted transition-colors {filterRoute === route.key ? 'bg-muted text-primary font-medium' : ''}"
                   >
                     {fmtRoute(route.departure, route.arrival)}
