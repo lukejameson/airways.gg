@@ -19,13 +19,27 @@ export const load: PageServerLoad = async ({ url }) => {
   const routeArr = routeParts.slice(1).join('-');
   const minFlightsPerRoute = range === '30' ? 2 : range === '90' ? 3 : 5;
 
-  // Get available years and airlines for filters
-  const [yearsResult, airlinesResult] = await Promise.all([
+  // Get available years, airlines, and routes for filters
+  const [yearsResult, airlinesResult, routesResult] = await Promise.all([
     db.execute(sql`SELECT DISTINCT EXTRACT(YEAR FROM flight_date)::int as year FROM flights WHERE flight_date IS NOT NULL ORDER BY year DESC`),
-    db.execute(sql`SELECT DISTINCT UPPER(SUBSTRING(flight_number FROM 1 FOR 2)) as code FROM flights WHERE flight_number IS NOT NULL AND flight_number ~ '^[A-Za-z]{2}' ORDER BY code`)
+    db.execute(sql`SELECT DISTINCT UPPER(SUBSTRING(flight_number FROM 1 FOR 2)) as code FROM flights WHERE flight_number IS NOT NULL AND flight_number ~ '^[A-Za-z]{2}' ORDER BY code`),
+    db.execute(sql`
+      SELECT DISTINCT
+        f.departure_airport,
+        f.arrival_airport,
+        f.departure_airport || '-' || f.arrival_airport AS route_key
+      FROM flights f
+      WHERE f.departure_airport != f.arrival_airport AND f.departure_airport IS NOT NULL AND f.arrival_airport IS NOT NULL
+      ORDER BY f.departure_airport, f.arrival_airport
+    `)
   ]);
   const availableYears = (yearsResult.rows as { year: number }[]).map(r => r.year);
   const availableAirlines = (airlinesResult.rows as { code: string }[]).map(r => r.code);
+  const availableRoutes = (routesResult.rows as { departure_airport: string; arrival_airport: string; route_key: string }[]).map(r => ({
+    departure: r.departure_airport,
+    arrival: r.arrival_airport,
+    key: r.route_key,
+  }));
 
   const airlineFilter = activeAirline
     ? sql`(UPPER(SUBSTRING(f.flight_number FROM 1 FOR 2)) = ${activeAirline})`
@@ -489,6 +503,7 @@ export const load: PageServerLoad = async ({ url }) => {
     threshold,
     availableYears,
     availableAirlines,
+    availableRoutes,
     heroStats: heroStats.rows[0] as Record<string, unknown>,
     delayDistribution: delayDistribution.rows[0] as Record<string, unknown>,
     dayOfWeek: dayOfWeek.rows as Record<string, unknown>[],

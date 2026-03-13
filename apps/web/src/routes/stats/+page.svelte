@@ -422,8 +422,9 @@
   const sk = 'animate-pulse rounded bg-muted';
 
   const topRouteOptions = $derived.by(() => {
-    const routes = data.worstRoutes as Record<string, unknown>[];
-    return [...routes].sort((a, b) => n(b.flights) - n(a.flights)).slice(0, 8);
+    // Use all available routes from the database instead of just worst routes
+    const routes = data.availableRoutes as { departure: string; arrival: string; key: string }[];
+    return routes.sort((a, b) => a.departure.localeCompare(b.departure) || a.arrival.localeCompare(b.arrival));
   });
 
   type InsightTone = 'green' | 'amber' | 'red' | 'neutral';
@@ -654,9 +655,11 @@
     <div>
       <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Route</p>
       <div class="flex flex-wrap gap-1.5">
+        {#if filterRoute}
+          <button onclick={() => goto(filterUrl({ route: null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors bg-primary text-primary-foreground border-primary">Clear</button>
+        {/if}
         {#each topRouteOptions as route}
-          {@const key = routeKey(route)}
-          <button onclick={() => setRouteFilter(key)} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterRoute === key ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{fmtRoute(String(route.departure_airport), String(route.arrival_airport))}</button>
+          <button onclick={() => setRouteFilter(route.key)} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterRoute === route.key ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{fmtRoute(route.departure, route.arrival)}</button>
         {/each}
       </div>
     </div>
