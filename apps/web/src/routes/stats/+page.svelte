@@ -433,9 +433,12 @@
     const routes = data.availableRoutes as { departure: string; arrival: string; key: string }[];
     const others = routes.slice(10);
     if (!routeSearch) return others;
-    return others.filter(r =>
-      `${r.departure}${r.arrival}`.toUpperCase().includes(routeSearch.toUpperCase())
-    );
+    const searchUpper = routeSearch.toUpperCase();
+    return others.filter(r => {
+      const codes = `${r.departure}${r.arrival}`.toUpperCase();
+      const names = `${airportName(r.departure)} ${airportName(r.arrival)}`.toUpperCase();
+      return codes.includes(searchUpper) || names.includes(searchUpper);
+    });
   });
 
   function selectRoute(key: string) {
