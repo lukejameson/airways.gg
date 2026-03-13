@@ -108,6 +108,7 @@ export const load: PageServerLoad = async ({ url }) => {
     visibilityDelays,
     precipDelays,
     weatherCodeDelays,
+    crosswindDelays,
     worstWeatherDays,
     delayImpact,
     worstDelayDays,
@@ -386,12 +387,39 @@ export const load: PageServerLoad = async ({ url }) => {
 
     db.execute(sql`
       SELECT
+        CASE
+          WHEN xw < 15 THEN '0–15 kn'
+          WHEN xw < 28 THEN '15–28 kn'
+          WHEN xw < 35 THEN '28–35 kn (>wet limit)'
+          ELSE '35+ kn (>dry limit)'
+        END AS xw_band,
+        MIN(xw) AS band_min,
+        COUNT(f.id) AS flights,
+        SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END) AS delayed,
+        SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
+        ROUND(SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END)::numeric * 100
+          / NULLIF(COUNT(f.id) - SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END), 0), 1) AS delay_pct,
+        ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay
+      FROM flights f
+      JOIN (
+        SELECT *, ROUND((wind_speed * ABS(SIN(RADIANS(wind_direction - 96))))::numeric, 1) AS xw
+        FROM historical_weather
+        WHERE wind_direction > 0
+      ) hw ON hw.airport_code = 'GCI' AND hw.timestamp = DATE_TRUNC('hour', f.scheduled_departure)
+      WHERE f.flight_date IS NOT NULL AND ${wxFilter}
+      GROUP BY 1
+      ORDER BY MIN(xw)
+    `),
+
+    db.execute(sql`
+      SELECT
         f.flight_date::text,
         COUNT(f.id) AS flights,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,
         SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END) AS delayed,
         ROUND(AVG(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN f.delay_minutes END), 0) AS avg_delay,
         ROUND(AVG(hw.wind_speed)::numeric, 1) AS wind_kn,
+        ROUND(AVG(hw.wind_direction)::numeric, 0)::integer AS wind_dir,
         ROUND(SUM(hw.precipitation)::numeric, 1) AS precip_mm,
         ROUND(AVG(hw.visibility)::numeric, 1) AS vis_km
       FROM flights f
@@ -477,6 +505,7 @@ export const load: PageServerLoad = async ({ url }) => {
     visibilityDelays: visibilityDelays.rows as Record<string, unknown>[],
     precipDelays: precipDelays.rows as Record<string, unknown>[],
     weatherCodeDelays: weatherCodeDelays.rows as Record<string, unknown>[],
+    crosswindDelays: crosswindDelays.rows as Record<string, unknown>[],
     worstWeatherDays: worstWeatherDays.rows as Record<string, unknown>[],
     wxFlightCount,
     delayImpact: delayImpact.rows[0] as Record<string, unknown>,

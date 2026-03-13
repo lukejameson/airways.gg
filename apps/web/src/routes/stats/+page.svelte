@@ -65,6 +65,17 @@
     const p = Math.min(Number(pct) || 0, 100);
     return `background: hsl(0 84% 60% / ${(p / 100) * 0.18})`;
   }
+  function degToCardinal(deg: unknown): string {
+    const d = Number(deg) || 0;
+    const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    return directions[Math.round((d % 360) / 22.5) % 16];
+  }
+  function xwBandColor(bandKey: unknown): string {
+    const b = String(bandKey);
+    if (b.includes('>dry limit')) return 'text-red-600 font-medium';
+    if (b.includes('>wet limit')) return 'text-amber-600 font-medium';
+    return '';
+  }
 
   const hero = $derived(data.heroStats);
   const dist = $derived(data.delayDistribution);
@@ -1276,11 +1287,12 @@
   <div class="rounded-xl border bg-card mb-4 overflow-hidden">
     <div class="px-4 pt-4 pb-3 border-b">
       <h2 class="text-sm font-semibold text-foreground">Weather Impact</h2>
-      <p class="text-xs text-muted-foreground mt-0.5">Based on {data.wxFlightCount} flights matched to hourly GCI weather · wind in knots · visibility in km · precip in mm</p>
+      <p class="text-xs text-muted-foreground mt-0.5">Based on {data.wxFlightCount} flights matched to hourly GCI weather · wind speed is 10m mean (not gusts) · crosswind calculated for RWY 09/27 (096°) · visibility in km · precip in mm</p>
     </div>
-    <div class="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x">
       {#each [
         { title: 'By Wind Speed', rows: data.windDelays, bandKey: 'wind_band' },
+        { title: 'By Crosswind (RWY 09/27)', rows: data.crosswindDelays, bandKey: 'xw_band' },
         { title: 'By Visibility',  rows: data.visibilityDelays, bandKey: 'vis_band' },
         { title: 'By Precipitation', rows: data.precipDelays, bandKey: 'precip_band' },
         { title: 'By Weather Condition', rows: data.weatherCodeDelays, bandKey: 'weather_code', isCode: true },
@@ -1300,7 +1312,7 @@
               {:else}
                 {#each section.rows as row}
                   <tr>
-                    <td class="py-2 pr-2 text-sm">{section.isCode ? (WX_LABELS[Number(row[section.bandKey])] ?? `Code ${row[section.bandKey]}`) : row[section.bandKey]}</td>
+                    <td class="py-2 pr-2 text-sm {section.bandKey === 'xw_band' ? xwBandColor(row[section.bandKey]) : ''}">{section.isCode ? (WX_LABELS[Number(row[section.bandKey])] ?? `Code ${row[section.bandKey]}`) : row[section.bandKey]}</td>
                     <td class="py-2 text-right text-sm tabular-nums">{row.flights}</td>
                     <td class="py-2 text-right text-sm tabular-nums" style="{cellBg(row.delay_pct)}"><span class="{delayColor(row.delay_pct)}">{row.delay_pct ?? '—'}%</span></td>
                     <td class="py-2 text-right text-sm tabular-nums hidden sm:table-cell">{fmt(row.avg_delay)}</td>
@@ -1339,7 +1351,7 @@
             </div>
             <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
               <span>avg delay {fmt(row.avg_delay)}</span>
-              <span class="{Number(row.wind_kn) > 30 ? 'text-red-600 font-medium' : Number(row.wind_kn) > 25 ? 'text-amber-600' : ''}">{row.wind_kn}kn wind</span>
+              <span class="{Number(row.wind_kn) > 30 ? 'text-red-600 font-medium' : Number(row.wind_kn) > 25 ? 'text-amber-600' : ''}">{row.wind_kn}kn {degToCardinal(row.wind_dir)}</span>
               <span class="{Number(row.vis_km) < 3 ? 'text-red-600 font-medium' : Number(row.vis_km) < 5 ? 'text-amber-600' : ''}">{row.vis_km}km vis</span>
               <span>{row.precip_mm}mm precip</span>
             </div>
@@ -1354,7 +1366,7 @@
           <th class="{thBtn}">Flights</th>
           <th class="{thBtn}">Cancelled</th>
           <th class="{thBtn}">Avg Delay</th>
-          <th class="{thBtn}">Wind kn</th>
+          <th class="{thBtn}">Wind</th>
           <th class="{thBtn}">Vis Km</th>
           <th class="{thBtn} pr-4">Precip mm</th>
         </tr></thead>
@@ -1368,7 +1380,7 @@
                 <td class="{tdBase} tabular-nums">{row.flights}</td>
                 <td class="{tdBase} tabular-nums text-red-600 font-medium">{row.cancelled}</td>
                 <td class="{tdBase} tabular-nums">{fmt(row.avg_delay)}</td>
-                <td class="{tdBase} tabular-nums {Number(row.wind_kn) > 30 ? 'text-red-600 font-medium' : Number(row.wind_kn) > 25 ? 'text-amber-600' : ''}">{row.wind_kn}</td>
+                <td class="{tdBase} tabular-nums {Number(row.wind_kn) > 30 ? 'text-red-600 font-medium' : Number(row.wind_kn) > 25 ? 'text-amber-600' : ''}">{row.wind_kn}kn {degToCardinal(row.wind_dir)}</td>
                 <td class="{tdBase} tabular-nums {Number(row.vis_km) < 3 ? 'text-red-600 font-medium' : Number(row.vis_km) < 5 ? 'text-amber-600' : ''}">{row.vis_km}</td>
                 <td class="{tdBase} pr-4 tabular-nums">{row.precip_mm}</td>
               </tr>
