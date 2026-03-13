@@ -678,7 +678,7 @@
         {#each topRouteOptions as route}
           <button onclick={() => setRouteFilter(route.key)} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterRoute === route.key ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{fmtRoute(route.departure, route.arrival)}</button>
         {/each}
-        {#if otherRoutes.length > 0}
+        {#if (data.availableRoutes as { departure: string; arrival: string; key: string }[]).length > 10}
           <div class="relative">
             <input
               type="text"
@@ -690,20 +690,21 @@
             />
             {#if routeSearch}
               <div class="absolute top-full mt-1 left-0 right-0 max-h-48 overflow-y-auto bg-background border border-border rounded-lg shadow-lg z-50 pointer-events-auto">
-                {#each otherRoutes as route}
-                  <button
-                    type="button"
-                    onmousedown={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      selectRoute(route.key);
-                    }}
-                    class="w-full px-4 py-2 text-left text-xs hover:bg-muted transition-colors {filterRoute === route.key ? 'bg-muted text-primary font-medium' : ''}"
-                  >
-                    {fmtRoute(route.departure, route.arrival)}
-                  </button>
-                {/each}
-                {#if otherRoutes.length === 0}
+                {#if otherRoutes.length > 0}
+                  {#each otherRoutes as route}
+                    <button
+                      type="button"
+                      onmousedown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        selectRoute(route.key);
+                      }}
+                      class="w-full px-4 py-2 text-left text-xs hover:bg-muted transition-colors {filterRoute === route.key ? 'bg-muted text-primary font-medium' : ''}"
+                    >
+                      {fmtRoute(route.departure, route.arrival)}
+                    </button>
+                  {/each}
+                {:else}
                   <div class="px-4 py-2 text-xs text-muted-foreground">No routes found</div>
                 {/if}
               </div>
