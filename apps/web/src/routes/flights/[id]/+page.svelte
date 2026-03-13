@@ -51,12 +51,12 @@
   const otherAirport = $derived(isDeparture ? flight.arrivalAirport : flight.departureAirport);
   const delayMinutes = $derived(flight.delayMinutes ?? 0);
 
-  // Calculate delay from times if available
+  // Calculate delay from times if available, preferring actual/estimated times over stale delayMinutes
   const calculatedDelayMinutes = $derived.by(() => {
-    if (delayMinutes > 0) return delayMinutes;
     if (displayTime && scheduledTime) {
       return Math.round((new Date(displayTime).getTime() - new Date(scheduledTime).getTime()) / 60000);
     }
+    if (delayMinutes > 0) return delayMinutes;
     return 0;
   });
 
@@ -510,7 +510,7 @@
           isCompleted={isCompleted}
           class="text-sm"
         />
-        {#if formattedEarly && !isCompleted}
+        {#if formattedEarly && !isCompleted && calculatedDelayMinutes < 0}
           <span class="text-sm font-bold text-green-600">{formattedEarly}</span>
         {/if}
       {/if}
