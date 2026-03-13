@@ -429,6 +429,20 @@
     return routes.slice(0, 10);
   });
 
+  const allRoutes = $derived.by(() => {
+    return data.availableRoutes as { departure: string; arrival: string; key: string }[];
+  });
+
+  const selectedRouteOption = $derived.by(() => {
+    if (!filterRoute) return null;
+    const route = allRoutes.find(r => r.key === filterRoute);
+    return route || null;
+  });
+
+  const selectedRouteIsTop10 = $derived.by(() => {
+    return topRouteOptions.some(r => r.key === filterRoute);
+  });
+
   const otherRoutes = $derived.by(() => {
     const routes = data.availableRoutes as { departure: string; arrival: string; key: string }[];
     const others = routes.slice(10);
@@ -675,7 +689,10 @@
     <div>
       <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Route</p>
       <div class="flex flex-wrap gap-1.5 items-center">
-        {#if filterRoute}
+        {#if filterRoute && selectedRouteOption && !selectedRouteIsTop10}
+          <button onclick={() => goto(filterUrl({ route: null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors bg-primary text-primary-foreground border-primary">{fmtRoute(selectedRouteOption.departure, selectedRouteOption.arrival)} ✕</button>
+        {/if}
+        {#if filterRoute && (selectedRouteIsTop10 || !selectedRouteOption)}
           <button onclick={() => goto(filterUrl({ route: null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors bg-primary text-primary-foreground border-primary">Clear</button>
         {/if}
         {#each topRouteOptions as route}
