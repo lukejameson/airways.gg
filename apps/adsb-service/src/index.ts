@@ -274,12 +274,48 @@ async function pollRegistrations(): Promise<void> {
     }
 
     // ── Aircraft airborne ────────────────────────────────────────────────────
-    if (!result.destIata) {
-      console.log(`[ADSB] ${aircraft.registration}: airborne but no destIata, skipping`);
-      continue;
+    const departureIata = result.origIata ?? 'GCI';
+
+    // If destIata is missing, try matching by callsign (flight number)
+    let destIata = result.destIata;
+    if (!destIata && result.callsign) {
+      // Extract flight number from callsign (e.g., "GR406" or "GR 406")
+      const match = result.callsign.match(/GR\s*(\d+)/i);
+      if (match) {
+        const flightNumber = `GR${match[1]}`;
+        // Find the flight by number, scheduled to depart around now
+        const [flight] = await db
+          .select({
+            id: flights.id,
+            arrivalAirport: flights.arrivalAirport,
+          })
+          .from(flights)
+          .where(
+            and(
+              eq(flights.flightNumber, flightNumber),
+              eq(flights.departureAirport, departureIata),
+              gte(flights.scheduledDeparture, windowStart),
+              lte(flights.scheduledDeparture, windowEnd),
+            ),
+          )
+          .limit(1);
+
+        if (flight) {
+          destIata = flight.arrivalAirport;
+          console.log(
+            `[ADSB] ${aircraft.registration}: matched by callsign ${result.callsign} → ` +
+              `${departureIata}→${destIata}`,
+          );
+        }
+      }
     }
 
-    const departureIata = result.origIata ?? 'GCI';
+    if (!destIata) {
+      console.log(
+        `[ADSB] ${aircraft.registration}: airborne but no destIata or matching callsign, skipping`,
+      );
+      continue;
+    }
 
     if (!regDone) {
       // Find the best-matching unregistered GR flight: closest scheduled departure to now
@@ -293,7 +329,7 @@ async function pollRegistrations(): Promise<void> {
           and(
             eq(flights.airlineCode, 'GR'),
             eq(flights.departureAirport, departureIata),
-            eq(flights.arrivalAirport, result.destIata),
+            eq(flights.arrivalAirport, destIata),
             isNull(flights.aircraftRegistration),
             gte(flights.scheduledDeparture, windowStart),
             lte(flights.scheduledDeparture, windowEnd),
@@ -304,7 +340,7 @@ async function pollRegistrations(): Promise<void> {
       const match = candidates[0];
       if (!match) {
         console.log(
-          `[ADSB] ${aircraft.registration}: airborne, ${departureIata}→${result.destIata} — ` +
+          `[ADSB] ${aircraft.registration}: airborne, ${departureIata}→${destIata} — ` +
             `no matching unregistered flight`,
         );
       } else {
@@ -327,12 +363,12 @@ async function pollRegistrations(): Promise<void> {
         registrationDone.set(aircraft.icao24, nowMs + REGISTRATION_COOLDOWN_MS);
         airborneTracker.set(aircraft.icao24, {
           flightId: match.id,
-          arrivalAirport: result.destIata,
+          arrivalAirport: destIata as string,
           missedPolls: 0,
         });
 
         console.log(
-          `[ADSB] ${aircraft.registration}: airborne, ${departureIata}→${result.destIata} → ` +
+          `[ADSB] ${aircraft.registration}: airborne, ${departureIata}→${destIata} → ` +
             `matched flight ${match.id}, status=Airborne`,
         );
 
