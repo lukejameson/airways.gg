@@ -19,6 +19,8 @@
   let showCompleted = $state($page.url.searchParams.get('completed') === '1');
   let searchQuery = $state('');
   let isLoading = $state(true);
+  // Start hidden until we check localStorage (prevents flash for dismissed users)
+  let roadsBannerVisible = $state(false);
 
   // Date navigation
   const displayDate = $derived(data.displayDate);
@@ -188,12 +190,18 @@
     }
   }
 
-  onMount(() => {
+onMount(() => {
+    const isDismissed = localStorage.getItem('dismissedRoadsBanner') === 'true';
+    roadsBannerVisible = !isDismissed;
     const interval = setInterval(async () => {
       await invalidateAll();
     }, 5 * 60 * 1000);
     return () => clearInterval(interval);
   });
+  function dismissRoadsBanner() {
+    roadsBannerVisible = false;
+    localStorage.setItem('dismissedRoadsBanner', 'true');
+  }
 </script>
 
 <svelte:head>
@@ -222,6 +230,39 @@
   {#if data.autoAdvanced}
     <div class="mb-4 p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-900 dark:text-blue-100">
       <strong>Today's flights have all completed.</strong> Showing tomorrow's schedule instead.
+    </div>
+  {/if}
+
+  <!-- Roads.gg banner - only renders when not dismissed -->
+  {#if roadsBannerVisible}
+    <div class="mb-4 p-3 bg-background border border-border rounded-lg text-sm flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+      <span class="flex items-center gap-2 text-foreground">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 16v-4"/><path d="M12 8h.01"/>
+        </svg>
+        <span>
+          {activeTab === 'arrivals'
+            ? 'Picking someone up? '
+            : 'Heading to the airport? '}
+          <a href="https://roads.gg" target="_blank" rel="noopener noreferrer" class="font-medium underline underline-offset-2 hover:opacity-80 transition-opacity">
+            Check roads.gg
+          </a>
+          {activeTab === 'arrivals'
+            ? ' for road closures before you leave'
+            : ' for road closures'}
+        </span>
+      </span>
+      <button
+        type="button"
+        onclick={dismissRoadsBanner}
+        class="shrink-0 p-1 rounded hover:bg-muted transition-colors opacity-60 hover:opacity-100"
+        aria-label="Dismiss"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+        </svg>
+      </button>
     </div>
   {/if}
 
