@@ -808,7 +808,7 @@ async function runBrowserSession(
       const connectOptions: Record<string, unknown> = {
         headless: false,
         turnstile: true,
-        disableXvfb: false,
+        disableXvfb: true,
         args: [
           '--disable-dev-shm-usage',
           '--window-size=1920,1080',
