@@ -2,7 +2,7 @@
   import { browser } from '$app/environment';
   import { goto } from '$app/navigation';
   import { page, navigating } from '$app/stores';
-  import { slide } from 'svelte/transition';
+  import { slide, fade } from 'svelte/transition';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -127,6 +127,8 @@
   const filterMonth     = $derived(data.activeMonth     || null);
   const filterYear      = $derived(data.activeYear      || null);
   const filterThreshold = $derived(data.threshold ?? 15);
+  const filterDateFrom  = $derived(data.dateFrom        || null);
+  const filterDateTo    = $derived(data.dateTo          || null);
   
   // Airline options: All, Aurigny, British Airways, Loganair
   const AIRLINE_OPTIONS = [
@@ -148,7 +150,7 @@
     goto(filterUrl({ route: filterRoute === key ? null : key }), { noScroll: true });
   }
   function clearAllFilters() {
-    goto(filterUrl({ route: null, airline: null, direction: null, dow: null, season: null, month: null, year: null, threshold: null }), { noScroll: true });
+    goto(filterUrl({ route: null, airline: null, direction: null, dow: null, season: null, month: null, year: null, threshold: null, dateFrom: null, dateTo: null }), { noScroll: true });
   }
   const activeFilterCount = $derived([
     filterAirline, filterRoute, filterDirection, filterDow,
@@ -157,6 +159,11 @@
   const hasActiveFilters = $derived(activeFilterCount > 0);
 
   let panelOpen = $state(false);
+
+  // Custom date range state - UI only, doesn't trigger navigation until dates are entered
+  let customModeOpen = $state(false);
+  let customDateFrom = $state('');
+  let customDateTo = $state('');
 
   const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -632,7 +639,7 @@
 <div class="container max-w-5xl px-4 py-6 sm:py-8">
 
   <!-- Header -->
-  <div class="flex flex-col gap-3 mb-4 sm:flex-row sm:items-end sm:justify-between">
+  <div class="flex flex-col gap-4 mb-4 sm:flex-row sm:items-center sm:justify-between">
     <div>
       <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Flight Statistics</h1>
       <p class="text-sm text-muted-foreground mt-1">
@@ -641,19 +648,76 @@
         · {totalFlights.toLocaleString()} flights
       </p>
     </div>
-    <div class="flex items-center self-start sm:self-auto gap-2">
-      <div class="flex items-center gap-1 rounded-lg border bg-muted/40 p-1">
-        {#each [['all', 'All time'], ['90', '90 days'], ['30', '30 days']] as [val, label]}
-          <button onclick={() => goto(`/stats?range=${val}`, { noScroll: true })} class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap h-[36px] flex items-center {currentRange === val ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}">{label}</button>
-        {/each}
+
+    <!-- Date Filter -->
+    <div class="flex items-center gap-2 w-full sm:w-auto">
+      <!-- Range buttons / Custom date inputs toggle container -->
+      <div class="relative h-[44px] flex-1 sm:w-[320px] sm:flex-none rounded-lg border bg-muted/40 overflow-hidden">
+        {#if !customModeOpen}
+          <div
+            class="absolute inset-0 flex items-center gap-1 p-1"
+            in:fade={{ duration: 150, delay: 75 }}
+            out:fade={{ duration: 150 }}
+          >
+            {#each [['all', 'All'], ['90', '90 Days'], ['30', '30 Days']] as [val, label]}
+              <button
+                onclick={() => { goto(`/stats?range=${val}`, { noScroll: true }); }}
+                class="flex-1 px-2 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap h-[36px] flex items-center justify-center {currentRange === val && !customModeOpen ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
+              >{label}</button>
+            {/each}
+            <button
+              onclick={() => { customModeOpen = true; }}
+              class="flex-1 px-2 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap h-[36px] flex items-center justify-center {currentRange === 'custom' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
+            >Custom</button>
+          </div>
+        {:else}
+          <div
+            class="absolute inset-0 flex items-center gap-2 p-1.5"
+            in:fade={{ duration: 150, delay: 75 }}
+            out:fade={{ duration: 150 }}
+          >
+            <input
+              type="date"
+              bind:value={customDateFrom}
+              onchange={() => { if (customDateFrom && customDateTo) goto(filterUrl({ range: 'custom', dateFrom: customDateFrom, dateTo: customDateTo }), { noScroll: true }); }}
+              class="flex-1 min-w-0 h-[36px] px-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <span class="text-sm text-muted-foreground shrink-0">–</span>
+            <input
+              type="date"
+              bind:value={customDateTo}
+              onchange={() => { if (customDateFrom && customDateTo) goto(filterUrl({ range: 'custom', dateFrom: customDateFrom, dateTo: customDateTo }), { noScroll: true }); }}
+              class="flex-1 min-w-0 h-[36px] px-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <button
+              onclick={() => {
+                customModeOpen = false;
+                customDateFrom = '';
+                customDateTo = '';
+                goto(filterUrl({ range: '30', dateFrom: null, dateTo: null }), { noScroll: true });
+              }}
+              class="shrink-0 h-[36px] w-[36px] flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Back to range selection"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            </button>
+          </div>
+        {/if}
       </div>
-      <button
-        onclick={() => panelOpen = !panelOpen}
-        class="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors h-[46px] {panelOpen || hasActiveFilters ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/40 text-muted-foreground hover:text-foreground'}"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
-        Filters{#if activeFilterCount > 0}&nbsp;({activeFilterCount}){/if}
-      </button>
+
+      <!-- Filters button -->
+      <div class="relative h-[44px] w-[44px] sm:w-[90px] rounded-lg border bg-muted/40 overflow-hidden shrink-0">
+        <div class="absolute inset-0 flex items-center p-1">
+          <button
+            onclick={() => panelOpen = !panelOpen}
+            class="w-full h-[36px] flex items-center justify-center gap-1.5 rounded-md text-sm font-medium transition-colors {panelOpen || hasActiveFilters ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
+            <span class="hidden sm:inline">Filters</span>
+            {#if activeFilterCount > 0}<span class="text-xs">({activeFilterCount})</span>{/if}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 

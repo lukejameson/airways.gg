@@ -5,6 +5,8 @@ import { sql } from 'drizzle-orm';
 
 export const load: PageServerLoad = async ({ url }) => {
   const range = url.searchParams.get('range') ?? '90';
+  const dateFrom = url.searchParams.get('dateFrom') ?? '';
+  const dateTo = url.searchParams.get('dateTo') ?? '';
   const activeAirline = url.searchParams.get('airline') ?? '';
   const activeRoute = url.searchParams.get('route') ?? '';
   const activeDirection = url.searchParams.get('direction') ?? '';
@@ -47,19 +49,32 @@ export const load: PageServerLoad = async ({ url }) => {
     ? sql`(UPPER(SUBSTRING(f.flight_number FROM 1 FOR 2)) = ${activeAirline})`
     : sql`(f.flight_number ILIKE 'GR%' OR f.flight_number ILIKE 'BA%')`;
 
-  const dateFilter =
-    range === '30'
-      ? sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '30 days'`
-      : range === '90'
-        ? sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '90 days'`
-        : sql``;
+  // Build date filter based on range selection or custom dates
+  let dateFilter;
+  if (range === 'custom' && dateFrom && dateTo) {
+    dateFilter = sql`AND f.flight_date BETWEEN ${dateFrom} AND ${dateTo}`;
+  } else if (range === '30') {
+    dateFilter = sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '30 days'`;
+  } else if (range === '90') {
+    dateFilter = sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '90 days'`;
+  } else {
+    dateFilter = sql``;
+  }
 
   // Subquery (alias f2) computes the set of regular routes for this period.
+  const routeMinDateFilter = range === 'custom' && dateFrom && dateTo
+    ? sql`AND f2.flight_date BETWEEN ${dateFrom} AND ${dateTo}`
+    : range === '30'
+      ? sql`AND f2.flight_date >= CURRENT_DATE - INTERVAL '30 days'`
+      : range === '90'
+        ? sql`AND f2.flight_date >= CURRENT_DATE - INTERVAL '90 days'`
+        : sql``;
+
   const routeMinFilter = sql`AND (f.departure_airport, f.arrival_airport) IN (
     SELECT f2.departure_airport, f2.arrival_airport FROM flights f2
     WHERE (f2.flight_number ILIKE 'GR%' OR f2.flight_number ILIKE 'BA%')
       AND f2.departure_airport != f2.arrival_airport
-      ${range === '30' ? sql`AND f2.flight_date >= CURRENT_DATE - INTERVAL '30 days'` : range === '90' ? sql`AND f2.flight_date >= CURRENT_DATE - INTERVAL '90 days'` : sql``}
+      ${routeMinDateFilter}
     GROUP BY f2.departure_airport, f2.arrival_airport
     HAVING COUNT(*) >= ${minFlightsPerRoute}
   )`;
@@ -99,8 +114,10 @@ export const load: PageServerLoad = async ({ url }) => {
 
   const sinceClause = sql`${airlineFilter} ${dateFilter} ${routeMinFilter} ${routeFilter} ${directionFilter} ${dowFilter} ${periodFilter} ${yearFilter}`;
   const routesSince  = sql`${airlineFilter} ${dateFilter} ${routeMinFilter} ${directionFilter} ${dowFilter} ${periodFilter} ${yearFilter}`;
-  const wxDateFilter =
-    range === '30'
+
+  const wxDateFilter = range === 'custom' && dateFrom && dateTo
+    ? sql`AND f.flight_date BETWEEN ${dateFrom} AND ${dateTo}`
+    : range === '30'
       ? sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '30 days'`
       : range === '90'
         ? sql`AND f.flight_date >= CURRENT_DATE - INTERVAL '90 days'`
@@ -495,6 +512,8 @@ export const load: PageServerLoad = async ({ url }) => {
 
   return {
     range,
+    dateFrom,
+    dateTo,
     activeAirline,
     activeRoute,
     activeDirection,
