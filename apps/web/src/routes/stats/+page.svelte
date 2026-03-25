@@ -119,7 +119,7 @@
   }
 
   // Filters come from URL params — server re-runs all queries on change
-  const filterRoute     = $derived(data.activeRoute     || null);
+  const filterRoutes    = $derived(data.activeRoutes || []);
   const filterAirline   = $derived(data.activeAirline   || null);
   const filterDirection = $derived(data.activeDirection || null);
   const filterDow       = $derived(data.activeDow       || null);
@@ -138,22 +138,36 @@
     ['LM', 'Loganair']
   ] as const;
 
-  function filterUrl(updates: Record<string, string | null>): string {
+  function filterUrl(updates: Record<string, string | null | string[]>): string {
     const p = new URLSearchParams($page.url.searchParams);
     for (const [k, v] of Object.entries(updates)) {
-      if (v === null || v === '') p.delete(k); else p.set(k, v);
+      if (v === null || v === '' || (Array.isArray(v) && v.length === 0)) {
+        p.delete(k);
+      } else if (Array.isArray(v)) {
+        p.delete(k);
+        for (const item of v) {
+          p.append(k, item);
+        }
+      } else {
+        p.set(k, v);
+      }
     }
     return `/stats?${p}`;
   }
 
   function setRouteFilter(key: string) {
-    goto(filterUrl({ route: filterRoute === key ? null : key }), { noScroll: true });
+    const currentRoutes = filterRoutes;
+    const isSelected = currentRoutes.includes(key);
+    const newRoutes = isSelected
+      ? currentRoutes.filter(r => r !== key)
+      : [...currentRoutes, key];
+    goto(filterUrl({ route: newRoutes }), { noScroll: true });
   }
   function clearAllFilters() {
-    goto(filterUrl({ route: null, airline: null, direction: null, dow: null, season: null, month: null, year: null, threshold: null, dateFrom: null, dateTo: null }), { noScroll: true });
+    goto(filterUrl({ route: [], airline: null, direction: null, dow: null, season: null, month: null, year: null, threshold: null, dateFrom: null, dateTo: null }), { noScroll: true });
   }
   const activeFilterCount = $derived([
-    filterAirline, filterRoute, filterDirection, filterDow,
+    filterAirline, filterRoutes.length > 0, filterDirection, filterDow,
     filterSeason, filterMonth, filterYear, filterThreshold !== 15 ? 'thr' : null,
   ].filter(Boolean).length);
   const hasActiveFilters = $derived(activeFilterCount > 0);
@@ -440,14 +454,16 @@
     return data.availableRoutes as { departure: string; arrival: string; key: string }[];
   });
 
-  const selectedRouteOption = $derived.by(() => {
-    if (!filterRoute) return null;
-    const route = allRoutes.find(r => r.key === filterRoute);
-    return route || null;
+  const selectedRouteOptions = $derived.by(() => {
+    return filterRoutes.map(key => allRoutes.find(r => r.key === key)).filter(Boolean) as { departure: string; arrival: string; key: string }[];
   });
 
-  const selectedRouteIsTop10 = $derived.by(() => {
-    return topRouteOptions.some(r => r.key === filterRoute);
+  const selectedTop10Routes = $derived.by(() => {
+    return filterRoutes.filter(key => topRouteOptions.some(r => r.key === key));
+  });
+
+  const selectedOtherRoutes = $derived.by(() => {
+    return filterRoutes.filter(key => !topRouteOptions.some(r => r.key === key));
   });
 
   const otherRoutes = $derived.by(() => {
@@ -504,7 +520,8 @@
       });
     }
 
-    if (bestDay) {
+    // Only show best/worst day cards when not filtering by day of week
+    if (bestDay && !filterDow) {
       list.push({
         label: 'Best day to fly',
         value: String(bestDay.day_name).trim(),
@@ -513,7 +530,7 @@
       });
     }
 
-    if (worstDay) {
+    if (worstDay && !filterDow) {
       list.push({
         label: 'Most disrupted day',
         value: String(worstDay.day_name).trim(),
@@ -522,8 +539,9 @@
       });
     }
 
+    // Only show "Most delayed route" when not filtering to specific route(s)
     const topRoute = (data.worstRoutes as Record<string, unknown>[]).find(r => n(r.flights) >= 10 && n(r.avg_delay) > 0);
-    if (topRoute) {
+    if (topRoute && filterRoutes.length === 0) {
       list.push({
         label: 'Most delayed route',
         value: fmtRoute(String(topRoute.departure_airport), String(topRoute.arrival_airport)),
@@ -534,9 +552,10 @@
 
     const fogRow = (data.visibilityDelays as Record<string, unknown>[]).find(r => String(r.vis_band).startsWith('<1'));
     if (fogRow && n(fogRow.flights) > 0) {
+      const delayPct = fogRow.delay_pct != null ? `${fogRow.delay_pct}% delayed` : 'No delay data';
       list.push({
         label: 'Fog impact',
-        value: `${fogRow.delay_pct}% delayed`,
+        value: delayPct,
         sub: `${fogRow.flights} flights in fog · ${fogRow.cancelled} cancelled`,
         tone: 'red',
       });
@@ -566,6 +585,21 @@
     return `£${v}`;
   }
   const impactData = $derived(data.delayImpact as Record<string, unknown>);
+  const hasResults = $derived(totalFlights > 0);
+  const hasRoutes = $derived((data.worstRoutes as Record<string, unknown>[]).length > 0);
+  const hasFlights = $derived((data.flightNumbers as Record<string, unknown>[]).length > 0);
+  const hasDailyOtp = $derived((data.dailyOtp as Record<string, unknown>[]).length > 0);
+  const hasDayOfWeek = $derived((data.dayOfWeek as Record<string, unknown>[]).length > 0);
+  const hasDepartureHour = $derived((data.departureHour as Record<string, unknown>[]).length > 0);
+  const hasDelayDistribution = $derived(distTotal > 0);
+  const hasBusiestDays = $derived((data.busiestDays as Record<string, unknown>[]).length > 0);
+  const hasWorstDays = $derived((data.worstDays as Record<string, unknown>[]).length > 0);
+  const hasTopDelays = $derived((data.topDelays as Record<string, unknown>[]).length > 0);
+  const hasMonthlyBreakdown = $derived((data.monthlyBreakdown as Record<string, unknown>[]).length > 0);
+  const hasAircraftUsage = $derived((data.aircraftUsage as Record<string, unknown>[]).length > 0);
+  const hasWeatherData = $derived((data.windDelays as Record<string, unknown>[]).length > 0);
+  const hasWorstWeatherDays = $derived((data.worstWeatherDays as Record<string, unknown>[]).length > 0);
+
   const impactMins = $derived(n(impactData.total_delay_mins_gt5));
   const impactHours = $derived(Math.round(impactMins / 60));
   const impactDays = $derived((impactMins / 60 / 24).toFixed(1));
@@ -635,6 +669,23 @@
     </div>
   </div>
 {/if}
+
+<!-- Empty State Component -->
+{#snippet emptyState(title: string, description: string)}
+  <div class="flex flex-col items-center justify-center py-12 sm:py-16 text-center px-4">
+    <div class="text-muted-foreground/50 mb-4">
+      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+    </div>
+    <h3 class="text-lg font-semibold text-foreground mb-2">{title}</h3>
+    <p class="text-sm text-muted-foreground mb-4 max-w-sm">{description}</p>
+    {#if hasActiveFilters}
+      <button onclick={clearAllFilters} class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        Clear all filters
+      </button>
+    {/if}
+  </div>
+{/snippet}
 
 <div class="container max-w-5xl px-4 py-6 sm:py-8">
 
@@ -714,7 +765,6 @@
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
             <span class="hidden sm:inline">Filters</span>
-            {#if activeFilterCount > 0}<span class="text-xs">({activeFilterCount})</span>{/if}
           </button>
         </div>
       </div>
@@ -753,14 +803,20 @@
     <div>
       <p class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Route</p>
       <div class="flex flex-wrap gap-1.5 items-center">
-        {#if filterRoute && selectedRouteOption && !selectedRouteIsTop10}
-          <button onclick={() => goto(filterUrl({ route: null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors bg-primary text-primary-foreground border-primary">{fmtRoute(selectedRouteOption.departure, selectedRouteOption.arrival)} ✕</button>
+        <!-- Selected non-top-10 routes -->
+        {#each selectedOtherRoutes as key}
+          {@const route = allRoutes.find(r => r.key === key)}
+          {#if route}
+            <button onclick={() => setRouteFilter(key)} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors bg-primary text-primary-foreground border-primary">{fmtRoute(route.departure, route.arrival)} ✕</button>
+          {/if}
+        {/each}
+        <!-- Clear all routes button -->
+        {#if filterRoutes.length > 0}
+          <button onclick={() => goto(filterUrl({ route: [] }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors bg-muted text-muted-foreground border-border hover:text-foreground">Clear all</button>
         {/if}
-        {#if filterRoute && (selectedRouteIsTop10 || !selectedRouteOption)}
-          <button onclick={() => goto(filterUrl({ route: null }), { noScroll: true })} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors bg-primary text-primary-foreground border-primary">Clear</button>
-        {/if}
+        <!-- Top 10 route options -->
         {#each topRouteOptions as route}
-          <button onclick={() => setRouteFilter(route.key)} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterRoute === route.key ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{fmtRoute(route.departure, route.arrival)}</button>
+          <button onclick={() => setRouteFilter(route.key)} class="px-4 py-2 sm:px-2.5 sm:py-1 rounded-full border text-xs font-medium transition-colors {filterRoutes.includes(route.key) ? 'bg-primary text-primary-foreground border-primary' : 'border-border bg-background text-muted-foreground hover:text-foreground hover:border-foreground/40 hover:bg-muted/30'}">{fmtRoute(route.departure, route.arrival)}</button>
         {/each}
         {#if (data.availableRoutes as { departure: string; arrival: string; key: string }[]).length > 10}
           <div class="relative">
@@ -769,7 +825,7 @@
               placeholder="Search other routes..."
               bind:value={routeSearch}
               bind:this={routeInputElement}
-              onblur={() => { routeSearch = ''; }}
+              onblur={() => { setTimeout(() => { routeSearch = ''; }, 200); }}
               class="px-3 py-1.5 sm:px-2.5 sm:py-1 rounded-full border border-border bg-background text-xs placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
             {#if routeSearch}
@@ -783,9 +839,10 @@
                         e.stopPropagation();
                         selectRoute(route.key);
                       }}
-                      class="w-full px-4 py-2 text-left text-xs hover:bg-muted transition-colors {filterRoute === route.key ? 'bg-muted text-primary font-medium' : ''}"
+                      class="w-full px-4 py-2 text-left text-xs hover:bg-muted transition-colors {filterRoutes.includes(route.key) ? 'bg-muted text-primary font-medium' : ''}"
                     >
                       {fmtRoute(route.departure, route.arrival)}
+                      {#if filterRoutes.includes(route.key)}<span class="ml-1">✓</span>{/if}
                     </button>
                   {/each}
                 {:else}
@@ -871,8 +928,8 @@
   <!-- At a Glance -->
   <div class="mb-6">
     <h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">At a Glance</h2>
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-      {#if isLoading}
+    {#if isLoading}
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {#each [1,2,3,4,5,6,7,8] as _}
           <div class="rounded-xl border bg-card p-3.5">
             <div class="{sk} h-3 w-20 mb-2"></div>
@@ -880,7 +937,11 @@
             <div class="{sk} h-3 w-28"></div>
           </div>
         {/each}
-      {:else}
+      </div>
+    {:else if !hasResults}
+      {@render emptyState('No data available', 'There are no flights matching your current filters. Try adjusting your date range or clearing some filters.')}
+    {:else}
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         {#each insights as insight}
           {@const cls = toneClasses[insight.tone]}
           <div class="rounded-xl border p-3.5 {cls.card}">
@@ -889,8 +950,8 @@
             <p class="text-xs {cls.label} mt-1 leading-snug opacity-80">{insight.sub}</p>
           </div>
         {/each}
-      {/if}
-    </div>
+      </div>
+    {/if}
   </div>
 
   <!-- Delay Impact -->
@@ -1006,6 +1067,8 @@
     <h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Daily OTP Trend</h2>
     {#if isLoading}
       <div class="{sk} h-48 sm:h-56 w-full rounded-lg"></div>
+    {:else if !hasDailyOtp}
+      {@render emptyState('No trend data', 'No daily on-time performance data available for the selected period.')}
     {:else}
       <div class="relative h-48 sm:h-56"><canvas bind:this={trendCanvas}></canvas></div>
     {/if}
@@ -1015,6 +1078,8 @@
       <h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Day of Week</h2>
       {#if isLoading}
         <div class="{sk} h-48 w-full rounded-lg"></div>
+      {:else if !hasDayOfWeek}
+        {@render emptyState('No day data', 'No day-of-week breakdown available for the selected filters.')}
       {:else}
         <div class="relative h-48"><canvas bind:this={dowCanvas}></canvas></div>
       {/if}
@@ -1023,6 +1088,8 @@
       <h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Delay by Departure Hour</h2>
       {#if isLoading}
         <div class="{sk} h-48 w-full rounded-lg"></div>
+      {:else if !hasDepartureHour}
+        {@render emptyState('No hour data', 'No departure hour data available for the selected filters.')}
       {:else}
         <div class="relative h-48"><canvas bind:this={hourCanvas}></canvas></div>
       {/if}
@@ -1032,6 +1099,8 @@
     <h2 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Delay Distribution</h2>
     {#if isLoading}
       <div class="{sk} h-32 w-full rounded-lg"></div>
+    {:else if !hasDelayDistribution}
+      {@render emptyState('No delay data', 'No delay distribution data available for the selected filters.')}
     {:else}
       <div class="relative h-32"><canvas bind:this={distCanvas}></canvas></div>
     {/if}
@@ -1040,7 +1109,7 @@
   <div class="rounded-xl border bg-card mb-4 overflow-hidden">
     <div class="flex items-center justify-between px-4 pt-4 pb-2">
       <h2 class="text-sm font-semibold text-foreground">Routes</h2>
-      <span class="text-xs text-muted-foreground hidden sm:block">{filterRoute ? 'Click row to deselect · ↗ to browse' : 'Click row to filter · ↗ to browse'}</span>
+      <span class="text-xs text-muted-foreground hidden sm:block">{filterRoutes.length > 0 ? `${filterRoutes.length} selected · Click to toggle · ↗ to browse` : 'Click row to filter · ↗ to browse'}</span>
     </div>
     {#if isLoading}
       <div class="divide-y sm:hidden">
@@ -1055,13 +1124,29 @@
           </div>
         {/each}
       </div>
+      <div class="overflow-x-auto hidden sm:block">
+        <table class="w-full">
+          <tbody class="divide-y">
+            {#each [1,2,3,4,5,6,7,8] as _}
+              <tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-20"></div></td>{#each [1,2,3,4,5,6] as _}<td class="{tdBase}"><div class="{sk} h-4 w-12"></div></td>{/each}</tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {:else if !hasRoutes}
+      <div class="px-4">
+        {@render emptyState('No routes found', 'No route data available for the current filter selection.')}
+      </div>
     {:else}
       <div class="divide-y sm:hidden">
         {#each sortedRoutes as row}
-          <button onclick={() => setRouteFilter(routeKey(row))} class="w-full text-left px-4 py-3 transition-colors {filterRoute === routeKey(row) ? 'bg-primary/5' : 'hover:bg-muted/30 active:bg-muted/50'}">
+          <button onclick={() => setRouteFilter(routeKey(row))} class="w-full text-left px-4 py-3 transition-colors {filterRoutes.includes(routeKey(row)) ? 'bg-primary/5' : 'hover:bg-muted/30 active:bg-muted/50'}">
             <div class="flex items-center justify-between gap-2 mb-1">
               <span class="font-semibold text-sm truncate">{fmtRoute(String(row.departure_airport), String(row.arrival_airport))}</span>
               <div class="flex items-center gap-2 shrink-0">
+                {#if filterRoutes.includes(routeKey(row))}
+                  <span class="text-xs text-primary font-medium">✓</span>
+                {/if}
                 <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {reliabilityBadge(row.reliability_score)}">{row.reliability_score ?? '—'}</span>
                 <a href="/search?from={row.departure_airport}&to={row.arrival_airport}" onclick={(e) => e.stopPropagation()} class="text-xs text-muted-foreground hover:text-foreground">↗</a>
               </div>
@@ -1075,30 +1160,27 @@
           </button>
         {/each}
       </div>
-    {/if}
-    <div class="overflow-x-auto hidden sm:block">
-      <table class="w-full">
-        <thead class="border-y bg-muted/30">
-          <tr>
-            <th class="{thBtn} pl-4">Route</th>
-            <th class="{thBtn}" onclick={() => routeSort = toggleSort(routeSort, 'flights')}>Flights {sortIcon(routeSort, 'flights')}</th>
-            <th class="{thBtn}" onclick={() => routeSort = toggleSort(routeSort, 'delay_pct')}>Delay% {sortIcon(routeSort, 'delay_pct')}</th>
-            <th class="{thBtn}" onclick={() => routeSort = toggleSort(routeSort, 'avg_delay')}>Avg Delay {sortIcon(routeSort, 'avg_delay')}</th>
-            <th class="{thBtn}" onclick={() => routeSort = toggleSort(routeSort, 'max_delay')}>Max {sortIcon(routeSort, 'max_delay')}</th>
-            <th class="{thBtn}" onclick={() => routeSort = toggleSort(routeSort, 'cancelled')}>Cancelled {sortIcon(routeSort, 'cancelled')}</th>
-            <th class="{thBtn} pr-4" onclick={() => routeSort = toggleSort(routeSort, 'reliability_score')}>Score {sortIcon(routeSort, 'reliability_score')}</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y">
-          {#if isLoading}
-            {#each [1,2,3,4,5,6,7,8] as _}
-              <tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-20"></div></td>{#each [1,2,3,4,5,6] as _}<td class="{tdBase}"><div class="{sk} h-4 w-12"></div></td>{/each}</tr>
-            {/each}
-          {:else}
+      <div class="overflow-x-auto hidden sm:block">
+        <table class="w-full">
+          <thead class="border-y bg-muted/30">
+            <tr>
+              <th class="{thBtn} pl-4">Route</th>
+              <th class="{thBtn}" onclick={() => routeSort = toggleSort(routeSort, 'flights')}>Flights {sortIcon(routeSort, 'flights')}</th>
+              <th class="{thBtn}" onclick={() => routeSort = toggleSort(routeSort, 'delay_pct')}>Delay% {sortIcon(routeSort, 'delay_pct')}</th>
+              <th class="{thBtn}" onclick={() => routeSort = toggleSort(routeSort, 'avg_delay')}>Avg Delay {sortIcon(routeSort, 'avg_delay')}</th>
+              <th class="{thBtn}" onclick={() => routeSort = toggleSort(routeSort, 'max_delay')}>Max {sortIcon(routeSort, 'max_delay')}</th>
+              <th class="{thBtn}" onclick={() => routeSort = toggleSort(routeSort, 'cancelled')}>Cancelled {sortIcon(routeSort, 'cancelled')}</th>
+              <th class="{thBtn} pr-4" onclick={() => routeSort = toggleSort(routeSort, 'reliability_score')}>Score {sortIcon(routeSort, 'reliability_score')}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y">
             {#each sortedRoutes as row}
-              <tr onclick={() => setRouteFilter(routeKey(row))} class="transition-colors cursor-pointer {filterRoute === routeKey(row) ? 'bg-primary/5' : 'hover:bg-muted/30 active:bg-muted/50'}">
+              <tr onclick={() => setRouteFilter(routeKey(row))} class="transition-colors cursor-pointer {filterRoutes.includes(routeKey(row)) ? 'bg-primary/5' : 'hover:bg-muted/30 active:bg-muted/50'}">
                 <td class="{tdBase} pl-4 font-semibold whitespace-nowrap">
                   {fmtRoute(String(row.departure_airport), String(row.arrival_airport))}
+                  {#if filterRoutes.includes(routeKey(row))}
+                    <span class="ml-1.5 text-xs text-primary">✓</span>
+                  {/if}
                   <a href="/search?from={row.departure_airport}&to={row.arrival_airport}" onclick={(e) => e.stopPropagation()} class="ml-1.5 text-xs font-normal text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity">↗</a>
                 </td>
                 <td class="{tdBase} tabular-nums">{row.flights}</td>
@@ -1109,10 +1191,10 @@
                 <td class="{tdBase} pr-4"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium {reliabilityBadge(row.reliability_score)}">{row.reliability_score ?? '—'}</span></td>
               </tr>
             {/each}
-          {/if}
-        </tbody>
-      </table>
-    </div>
+          </tbody>
+        </table>
+      </div>
+    {/if}
   </div>
 
   <!-- Flight numbers -->
@@ -1133,6 +1215,19 @@
           </div>
         {/each}
       </div>
+      <div class="overflow-x-auto hidden sm:block">
+        <table class="w-full">
+          <tbody class="divide-y">
+            {#each [1,2,3,4,5,6,7] as _}
+              <tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-16"></div></td>{#each [1,2,3,4,5] as _}<td class="{tdBase}"><div class="{sk} h-4 w-12"></div></td>{/each}</tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {:else if !hasFlights}
+      <div class="px-4">
+        {@render emptyState('No flight data', 'No individual flight records available for the current filter selection.')}
+      </div>
     {:else}
       <div class="divide-y sm:hidden">
         {#each sortedFlights as row}
@@ -1150,25 +1245,19 @@
           </button>
         {/each}
       </div>
-    {/if}
-    <div class="overflow-x-auto hidden sm:block">
-      <table class="w-full">
-        <thead class="border-y bg-muted/30">
-          <tr>
-            <th class="{thBtn} pl-4">Flight</th>
-            <th class="{thBtn}" onclick={() => flightSort = toggleSort(flightSort, 'operated')}>Ops {sortIcon(flightSort, 'operated')}</th>
-            <th class="{thBtn}" onclick={() => flightSort = toggleSort(flightSort, 'delay_pct')}>Delay% {sortIcon(flightSort, 'delay_pct')}</th>
-            <th class="{thBtn}" onclick={() => flightSort = toggleSort(flightSort, 'avg_delay')}>Avg {sortIcon(flightSort, 'avg_delay')}</th>
-            <th class="{thBtn}" onclick={() => flightSort = toggleSort(flightSort, 'worst_delay')}>Worst {sortIcon(flightSort, 'worst_delay')}</th>
-            <th class="{thBtn} pr-4" onclick={() => flightSort = toggleSort(flightSort, 'cancelled')}>Cancelled {sortIcon(flightSort, 'cancelled')}</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y">
-          {#if isLoading}
-            {#each [1,2,3,4,5,6,7] as _}
-              <tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-16"></div></td>{#each [1,2,3,4,5] as _}<td class="{tdBase}"><div class="{sk} h-4 w-12"></div></td>{/each}</tr>
-            {/each}
-          {:else}
+      <div class="overflow-x-auto hidden sm:block">
+        <table class="w-full">
+          <thead class="border-y bg-muted/30">
+            <tr>
+              <th class="{thBtn} pl-4">Flight</th>
+              <th class="{thBtn}" onclick={() => flightSort = toggleSort(flightSort, 'operated')}>Ops {sortIcon(flightSort, 'operated')}</th>
+              <th class="{thBtn}" onclick={() => flightSort = toggleSort(flightSort, 'delay_pct')}>Delay% {sortIcon(flightSort, 'delay_pct')}</th>
+              <th class="{thBtn}" onclick={() => flightSort = toggleSort(flightSort, 'avg_delay')}>Avg {sortIcon(flightSort, 'avg_delay')}</th>
+              <th class="{thBtn}" onclick={() => flightSort = toggleSort(flightSort, 'worst_delay')}>Worst {sortIcon(flightSort, 'worst_delay')}</th>
+              <th class="{thBtn} pr-4" onclick={() => flightSort = toggleSort(flightSort, 'cancelled')}>Cancelled {sortIcon(flightSort, 'cancelled')}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y">
             {#each sortedFlights as row}
               <tr onclick={() => nav(`/search?q=${row.flight_number}`)} class="hover:bg-muted/30 active:bg-muted/50 transition-colors cursor-pointer">
                 <td class="{tdBase} pl-4 font-semibold">{row.flight_number}</td>
@@ -1179,28 +1268,38 @@
                 <td class="{tdBase} pr-4 tabular-nums">{row.cancelled}</td>
               </tr>
             {/each}
-          {/if}
-        </tbody>
-      </table>
-    </div>
+          </tbody>
+        </table>
+      </div>
+    {/if}
   </div>
 
   <!-- Busiest + worst days -->
   <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="px-4 pt-4 pb-2"><h2 class="text-sm font-semibold text-foreground">Busiest Days</h2></div>
-      <div class="overflow-x-auto">
-        <table class="w-full">
-          <thead class="border-y bg-muted/30"><tr>
-            <th class="{thBtn} pl-4">Date</th>
-            <th class="{thBtn}">Flights</th>
-            <th class="{thBtn}">Cancelled</th>
-            <th class="{thBtn} pr-4">Landed</th>
-          </tr></thead>
-          <tbody class="divide-y">
-            {#if isLoading}
+      {#if isLoading}
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <tbody class="divide-y">
               {#each [1,2,3,4,5] as _}<tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-24"></div></td>{#each [1,2,3] as _}<td class="{tdBase}"><div class="{sk} h-4 w-8"></div></td>{/each}</tr>{/each}
-            {:else}
+            </tbody>
+          </table>
+        </div>
+      {:else if !hasBusiestDays}
+        <div class="px-4 py-8">
+          {@render emptyState('No data', 'No busiest days data available.')}
+        </div>
+      {:else}
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead class="border-y bg-muted/30"><tr>
+              <th class="{thBtn} pl-4">Date</th>
+              <th class="{thBtn}">Flights</th>
+              <th class="{thBtn}">Cancelled</th>
+              <th class="{thBtn} pr-4">Landed</th>
+            </tr></thead>
+            <tbody class="divide-y">
               {#each data.busiestDays as row}
                 <tr onclick={() => nav(`/search?date=${row.flight_date}`)} class="hover:bg-muted/30 active:bg-muted/50 transition-colors cursor-pointer">
                   <td class="{tdBase} pl-4">{fmtDate(row.flight_date)}</td>
@@ -1209,25 +1308,35 @@
                   <td class="{tdBase} pr-4 tabular-nums">{row.landed}</td>
                 </tr>
               {/each}
-            {/if}
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
+      {/if}
     </div>
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="px-4 pt-4 pb-2"><h2 class="text-sm font-semibold text-foreground">Worst Cancellation Days</h2></div>
-      <div class="overflow-x-auto">
-        <table class="w-full">
-          <thead class="border-y bg-muted/30"><tr>
-            <th class="{thBtn} pl-4">Date</th>
-            <th class="{thBtn}">Cancelled</th>
-            <th class="{thBtn}">Total</th>
-            <th class="{thBtn} pr-4">Cancel%</th>
-          </tr></thead>
-          <tbody class="divide-y">
-            {#if isLoading}
+      {#if isLoading}
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <tbody class="divide-y">
               {#each [1,2,3,4,5] as _}<tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-24"></div></td>{#each [1,2,3] as _}<td class="{tdBase}"><div class="{sk} h-4 w-8"></div></td>{/each}</tr>{/each}
-            {:else}
+            </tbody>
+          </table>
+        </div>
+      {:else if !hasWorstDays}
+        <div class="px-4 py-8">
+          {@render emptyState('No data', 'No cancellation data available.')}
+        </div>
+      {:else}
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead class="border-y bg-muted/30"><tr>
+              <th class="{thBtn} pl-4">Date</th>
+              <th class="{thBtn}">Cancelled</th>
+              <th class="{thBtn}">Total</th>
+              <th class="{thBtn} pr-4">Cancel%</th>
+            </tr></thead>
+            <tbody class="divide-y">
               {#each data.worstDays as row}
                 <tr onclick={() => nav(`/search?date=${row.flight_date}`)} class="hover:bg-muted/30 active:bg-muted/50 transition-colors cursor-pointer">
                   <td class="{tdBase} pl-4">{fmtDate(row.flight_date)}</td>
@@ -1236,10 +1345,10 @@
                   <td class="{tdBase} pr-4" style="{cellBg(row.cancel_pct)}"><span class="{delayColor(row.cancel_pct)}">{row.cancel_pct}%</span></td>
                 </tr>
               {/each}
-            {/if}
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -1258,6 +1367,17 @@
           </div>
         {/each}
       </div>
+      <div class="overflow-x-auto hidden sm:block">
+        <table class="w-full">
+          <tbody class="divide-y">
+            {#each [1,2,3,4,5] as _}<tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-14"></div></td><td class="{tdBase}"><div class="{sk} h-4 w-24"></div></td><td class="{tdBase}"><div class="{sk} h-4 w-16"></div></td><td class="{tdBase} pr-4"><div class="{sk} h-4 w-10"></div></td></tr>{/each}
+          </tbody>
+        </table>
+      </div>
+    {:else if !hasTopDelays}
+      <div class="px-4">
+        {@render emptyState('No delay records', 'No individual delay records available for the selected period.')}
+      </div>
     {:else}
       <div class="divide-y sm:hidden">
         {#each (data.topDelays as Record<string, unknown>[]) as row}
@@ -1273,19 +1393,15 @@
           </button>
         {/each}
       </div>
-    {/if}
-    <div class="overflow-x-auto hidden sm:block">
-      <table class="w-full">
-        <thead class="border-y bg-muted/30"><tr>
-          <th class="{thBtn} pl-4">Flight</th>
-          <th class="{thBtn}">Date</th>
-          <th class="{thBtn}">Route</th>
-          <th class="{thBtn} pr-4">Delay</th>
-        </tr></thead>
-        <tbody class="divide-y">
-          {#if isLoading}
-            {#each [1,2,3,4,5] as _}<tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-14"></div></td><td class="{tdBase}"><div class="{sk} h-4 w-24"></div></td><td class="{tdBase}"><div class="{sk} h-4 w-16"></div></td><td class="{tdBase} pr-4"><div class="{sk} h-4 w-10"></div></td></tr>{/each}
-          {:else}
+      <div class="overflow-x-auto hidden sm:block">
+        <table class="w-full">
+          <thead class="border-y bg-muted/30"><tr>
+            <th class="{thBtn} pl-4">Flight</th>
+            <th class="{thBtn}">Date</th>
+            <th class="{thBtn}">Route</th>
+            <th class="{thBtn} pr-4">Delay</th>
+          </tr></thead>
+          <tbody class="divide-y">
             {#each (data.topDelays as Record<string, unknown>[]) as row}
               <tr onclick={() => nav(`/flights/${row.id}`)} class="hover:bg-muted/30 active:bg-muted/50 transition-colors cursor-pointer">
                 <td class="{tdBase} pl-4 font-semibold">{row.flight_number}</td>
@@ -1294,10 +1410,10 @@
                 <td class="{tdBase} pr-4 font-bold tabular-nums text-red-600">{fmt(row.delay_minutes)}</td>
               </tr>
             {/each}
-          {/if}
-        </tbody>
-      </table>
-    </div>
+          </tbody>
+        </table>
+      </div>
+    {/if}
   </div>
 
   <!-- Monthly + aircraft -->
@@ -1316,6 +1432,17 @@
             </div>
           {/each}
         </div>
+        <div class="overflow-x-auto hidden sm:block">
+          <table class="w-full">
+            <tbody class="divide-y">
+              {#each [1,2,3] as _}<tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-20"></div></td>{#each [1,2,3,4] as _}<td class="{tdBase}"><div class="{sk} h-4 w-10"></div></td>{/each}</tr>{/each}
+            </tbody>
+          </table>
+        </div>
+      {:else if !hasMonthlyBreakdown}
+        <div class="px-4 py-8">
+          {@render emptyState('No monthly data', 'No monthly breakdown available for the selected filters.')}
+        </div>
       {:else}
         <div class="divide-y sm:hidden">
           {#each data.monthlyBreakdown as row}
@@ -1332,20 +1459,16 @@
             </div>
           {/each}
         </div>
-      {/if}
-      <div class="overflow-x-auto hidden sm:block">
-        <table class="w-full">
-          <thead class="border-y bg-muted/30"><tr>
-            <th class="{thBtn} pl-4">Month</th>
-            <th class="{thBtn}">Flights</th>
-            <th class="{thBtn}">Cancelled</th>
-            <th class="{thBtn}">Cancel%</th>
-            <th class="{thBtn} pr-4">Avg Delay</th>
-          </tr></thead>
-          <tbody class="divide-y">
-            {#if isLoading}
-              {#each [1,2,3] as _}<tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-20"></div></td>{#each [1,2,3,4] as _}<td class="{tdBase}"><div class="{sk} h-4 w-10"></div></td>{/each}</tr>{/each}
-            {:else}
+        <div class="overflow-x-auto hidden sm:block">
+          <table class="w-full">
+            <thead class="border-y bg-muted/30"><tr>
+              <th class="{thBtn} pl-4">Month</th>
+              <th class="{thBtn}">Flights</th>
+              <th class="{thBtn}">Cancelled</th>
+              <th class="{thBtn}">Cancel%</th>
+              <th class="{thBtn} pr-4">Avg Delay</th>
+            </tr></thead>
+            <tbody class="divide-y">
               {#each data.monthlyBreakdown as row}
                 <tr>
                   <td class="{tdBase} pl-4 font-medium">{row.month}</td>
@@ -1355,10 +1478,10 @@
                   <td class="{tdBase} pr-4 tabular-nums">{fmt(row.avg_delay)}</td>
                 </tr>
               {/each}
-            {/if}
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
+      {/if}
     </div>
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="px-4 pt-4 pb-2"><h2 class="text-sm font-semibold text-foreground">Aircraft Usage</h2></div>
@@ -1373,6 +1496,17 @@
               </div>
             </div>
           {/each}
+        </div>
+        <div class="overflow-x-auto hidden sm:block">
+          <table class="w-full">
+            <tbody class="divide-y">
+              {#each [1,2,3,4,5,6] as _}<tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-20"></div></td>{#each [1,2,3,4] as _}<td class="{tdBase}"><div class="{sk} h-4 w-10"></div></td>{/each}</tr>{/each}
+            </tbody>
+          </table>
+        </div>
+      {:else if !hasAircraftUsage}
+        <div class="px-4 py-8">
+          {@render emptyState('No aircraft data', 'No aircraft usage records available for the selected filters.')}
         </div>
       {:else}
         <div class="divide-y sm:hidden">
@@ -1390,20 +1524,16 @@
             </div>
           {/each}
         </div>
-      {/if}
-      <div class="overflow-x-auto hidden sm:block">
-        <table class="w-full">
-          <thead class="border-y bg-muted/30"><tr>
-            <th class="{thBtn} pl-4">Reg</th>
-            <th class="{thBtn}">Type</th>
-            <th class="{thBtn}">Flights</th>
-            <th class="{thBtn}">Cancelled</th>
-            <th class="{thBtn} pr-4">Avg Delay</th>
-          </tr></thead>
-          <tbody class="divide-y">
-            {#if isLoading}
-              {#each [1,2,3,4,5,6] as _}<tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-20"></div></td>{#each [1,2,3,4] as _}<td class="{tdBase}"><div class="{sk} h-4 w-10"></div></td>{/each}</tr>{/each}
-            {:else}
+        <div class="overflow-x-auto hidden sm:block">
+          <table class="w-full">
+            <thead class="border-y bg-muted/30"><tr>
+              <th class="{thBtn} pl-4">Reg</th>
+              <th class="{thBtn}">Type</th>
+              <th class="{thBtn}">Flights</th>
+              <th class="{thBtn}">Cancelled</th>
+              <th class="{thBtn} pr-4">Avg Delay</th>
+            </tr></thead>
+            <tbody class="divide-y">
               {#each data.aircraftUsage as row}
                 <tr>
                   <td class="{tdBase} pl-4 font-mono font-semibold text-sm">{row.aircraft_registration}</td>
@@ -1413,10 +1543,10 @@
                   <td class="{tdBase} pr-4 tabular-nums">{fmt(row.avg_delay)}</td>
                 </tr>
               {/each}
-            {/if}
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -1426,27 +1556,42 @@
       <h2 class="text-sm font-semibold text-foreground">Weather Impact</h2>
       <p class="text-xs text-muted-foreground mt-0.5">Based on {data.wxFlightCount} flights matched to hourly GCI weather · wind speed is 10m mean (not gusts) · crosswind calculated for RWY 09/27 (096°) · visibility in km · precip in mm</p>
     </div>
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x">
-      {#each [
-        { title: 'By Wind Speed', rows: data.windDelays, bandKey: 'wind_band' },
-        { title: 'By Crosswind (RWY 09/27)', rows: data.crosswindDelays, bandKey: 'xw_band' },
-        { title: 'By Visibility',  rows: data.visibilityDelays, bandKey: 'vis_band' },
-        { title: 'By Precipitation', rows: data.precipDelays, bandKey: 'precip_band' },
-        { title: 'By Weather Condition', rows: data.weatherCodeDelays, bandKey: 'weather_code', isCode: true },
-      ] as section}
-        <div class="p-4">
-          <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">{section.title}</h3>
-          <table class="w-full">
-            <thead><tr class="border-b">
-              <th class="text-left text-xs text-muted-foreground pb-1.5 font-medium">Condition</th>
-              <th class="text-right text-xs text-muted-foreground pb-1.5 font-medium">Flights</th>
-              <th class="text-right text-xs text-muted-foreground pb-1.5 font-medium">Delay%</th>
-              <th class="text-right text-xs text-muted-foreground pb-1.5 font-medium hidden sm:table-cell">Avg</th>
-            </tr></thead>
-            <tbody class="divide-y">
-              {#if isLoading}
+    {#if isLoading}
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x">
+        {#each [1,2,3,4,5] as _}
+          <div class="p-4">
+            <div class="{sk} h-3 w-24 mb-3"></div>
+            <table class="w-full">
+              <tbody class="divide-y">
                 {#each [1,2,3,4] as _}<tr><td class="py-2 pr-2"><div class="{sk} h-4 w-24"></div></td><td class="py-2 text-right"><div class="{sk} h-4 w-8 ml-auto"></div></td><td class="py-2 text-right"><div class="{sk} h-4 w-10 ml-auto"></div></td><td class="py-2 text-right hidden sm:table-cell"><div class="{sk} h-4 w-12 ml-auto"></div></td></tr>{/each}
-              {:else}
+              </tbody>
+            </table>
+          </div>
+        {/each}
+      </div>
+    {:else if !hasWeatherData}
+      <div class="px-4 py-8">
+        {@render emptyState('No weather data', 'No weather impact data available for the selected period.')}
+      </div>
+    {:else}
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x">
+        {#each [
+          { title: 'By Wind Speed', rows: data.windDelays, bandKey: 'wind_band' },
+          { title: 'By Crosswind (RWY 09/27)', rows: data.crosswindDelays, bandKey: 'xw_band' },
+          { title: 'By Visibility',  rows: data.visibilityDelays, bandKey: 'vis_band' },
+          { title: 'By Precipitation', rows: data.precipDelays, bandKey: 'precip_band' },
+          { title: 'By Weather Condition', rows: data.weatherCodeDelays, bandKey: 'weather_code', isCode: true },
+        ] as section}
+          <div class="p-4">
+            <h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">{section.title}</h3>
+            <table class="w-full">
+              <thead><tr class="border-b">
+                <th class="text-left text-xs text-muted-foreground pb-1.5 font-medium">Condition</th>
+                <th class="text-right text-xs text-muted-foreground pb-1.5 font-medium">Flights</th>
+                <th class="text-right text-xs text-muted-foreground pb-1.5 font-medium">Delay%</th>
+                <th class="text-right text-xs text-muted-foreground pb-1.5 font-medium hidden sm:table-cell">Avg</th>
+              </tr></thead>
+              <tbody class="divide-y">
                 {#each section.rows as row}
                   <tr>
                     <td class="py-2 pr-2 text-sm {section.bandKey === 'xw_band' ? xwBandColor(row[section.bandKey]) : ''}">{section.isCode ? (WX_LABELS[Number(row[section.bandKey])] ?? `Code ${row[section.bandKey]}`) : row[section.bandKey]}</td>
@@ -1455,12 +1600,12 @@
                     <td class="py-2 text-right text-sm tabular-nums hidden sm:table-cell">{fmt(row.avg_delay)}</td>
                   </tr>
                 {/each}
-              {/if}
-            </tbody>
-          </table>
-        </div>
-      {/each}
-    </div>
+              </tbody>
+            </table>
+          </div>
+        {/each}
+      </div>
+    {/if}
   </div>
 
   <!-- Worst weather days -->
@@ -1477,6 +1622,17 @@
             </div>
           </div>
         {/each}
+      </div>
+      <div class="overflow-x-auto hidden sm:block">
+        <table class="w-full">
+          <tbody class="divide-y">
+            {#each [1,2,3,4,5,6,7,8] as _}<tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-24"></div></td>{#each [1,2,3,4,5] as _}<td class="{tdBase}"><div class="{sk} h-4 w-10"></div></td>{/each}</tr>{/each}
+          </tbody>
+        </table>
+      </div>
+    {:else if !hasWorstWeatherDays}
+      <div class="px-4">
+        {@render emptyState('No weather days data', 'No weather-related delay records available for the selected period.')}
       </div>
     {:else}
       <div class="divide-y sm:hidden">
@@ -1495,22 +1651,18 @@
           </button>
         {/each}
       </div>
-    {/if}
-    <div class="overflow-x-auto hidden sm:block">
-      <table class="w-full">
-        <thead class="border-y bg-muted/30"><tr>
-          <th class="{thBtn} pl-4">Date</th>
-          <th class="{thBtn}">Flights</th>
-          <th class="{thBtn}">Cancelled</th>
-          <th class="{thBtn}">Avg Delay</th>
-          <th class="{thBtn}">Wind</th>
-          <th class="{thBtn}">Vis Km</th>
-          <th class="{thBtn} pr-4">Precip mm</th>
-        </tr></thead>
-        <tbody class="divide-y">
-          {#if isLoading}
-            {#each [1,2,3,4,5,6,7,8] as _}<tr><td class="{tdBase} pl-4"><div class="{sk} h-4 w-24"></div></td>{#each [1,2,3,4,5] as _}<td class="{tdBase}"><div class="{sk} h-4 w-10"></div></td>{/each}</tr>{/each}
-          {:else}
+      <div class="overflow-x-auto hidden sm:block">
+        <table class="w-full">
+          <thead class="border-y bg-muted/30"><tr>
+            <th class="{thBtn} pl-4">Date</th>
+            <th class="{thBtn}">Flights</th>
+            <th class="{thBtn}">Cancelled</th>
+            <th class="{thBtn}">Avg Delay</th>
+            <th class="{thBtn}">Wind</th>
+            <th class="{thBtn}">Vis Km</th>
+            <th class="{thBtn} pr-4">Precip mm</th>
+          </tr></thead>
+          <tbody class="divide-y">
             {#each data.worstWeatherDays as row}
               <tr onclick={() => nav(`/search?date=${row.flight_date}`)} class="hover:bg-muted/30 active:bg-muted/50 transition-colors cursor-pointer">
                 <td class="{tdBase} pl-4">{fmtDate(row.flight_date)}</td>
@@ -1522,9 +1674,9 @@
                 <td class="{tdBase} pr-4 tabular-nums">{row.precip_mm}</td>
               </tr>
             {/each}
-          {/if}
-        </tbody>
-      </table>
-    </div>
+          </tbody>
+        </table>
+      </div>
+    {/if}
   </div>
 </div>

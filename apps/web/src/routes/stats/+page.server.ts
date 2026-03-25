@@ -8,7 +8,8 @@ export const load: PageServerLoad = async ({ url }) => {
   const dateFrom = url.searchParams.get('dateFrom') ?? '';
   const dateTo = url.searchParams.get('dateTo') ?? '';
   const activeAirline = url.searchParams.get('airline') ?? '';
-  const activeRoute = url.searchParams.get('route') ?? '';
+  // Support multiple routes: ?route=GCI-LGW&route=GCI-EXT
+  const activeRoutes = url.searchParams.getAll('route').filter(Boolean);
   const activeDirection = url.searchParams.get('direction') ?? '';
   const activeDow = url.searchParams.get('dow') ?? '';
   const activeSeason = url.searchParams.get('season') ?? '';
@@ -16,10 +17,15 @@ export const load: PageServerLoad = async ({ url }) => {
   const activeYear = url.searchParams.get('year') ?? '';
   const thresholdParam = parseInt(url.searchParams.get('threshold') ?? '15', 10);
   const threshold = [0, 15, 30].includes(thresholdParam) ? thresholdParam : 15;
-  const routeParts = activeRoute ? activeRoute.split('-') : [];
-  const routeDep = routeParts[0] ?? '';
-  const routeArr = routeParts.slice(1).join('-');
   const minFlightsPerRoute = range === '30' ? 2 : range === '90' ? 3 : 5;
+
+  // Parse multiple routes into array of {dep, arr} objects
+  const parsedRoutes = activeRoutes.map(r => {
+    const parts = r.split('-');
+    const dep = parts[0] ?? '';
+    const arr = parts.slice(1).join('-');
+    return { dep, arr, key: r };
+  }).filter(r => r.dep && r.arr);
 
   // Get available years, airlines, and routes for filters
   const [yearsResult, airlinesResult, routesResult] = await Promise.all([
@@ -79,8 +85,8 @@ export const load: PageServerLoad = async ({ url }) => {
     HAVING COUNT(*) >= ${minFlightsPerRoute}
   )`;
 
-  const routeFilter = routeDep && routeArr
-    ? sql`AND f.departure_airport = ${routeDep} AND f.arrival_airport = ${routeArr}`
+  const routeFilter = parsedRoutes.length > 0
+    ? sql`AND (f.departure_airport, f.arrival_airport) IN (${sql.join(parsedRoutes.map(r => sql`(${r.dep}, ${r.arr})`), sql`, `)})`
     : sql``;
 
   const directionFilter = activeDirection === 'dep'
@@ -515,7 +521,7 @@ export const load: PageServerLoad = async ({ url }) => {
     dateFrom,
     dateTo,
     activeAirline,
-    activeRoute,
+    activeRoutes,
     activeDirection,
     activeDow,
     activeSeason,
