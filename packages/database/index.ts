@@ -4,6 +4,49 @@ import * as schema from './schema';
 
 // Re-export schema types and table objects — safe to import anywhere
 export * from './schema';
+
+// Export inferred types for all tables
+export type User = typeof schema.users.$inferSelect;
+export type NewUser = typeof schema.users.$inferInsert;
+
+export type Session = typeof schema.sessions.$inferSelect;
+export type NewSession = typeof schema.sessions.$inferInsert;
+
+export type Flight = typeof schema.flights.$inferSelect;
+export type NewFlight = typeof schema.flights.$inferInsert;
+
+export type FlightTime = typeof schema.flightTimes.$inferSelect;
+export type NewFlightTime = typeof schema.flightTimes.$inferInsert;
+
+export type FlightNote = typeof schema.flightNotes.$inferSelect;
+export type NewFlightNote = typeof schema.flightNotes.$inferInsert;
+
+export type FlightStatusHistory = typeof schema.flightStatusHistory.$inferSelect;
+export type NewFlightStatusHistory = typeof schema.flightStatusHistory.$inferInsert;
+
+export type WeatherDatum = typeof schema.weatherData.$inferSelect;
+export type NewWeatherDatum = typeof schema.weatherData.$inferInsert;
+
+export type AirportDaylight = typeof schema.airportDaylight.$inferSelect;
+export type NewAirportDaylight = typeof schema.airportDaylight.$inferInsert;
+
+export type Airport = typeof schema.airports.$inferSelect;
+export type NewAirport = typeof schema.airports.$inferInsert;
+
+export type ScraperLog = typeof schema.scraperLogs.$inferSelect;
+export type NewScraperLog = typeof schema.scraperLogs.$inferInsert;
+
+export type AircraftPosition = typeof schema.aircraftPositions.$inferSelect;
+export type NewAircraftPosition = typeof schema.aircraftPositions.$inferInsert;
+
+export type PushSubscription = typeof schema.pushSubscriptions.$inferSelect;
+export type NewPushSubscription = typeof schema.pushSubscriptions.$inferInsert;
+
+export type HistoricalWeather = typeof schema.historicalWeather.$inferSelect;
+export type NewHistoricalWeather = typeof schema.historicalWeather.$inferInsert;
+
+export type NotificationWatermark = typeof schema.notificationWatermark.$inferSelect;
+export type NewNotificationWatermark = typeof schema.notificationWatermark.$inferInsert;
 export { canUpgradeStatus, isTerminalStatus } from './statusPriority';
 export { ROUTE_FLIGHT_MINUTES, LOCATION_TO_IATA, routeFlightMinutes, locationToIata } from './constants';
 

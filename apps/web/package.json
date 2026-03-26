@@ -40,6 +40,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@airways/common": "*",
     "@airways/database": "*",
     "chart.js": "^4.5.1",
     "dotenv": "^16.0.0",

@@ -1,26 +1,5 @@
-import { config } from 'dotenv';
-import { resolve, dirname } from 'path';
-import { existsSync } from 'fs';
-
-function findEnvFile(startDir: string): string | null {
-  let dir = startDir;
-  for (let i = 0; i < 10; i++) {
-    const candidate = resolve(dir, '.env');
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
-
-const envPath = findEnvFile(__dirname);
-if (envPath) {
-  config({ path: envPath });
-  console.log(`[Notify] Loaded env from ${envPath}`);
-} else {
-  console.warn('[Notify] Warning: .env file not found');
-}
+import { loadEnv } from '@airways/common';
+loadEnv({ serviceName: 'Notify', startDir: __dirname, logPath: true });
 
 import { dispatch } from './dispatcher';
 

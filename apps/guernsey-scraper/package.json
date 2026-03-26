@@ -9,6 +9,7 @@
     "dev": "tsc && SCRAPER_MODE=live SCRAPER_INTERVAL_TODAY_MINS=2 SCRAPER_INTERVAL_TOMORROW_MINS=30 node dist/index.js"
   },
   "dependencies": {
+    "@airways/common": "*",
     "@airways/database": "*",
     "cheerio": "^1.0.0",
     "dotenv": "^16.4.0",

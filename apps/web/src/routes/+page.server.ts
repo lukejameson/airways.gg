@@ -1,14 +1,7 @@
 import type { PageServerLoad } from './$types';
 import { db, flights, weatherData, scraperLogs, airportDaylight, flightTimes } from '$lib/server/db';
 import { and, gte, lte, inArray, or, eq, desc, asc, count, not, sql } from 'drizzle-orm';
-
-// Guernsey local timezone
-const GY_TZ = 'Europe/London';
-
-/** Convert Date to YYYY-MM-DD in Guernsey local time */
-function toGuernseyDateStr(d: Date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: GY_TZ }).format(d);
-}
+import { guernseyDateStr, isTerminalStatus } from '@airways/common';
 
 /** Add N days to a date string (YYYY-MM-DD) */
 function addDaysToDateStr(dateStr: string, days: number): string {
@@ -32,20 +25,17 @@ async function countFlightsForDate(dateStr: string): Promise<number> {
 
 /** Get all active (non-terminal) flights for a given date */
 async function getActiveFlightsForDate(dateStr: string) {
-  const TERMINAL_STATUSES = ['Landed', 'Cancelled', 'Completed'];
   try {
-    return await db
+    const rows = await db
       .select()
       .from(flights)
       .where(
         and(
           eq(flights.flightDate, dateStr),
           eq(flights.canceled, false),
-          not(inArray(flights.status, TERMINAL_STATUSES)),
-          // Diverted flights are also terminal but have variable text
-          sql`LOWER(${flights.status}) NOT LIKE 'diverted%'`
         )
       );
+    return rows.filter(f => !isTerminalStatus(f.status));
   } catch {
     return [];
   }
@@ -89,7 +79,7 @@ type RecentFlight = { id: number; flightNumber: string; departureAirport: string
 
 export const load: PageServerLoad = async ({ url, cookies }) => {
   const now = new Date();
-  const todayStr = toGuernseyDateStr(now);
+  const todayStr = guernseyDateStr(now);
   const tomorrowStr = addDaysToDateStr(todayStr, 1);
 
   // Parse ?date= parameter

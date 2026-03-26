@@ -1,27 +1,5 @@
-import { config } from 'dotenv';
-import { resolve, dirname } from 'path';
-import { existsSync } from 'fs';
-
-// Walk up from __dirname to find .env — works for ts-node (src/) and compiled output
-function findEnvFile(startDir: string): string | null {
-  let dir = startDir;
-  for (let i = 0; i < 10; i++) {
-    const candidate = resolve(dir, '.env');
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
-
-const envPath = findEnvFile(__dirname);
-if (envPath) {
-  config({ path: envPath });
-  console.log(`[ADSB] Loaded env from ${envPath}`);
-} else {
-  console.warn('[ADSB] Warning: .env file not found, relying on environment variables');
-}
+import { loadEnv, type AirborneEntry } from '@airways/common';
+loadEnv({ serviceName: 'ADSB', startDir: __dirname, logPath: true });
 
 import { db, flights } from '@airways/database';
 import { eq, and, sql, isNull, gte, lte, asc } from 'drizzle-orm';
@@ -42,12 +20,6 @@ const UK_MISSED_THRESHOLD = 6;
 
 // icao24 → timestamp when registration-write cooldown expires
 const registrationDone = new Map<string, number>();
-
-interface AirborneEntry {
-  flightId: number;
-  arrivalAirport: string;
-  missedPolls: number;
-}
 
 const airborneTracker = new Map<string, AirborneEntry>();
 

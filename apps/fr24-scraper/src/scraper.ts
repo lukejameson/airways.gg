@@ -3,16 +3,7 @@ import type { Browser, Page } from 'rebrowser-puppeteer-core';
 import { execSync } from 'child_process';
 import { db, flights as flightsTable, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, isTerminalStatus, routeFlightMinutes, ROUTE_FLIGHT_MINUTES } from '@airways/database';
 import { eq, and, max, desc, count } from 'drizzle-orm';
-
-// ---------------------------------------------------------------------------
-// Timezone utility
-// ---------------------------------------------------------------------------
-
-const GY_TZ = 'Europe/London';
-
-export function guernseyDateStr(d: Date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: GY_TZ }).format(d);
-}
+import { guernseyDateStr, GY_TZ } from '@airways/common';
 
 // ---------------------------------------------------------------------------
 // Proxy helpers

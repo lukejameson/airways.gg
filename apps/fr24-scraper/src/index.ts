@@ -1,28 +1,7 @@
-import { config } from 'dotenv';
-import { resolve, dirname } from 'path';
-import { existsSync } from 'fs';
+import { loadEnv, CircuitBreaker, createCircuitBreakerFromEnv, TERMINAL_STATUSES, isTerminalStatus, mins, guernseyHour, guernseyDateStr, guernseyTomorrowStr, nextGuernseyTime, type TimerState } from '@airways/common';
+loadEnv({ serviceName: 'FR24', startDir: __dirname });
 
-// Walk up from __dirname until we find the .env file
-function findEnvFile(startDir: string): string | null {
-  let dir = startDir;
-  for (let i = 0; i < 10; i++) {
-    const candidate = resolve(dir, '.env');
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
-
-const envPath = findEnvFile(__dirname);
-if (envPath) {
-  config({ path: envPath });
-} else {
-  console.warn('[FR24] Warning: .env file not found, relying on environment variables');
-}
-
-import { scrapeOnce, guernseyDateStr } from './scraper';
+import { scrapeOnce } from './scraper';
 import { db, scraperLogs, flights, flightTimes } from '@airways/database';
 import { eq, and, not, inArray, desc, count, max, asc, isNull, sql } from 'drizzle-orm';
 
@@ -30,44 +9,23 @@ import { eq, and, not, inArray, desc, count, max, asc, isNull, sql } from 'drizz
 // Configuration
 // ---------------------------------------------------------------------------
 
-const mins = (n: number) => n * 60_000;
-
 const CUTOFF_HOUR          = parseInt(process.env.SCRAPER_CUTOFF_HOUR           || '23', 10);
 const WAKE_OFFSET_MINS     = parseInt(process.env.SCRAPER_WAKE_OFFSET_MINS       || '30', 10);
 const INTERVAL_HIGH_MS     = mins(parseInt(process.env.SCRAPER_INTERVAL_HIGH_MINS   || '2',  10));
 const INTERVAL_MEDIUM_MS   = mins(parseInt(process.env.SCRAPER_INTERVAL_MEDIUM_MINS || '5',  10));
 const INTERVAL_LOW_MS      = mins(parseInt(process.env.SCRAPER_INTERVAL_LOW_MINS    || '10', 10));
 const INTERVAL_IDLE_MS     = mins(parseInt(process.env.SCRAPER_INTERVAL_IDLE_MINS   || '15', 10));
-const CIRCUIT_BREAKER_THRESHOLD = parseInt(process.env.SCRAPER_CIRCUIT_BREAKER_THRESHOLD || '5', 10);
-const CIRCUIT_BREAKER_RESET_MS = parseInt(process.env.SCRAPER_CIRCUIT_BREAKER_RESET_MS || '60000', 10);
-
-const TERMINAL_STATUSES = ['Landed', 'Cancelled'];
 
 // ---------------------------------------------------------------------------
 // State Management & Circuit Breaker
 // ---------------------------------------------------------------------------
-
-interface TimerState {
-  scrapeTimeout: ReturnType<typeof setTimeout> | null;
-  wakeTimeout: ReturnType<typeof setTimeout> | null;
-}
 
 const timers: TimerState = {
   scrapeTimeout: null,
   wakeTimeout: null,
 };
 
-interface CircuitBreakerState {
-  failures: number;
-  lastFailureTime: number | null;
-  isOpen: boolean;
-}
-
-const circuitBreaker: CircuitBreakerState = {
-  failures: 0,
-  lastFailureTime: null,
-  isOpen: false,
-};
+const circuitBreaker = createCircuitBreakerFromEnv('FR24', 5, 60000);
 
 function clearAllTimers(): void {
   Object.keys(timers).forEach((key) => {
@@ -77,84 +35,6 @@ function clearAllTimers(): void {
       timers[timerKey] = null;
     }
   });
-}
-
-function checkCircuitBreaker(): boolean {
-  if (circuitBreaker.isOpen) {
-    const now = Date.now();
-    if (circuitBreaker.lastFailureTime &&
-        now - circuitBreaker.lastFailureTime > CIRCUIT_BREAKER_RESET_MS) {
-      circuitBreaker.isOpen = false;
-      circuitBreaker.failures = 0;
-      console.log('[FR24] Circuit breaker reset, resuming operations');
-      return true;
-    }
-    console.log('[FR24] Circuit breaker is OPEN, skipping operation');
-    return false;
-  }
-  return true;
-}
-
-function recordFailure(): void {
-  circuitBreaker.failures++;
-  circuitBreaker.lastFailureTime = Date.now();
-  if (circuitBreaker.failures >= CIRCUIT_BREAKER_THRESHOLD) {
-    circuitBreaker.isOpen = true;
-    console.error(`[FR24] Circuit breaker OPENED after ${circuitBreaker.failures} failures`);
-  }
-}
-
-function recordSuccess(): void {
-  if (circuitBreaker.failures > 0) {
-    circuitBreaker.failures = Math.max(0, circuitBreaker.failures - 1);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Timezone utilities
-// ---------------------------------------------------------------------------
-
-const GY_TZ = 'Europe/London';
-
-function guernseyHour(d: Date = new Date()): number {
-  return parseInt(
-    new Intl.DateTimeFormat('en-GB', { timeZone: GY_TZ, hour: 'numeric', hour12: false }).format(d),
-    10,
-  );
-}
-
-function nextGuernseyTime(hour: number, minute: number): Date {
-  const todayGY = guernseyDateStr();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const candidateStr = `${todayGY}T${pad(hour)}:${pad(minute)}:00`;
-
-  const now = new Date();
-  const nowGYStr = new Intl.DateTimeFormat('en-GB', {
-    timeZone: GY_TZ,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false,
-  }).format(now);
-
-  const [datePart, timePart] = nowGYStr.split(', ');
-  const [dd, mm, yyyy] = datePart.split('/');
-  const gyWallNow = new Date(`${yyyy}-${mm}-${dd}T${timePart}Z`);
-  const offsetMs = now.getTime() - gyWallNow.getTime();
-
-  const targetGYWall = new Date(`${candidateStr}Z`);
-  let targetUTC = new Date(targetGYWall.getTime() + offsetMs);
-
-  if (targetUTC <= now) {
-    targetUTC = new Date(targetUTC.getTime() + 24 * 60 * 60 * 1000);
-  }
-
-  return targetUTC;
-}
-
-function guernseyTomorrowStr(): string {
-  const tomorrow = new Date();
-  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-  return new Intl.DateTimeFormat('en-CA', { timeZone: GY_TZ }).format(tomorrow);
 }
 
 // ---------------------------------------------------------------------------
@@ -230,7 +110,7 @@ async function logSchedulerEvent(type: 'sleep' | 'wake', detail: string): Promis
   try {
     const label = type === 'sleep' ? 'SLEEP' : 'WAKE';
     await db.insert(scraperLogs).values({
-      service: 'fr24_live' as any,
+      service: 'fr24_live',
       status: 'success',
       recordsScraped: 0,
       errorMessage: `[${label}] ${detail}`,
@@ -454,7 +334,7 @@ async function msSinceLastScrape(): Promise<number> {
     const [last] = await db
       .select({ completedAt: scraperLogs.completedAt })
       .from(scraperLogs)
-      .where(eq(scraperLogs.service, 'fr24_live' as any))
+      .where(eq(scraperLogs.service, 'fr24_live'))
       .orderBy(desc(scraperLogs.completedAt))
       .limit(1);
     if (!last?.completedAt) return Infinity;
@@ -660,7 +540,7 @@ async function scheduleNextScrape(): Promise<void> {
   timers.scrapeTimeout = setTimeout(async () => {
     timers.scrapeTimeout = null;
 
-    if (!checkCircuitBreaker()) {
+    if (!circuitBreaker.check()) {
       console.log('[FR24] Circuit breaker open, skipping scrape and rescheduling');
       await scheduleNextScrape();
       return;
@@ -668,10 +548,10 @@ async function scheduleNextScrape(): Promise<void> {
 
     try {
       await runScrape('Scheduled scrape');
-      recordSuccess();
+      circuitBreaker.recordSuccess();
     } catch (err) {
       console.error('[FR24] Error in scheduled scrape:', err);
-      recordFailure();
+      circuitBreaker.recordFailure();
     }
     await scheduleNextScrape();
   }, totalMs);

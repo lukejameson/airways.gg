@@ -2,28 +2,37 @@
   import type { PageData } from './$types';
   import { browser } from '$app/environment';
   import { invalidateAll } from '$app/navigation';
-  import { onDestroy } from 'svelte';
   import { page } from '$app/stores';
-  import { airportName, getAirportCoords, getAirportsForNearestSearch } from '$lib/airports';
-  import Icon from '$lib/components/Icon.svelte';
-  import type { IconName } from '$lib/components/Icon.svelte';
-  import { getWeatherIconName, isDaytime } from '$lib/daylight';
-  import { shortenStatus, statusHasDetail, extractDelayReason, isFlightCompleted } from '$lib/status';
-  import { getStatusTone, STATUS_TEXT_CLASSES, STATUS_DOT_CLASSES, STATUS_PILL_CLASSES } from '$lib/statusConfig';
-  import DelayCounter from '$lib/components/DelayCounter.svelte';
+  import { onDestroy } from 'svelte';
+  import { airportName, getAirportCoords } from '$lib/airports';
+  import { isDaytime } from '$lib/daylight';
+  import { isFlightCompleted } from '$lib/status';
+
+  // Component imports
+  import FlightHeader from './components/FlightHeader.svelte';
+  import FlightTimeline from './components/FlightTimeline.svelte';
+  import FlightMap from './components/FlightMap.svelte';
+  import WeatherDisplay from './components/WeatherDisplay.svelte';
+  import RotationHistory from './components/RotationHistory.svelte';
+  import DelayAnalysis from './components/DelayAnalysis.svelte';
 
   let { data }: { data: PageData } = $props();
-
-  // Get return tab from URL query param
   const returnTab = $derived($page.url.searchParams.get('tab') ?? '');
 
-  const { flight, statusHistory, weatherMap, daylightMap, position, rotationFlights, times } = $derived(data);
+  const {
+    flight,
+    statusHistory,
+    weatherMap,
+    daylightMap,
+    position,
+    rotationFlights,
+    times
+  } = $derived(data);
+
   const depWeather = $derived(weatherMap?.[flight.departureAirport] ?? null);
   const arrWeather = $derived(weatherMap?.[flight.arrivalAirport] ?? null);
 
-  // Determine if it's currently daytime at departure and arrival airports.
-  // Use the current wall-clock time — the weather panel shows current conditions,
-  // so the icon should reflect right now, not the flight's scheduled time.
+  // Determine if it's currently daytime at departure and arrival airports
   const depIsDay = $derived.by(() => {
     const daylight = daylightMap?.[flight.departureAirport]?.[0];
     if (!daylight) return true;
@@ -35,77 +44,28 @@
     return isDaytime(new Date(daylight.sunrise), new Date(daylight.sunset), new Date());
   });
 
-  // Get weather icons with day/night awareness
-  const depWeatherIcon: IconName = $derived(depWeather ? getWeatherIconName(depWeather.weatherCode, depIsDay) : 'cloud');
-  const arrWeatherIcon: IconName = $derived(arrWeather ? getWeatherIconName(arrWeather.weatherCode, arrIsDay) : 'cloud');
-
-  // Time calculations (needed for status calculation)
   const isDeparture = $derived(flight.departureAirport === 'GCI');
-  const scheduledTime = $derived(isDeparture ? flight.scheduledDeparture : flight.scheduledArrival);
-  const actualTime = $derived(isDeparture ? flight.actualDeparture : flight.actualArrival);
-  const estimatedTime = $derived.by(() => {
-    const timeType = isDeparture ? 'EstimatedBlockOff' : 'EstimatedBlockOn';
-    return times?.find((t: { timeType: string }) => t.timeType === timeType)?.timeValue ?? null;
-  });
-  const displayTime = $derived(actualTime ?? estimatedTime);
-  const otherAirport = $derived(isDeparture ? flight.arrivalAirport : flight.departureAirport);
-  const delayMinutes = $derived(flight.delayMinutes ?? 0);
+  const isCompleted = $derived(isFlightCompleted(flight));
+  const isPreDeparture = $derived(
+    !flight.actualDeparture &&
+    !['airborne', 'taxiing', 'landed', 'completed', 'cancelled', 'canceled']
+      .some(s => flight.status?.toLowerCase().includes(s))
+  );
 
-  // Calculate delay from times if available, preferring actual/estimated times over stale delayMinutes
-  const calculatedDelayMinutes = $derived.by(() => {
-    if (displayTime && scheduledTime) {
-      return Math.round((new Date(displayTime).getTime() - new Date(scheduledTime).getTime()) / 60000);
-    }
-    if (delayMinutes > 0) return delayMinutes;
-    return 0;
+  // Derived values for timeline
+  const estimatedDeparture = $derived.by(() => {
+    const entry = times?.find((t: { timeType: string }) => t.timeType === 'EstimatedBlockOff');
+    return entry?.timeValue ?? null;
+  });
+  const estimatedArrival = $derived.by(() => {
+    const entry = times?.find((t: { timeType: string }) => t.timeType === 'EstimatedBlockOn');
+    return entry?.timeValue ?? null;
   });
 
-  // Calculate our own status when external source is unreliable
-  // If we have delay minutes or the actual/estimated time differs from scheduled by > 15 min
-  const calculatedStatus = $derived.by(() => {
-    // If flight is already landed/airborne/boarding/cancelled, trust that status
-    const currentStatus = flight.status?.toLowerCase() ?? '';
-    if (currentStatus.includes('landed') || currentStatus.includes('completed') ||
-        currentStatus.includes('airborne') || currentStatus.includes('taxiing') ||
-        currentStatus.includes('boarding') || currentStatus.includes('cancel')) {
-      return flight.status;
-    }
-
-    // Check calculated delay from times
-    if (calculatedDelayMinutes > 15) {
-      return 'Delayed';
-    }
-
-    // If the estimated arrival/departure is early, the flight must be airborne
-    // (you can't arrive early unless you've departed)
-    if (calculatedDelayMinutes < -5 && new Date(flight.scheduledDeparture).getTime() <= Date.now()) {
-      return 'Airborne';
-    }
-
-    // Otherwise trust the external status
-    return flight.status || 'Scheduled';
-  });
-
-  // Format early arrival for display (e.g., "-16m" or "-1h 5m")
-  const formattedEarly = $derived.by(() => {
-    if (calculatedDelayMinutes >= -5) return null;
-    const absMins = Math.abs(calculatedDelayMinutes);
-    const hrs = Math.floor(absMins / 60);
-    const mins = absMins % 60;
-    if (hrs > 0 && mins > 0) return `-${hrs}h ${mins}m`;
-    if (hrs > 0) return `-${hrs}h`;
-    return `-${mins}m`;
-  });
-
-  // Format delay for display (e.g., "5h 35m" or "45m")
-  const formattedDelay = $derived.by(() => {
-    if (calculatedDelayMinutes <= 0) return null;
-    const hrs = Math.floor(calculatedDelayMinutes / 60);
-    const mins = calculatedDelayMinutes % 60;
-    if (hrs > 0 && mins > 0) return `${hrs}h ${mins}m`;
-    if (hrs > 0) return `${hrs}h`;
-    return `${mins}m`;
-  });
+  // Destructure flight for template use
+  const scheduledDeparture = $derived(flight.scheduledDeparture);
+  const actualDeparture = $derived(flight.actualDeparture);
+  const actualArrival = $derived(flight.actualArrival);
 
   // SEO
   const seoTitle = $derived(`${flight.flightNumber}: ${airportName(flight.departureAirport)} → ${airportName(flight.arrivalAirport)} | airways.gg`);
@@ -115,86 +75,82 @@
       : ''
   );
   const seoDescription = $derived(
-    `${flight.flightNumber} from ${flight.departureAirport} to ${flight.arrivalAirport}${seoDate ? ` on ${seoDate}` : ''}${formattedDelay ? ` · Delayed ${formattedDelay}` : ''}. Track live flight status and delay predictions on airways.gg.`
+    `${flight.flightNumber} from ${flight.departureAirport} to ${flight.arrivalAirport}${seoDate ? ` on ${seoDate}` : ''}. Track live flight status and delay predictions on airways.gg.`
   );
   const seoCanonical = $derived(`${data.siteUrl}/flights/${flight.id}`);
 
-  const hasPosition = $derived(!!position && position.lat != null && position.lon != null);
-
-  import type { Component } from 'svelte';
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let FlightMapComponent: Component<any> | null = $state(null);
-  let mapExpanded = $state(false);
-  let rotationExpanded = $state(false);
-  let rotationScrollEl: HTMLDivElement | undefined = $state();
-
-  function toggleRotation() {
-    rotationExpanded = !rotationExpanded;
-    if (rotationExpanded) {
-      // After DOM updates, scroll the current flight into view
-      setTimeout(() => {
-        const el = rotationScrollEl?.querySelector('[data-current="true"]') as HTMLElement | null;
-        el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      }, 50);
-    }
-  }
-
-  function rotationDelayDelta(delayMinutes: number | null): string | null {
-    if (!delayMinutes || delayMinutes <= 0) return null;
-    const hrs = Math.floor(delayMinutes / 60);
-    const mins = delayMinutes % 60;
-    if (hrs > 0 && mins > 0) return `+${hrs}h ${mins}m`;
-    if (hrs > 0) return `+${hrs}h`;
-    return `+${mins}m`;
-  }
-  const rotationStatusTone = (status: string | null, canceled?: boolean | null) =>
-    getStatusTone(status, canceled);
-
+  // Auto-refresh
+  let refreshInterval: ReturnType<typeof setInterval> | null = null;
   $effect(() => {
-    if (browser && hasPosition && !FlightMapComponent) {
-      import('$lib/components/FlightMap.svelte').then(m => {
-        FlightMapComponent = m.default;
-      });
+    if (browser) {
+      refreshInterval = setInterval(() => { invalidateAll(); }, 60_000);
+    }
+    return () => {
+      if (refreshInterval) clearInterval(refreshInterval);
+    };
+  });
+
+  // Recently viewed
+  $effect(() => {
+    if (browser) {
+      const key = 'recentlyViewedFlights';
+      let existing: unknown[];
+      try {
+        existing = JSON.parse(localStorage.getItem(key) || '[]');
+        if (!Array.isArray(existing)) existing = [];
+      } catch {
+        existing = [];
+      }
+      const flightInfo = {
+        id: flight.id,
+        flightNumber: flight.flightNumber,
+        departureAirport: flight.departureAirport,
+        arrivalAirport: flight.arrivalAirport,
+        scheduledDeparture: flight.scheduledDeparture,
+        viewedAt: new Date().toISOString(),
+      };
+      const filtered = (existing as { id: number }[]).filter(f => f.id !== flight.id);
+      const updated = [flightInfo, ...filtered].slice(0, 5);
+      const serialized = JSON.stringify(updated);
+      localStorage.setItem(key, serialized);
+      document.cookie = `rv=${encodeURIComponent(serialized)}; max-age=${30 * 24 * 60 * 60}; path=/; SameSite=Lax; Secure`;
     }
   });
 
-  function toggleMap() {
-    mapExpanded = !mapExpanded;
-  }
+  // Share functionality
+  let shareSuccess = $state(false);
+  async function shareFlight() {
+    const shareData = {
+      title: `${flight.flightNumber} — airways.gg`,
+      text: `Track ${flight.flightNumber} from ${airportName(flight.departureAirport)} to ${airportName(flight.arrivalAirport)}`,
+      url: window.location.href,
+    };
 
-  /** Find the nearest airport IATA code from a lat/lon using the known AIRPORTS table. */
-  function nearestAirport(lat: number, lon: number): string | null {
-    const airports = getAirportsForNearestSearch();
-    let best: string | null = null;
-    let bestDist = Infinity;
-    for (const { iata, lat: aLat, lon: aLon } of airports) {
-      const d = calculateDistance(lat, lon, aLat, aLon);
-      if (d < bestDist) { bestDist = d; best = iata; }
+    if (navigator.share) {
+      try { await navigator.share(shareData); } catch { /* User cancelled */ }
+    } else {
+      try {
+        await navigator.clipboard.writeText(window.location.href);
+        shareSuccess = true;
+        setTimeout(() => shareSuccess = false, 2000);
+      } catch { /* Clipboard failed */ }
     }
-    // Only trust if within 30 km of a known airport
-    return bestDist < 30 ? best : null;
   }
 
-  /**
-   * Find the most recently landed flight in the rotation before the current flight.
-   * Uses actual_arrival if available, otherwise falls back to scheduled_arrival for ordering.
-   */
+  // Rotation helpers
   function getMostRecentLandedRotationFlight() {
     if (!rotationFlights || rotationFlights.length === 0) return null;
-
     const currentFlightDep = new Date(flight.scheduledDeparture).getTime();
 
     const landedBefore = rotationFlights.filter(f => {
       const status = f.status?.toLowerCase() || '';
       const isLanded = status.includes('landed') || status.includes('completed');
-      // Must have departed before the current flight
       const depTime = new Date(f.scheduledDeparture).getTime();
       return isLanded && depTime < currentFlightDep;
     });
 
     if (landedBefore.length === 0) return null;
 
-    // Sort by actual_arrival desc (most recently landed first), fall back to scheduled
     return landedBefore.sort((a, b) => {
       const aTime = a.actualArrival ? new Date(a.actualArrival).getTime() : new Date(a.scheduledArrival).getTime();
       const bTime = b.actualArrival ? new Date(b.actualArrival).getTime() : new Date(b.scheduledArrival).getTime();
@@ -202,14 +158,7 @@
     })[0];
   }
 
-  /**
-   * Return the best known location for the aircraft.
-   * Rotation data is more up-to-date than stale inferred positions,
-   * so if the most recent landed rotation flight arrived AFTER the
-   * stored inferred position was recorded, prefer the rotation result.
-   */
-  function getInferredLocationFromRotation(): { airport: string; source: 'rotation' } | null {
-    // If the current flight itself has landed, the plane is at the arrival airport
+  function getInferredLocationFromRotation(): { airport: string; source: string } | null {
     const status = flight.status?.toLowerCase() || '';
     if (status.includes('landed') || status.includes('completed')) {
       return { airport: flight.arrivalAirport, source: 'rotation' };
@@ -220,122 +169,26 @@
     return { airport: mostRecent.arrivalAirport, source: 'rotation' };
   }
 
-  /**
-   * True when the stored inferred position is stale compared to rotation data.
-   * e.g. position says ACI (from GR202) but rotation shows GR205 landed at GCI after that.
-   */
+  const inferredLocation = $derived(getInferredLocationFromRotation());
+
   const rotationOverridesPosition = $derived.by(() => {
     if (!position) return false;
-    // Only applies to inferred positions — live positions are always trusted
     if (!position.fr24Id?.startsWith('INFERRED_')) return false;
 
     const mostRecent = getMostRecentLandedRotationFlight();
     if (!mostRecent) return false;
 
-    // Compare arrival time of the rotation's most recent flight vs the inferred position timestamp
     const rotationArrival = mostRecent.actualArrival
       ? new Date(mostRecent.actualArrival).getTime()
       : new Date(mostRecent.scheduledArrival).getTime();
     const inferredAt = new Date(position.positionTimestamp).getTime();
-
-    // Rotation is newer if the flight arrived after the inferred position was recorded,
-    // OR if the inferred position airport doesn't match the rotation's conclusion
     const rotationAirport = mostRecent.arrivalAirport;
     const inferredAirport = position.destIata ?? null;
 
     return rotationArrival > inferredAt || rotationAirport !== inferredAirport;
   });
 
-  function getFlightProgressDescription(): string {
-    if (!position || !hasPosition) return 'Location unavailable';
-    const isInferred = position.fr24Id?.startsWith('INFERRED_');
-    if (isInferred) {
-      const iata = nearestAirport(position.lat, position.lon) ?? position.destIata ?? '—';
-      return `On the ground at ${airportName(iata)}`;
-    }
-    if (position.onGround) {
-      const iata = nearestAirport(position.lat, position.lon) ?? position.destIata ?? flight.arrivalAirport;
-      return `Currently at ${airportName(iata)}`;
-    }
-    const dep = airportName(flight.departureAirport);
-    const arr = airportName(flight.arrivalAirport);
-    const altitude = position.altitudeFt;
-    if (altitude != null) {
-      if (altitude < 1000) return `Departing ${dep}`;
-      if (altitude > 30000) return `Cruising at ${altitude.toLocaleString()} ft`;
-      if (altitude < 5000) return `Approaching ${arr}`;
-      return `En route from ${dep} to ${arr}`;
-    }
-    return `En route from ${dep} to ${arr}`;
-  }
-
-  function getProgressPercentage(): number {
-    if (!position || !hasPosition || !depCoords || !arrCoords) return 0;
-    // Simple distance-based progress
-    const totalDistance = calculateDistance(depCoords[0], depCoords[1], arrCoords[0], arrCoords[1]);
-    const currentDistance = calculateDistance(position.lat, position.lon, arrCoords[0], arrCoords[1]);
-    return Math.max(0, Math.min(100, Math.round((1 - currentDistance / totalDistance) * 100)));
-  }
-
-  function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371; // Earth's radius in km
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-  }
-
-  const depCoords = $derived(
-    position?.originIata ? getAirportCoords(position.originIata) : getAirportCoords(flight.departureAirport)
-  );
-  const arrCoords = $derived(
-    position?.destIata ? getAirportCoords(position.destIata) : getAirportCoords(flight.arrivalAirport)
-  );
-
-  function compassDir(deg: number | null): string {
-    if (deg == null) return '—';
-    const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
-    return dirs[Math.round(deg / 22.5) % 16];
-  }
-
-  function timeSince(date: string | Date | null): string {
-    if (!date) return '';
-    const secs = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
-    if (secs < 60) return `${secs}s ago`;
-    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-    return `${Math.floor(secs / 3600)}h ago`;
-  }
-
-  const isEstimate = $derived(!actualTime && !!estimatedTime);
-  const isCompleted = $derived(isFlightCompleted(flight));
-  const isPreDeparture = $derived(
-    !flight.actualDeparture &&
-    !['airborne', 'taxiing', 'landed', 'completed', 'cancelled', 'canceled']
-      .some(s => flight.status?.toLowerCase().includes(s))
-  );
-  const delayReason = $derived.by(() => {
-    if (!isDeparture) return null;
-    const s = flight.status?.toLowerCase() ?? '';
-    if (s.includes('airborne') || s.includes('landed') || s.includes('completed') || s.includes('taxiing') || s.includes('diverted') || s.includes('diverting')) return null;
-    const fromStatus = extractDelayReason(flight.status);
-    if (fromStatus) return fromStatus;
-    const guernseyEntries = statusHistory.filter((e: { source: string }) => e.source === 'guernsey_airport');
-    for (const entry of [...guernseyEntries].reverse()) {
-      const r = extractDelayReason((entry as { statusMessage: string }).statusMessage);
-      if (r) return r;
-    }
-    return null;
-  });
-  const fogAirport = $derived.by(() => {
-    if (depWeather?.visibility != null && depWeather.visibility <= 5) return { code: flight.departureAirport, visibility: depWeather.visibility };
-    if (arrWeather?.visibility != null && arrWeather.visibility <= 5) return { code: flight.arrivalAirport, visibility: arrWeather.visibility };
-    return null;
-  });
-  const showFogWarning = $derived(!flight.canceled && fogAirport != null);
-
+  // Format helpers
   function formatTime(date: string | Date | null | undefined): string {
     if (!date) return '--:--';
     return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -350,81 +203,6 @@
       hour: '2-digit',
       minute: '2-digit',
     });
-  }
-
-  function shortDate(date: string | Date | null | undefined): string {
-    if (!date) return '';
-    return new Date(date).toLocaleDateString('en-GB', {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-    });
-  }
-
-  const getStatusColor = (status: string | null | undefined, canceled?: boolean | null) =>
-    STATUS_TEXT_CLASSES[getStatusTone(status, canceled)];
-  const getStatusDotColor = (status: string | null | undefined, canceled?: boolean | null) =>
-    STATUS_DOT_CLASSES[getStatusTone(status, canceled)];
-
-  let shareSuccess = $state(false);
-
-  // Save to recently viewed
-  let refreshInterval: ReturnType<typeof setInterval> | null = null;
-  $effect(() => {
-    if (browser) {
-      refreshInterval = setInterval(() => { invalidateAll(); }, 60_000);
-    }
-    return () => {
-      if (refreshInterval) clearInterval(refreshInterval);
-    };
-  });
-
-  $effect(() => {
-    if (browser) {
-      const key = 'recentlyViewedFlights';
-      const existing = JSON.parse(localStorage.getItem(key) || '[]');
-      const flightInfo = {
-        id: flight.id,
-        flightNumber: flight.flightNumber,
-        departureAirport: flight.departureAirport,
-        arrivalAirport: flight.arrivalAirport,
-        scheduledDeparture: flight.scheduledDeparture,
-        viewedAt: new Date().toISOString(),
-      };
-      // Remove if already exists to move to front
-      const filtered = (existing as { id: number }[]).filter(f => f.id !== flight.id);
-      // Add to front, keep only last 5
-      const updated = [flightInfo, ...filtered].slice(0, 5);
-      const serialized = JSON.stringify(updated);
-      localStorage.setItem(key, serialized);
-      // Mirror to cookie so the server can render the section in SSR (prevents pop-in)
-      document.cookie = `rv=${encodeURIComponent(serialized)}; max-age=${30 * 24 * 60 * 60}; path=/; SameSite=Lax; Secure`;
-    }
-  });
-
-  async function shareFlight() {
-    const shareData = {
-      title: `${flight.flightNumber} — airways.gg`,
-      text: `Track ${flight.flightNumber} from ${airportName(flight.departureAirport)} to ${airportName(flight.arrivalAirport)}`,
-      url: window.location.href,
-    };
-
-    if (navigator.share) {
-      try {
-        await navigator.share(shareData);
-      } catch {
-        // User cancelled or share failed
-      }
-    } else {
-      // Fallback: copy to clipboard
-      try {
-        await navigator.clipboard.writeText(window.location.href);
-        shareSuccess = true;
-        setTimeout(() => shareSuccess = false, 2000);
-      } catch {
-        // Clipboard failed
-      }
-    }
   }
 </script>
 
@@ -452,562 +230,82 @@
 </svelte:head>
 
 <div class="container py-4 sm:py-6 max-w-3xl">
-  <!-- Top row: Back + Notify + Share -->
-  <div class="flex items-center justify-between mb-4">
-    <a
-      href="/{returnTab ? `?tab=${returnTab}` : ''}"
-      class="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-    >
-      ← Back
-    </a>
+  <FlightHeader
+    flightNumber={flight.flightNumber}
+    airlineCode={flight.airlineCode}
+    departureAirport={flight.departureAirport}
+    arrivalAirport={flight.arrivalAirport}
+    {isDeparture}
+    {scheduledDeparture}
+    {actualDeparture}
+    {estimatedDeparture}
+    {actualArrival}
+    {estimatedArrival}
+    delayMinutes={flight.delayMinutes}
+    status={flight.status}
+    canceled={flight.canceled}
+    {isCompleted}
+    flightDate={flight.flightDate}
+    onShare={shareFlight}
+    {shareSuccess}
+    {returnTab}
+  />
 
-    <div class="flex items-center gap-1">
+  <DelayAnalysis
+    status={flight.status}
+    canceled={flight.canceled}
+    {isDeparture}
+    {statusHistory}
+    delayMinutes={flight.delayMinutes}
+    {depWeather}
+    {arrWeather}
+    departureAirport={flight.departureAirport}
+    arrivalAirport={flight.arrivalAirport}
+  />
 
+  <FlightTimeline
+    {isDeparture}
+    departureAirport={flight.departureAirport}
+    arrivalAirport={flight.arrivalAirport}
+    scheduledDeparture={flight.scheduledDeparture}
+    scheduledArrival={flight.scheduledArrival}
+    actualDeparture={flight.actualDeparture}
+    actualArrival={flight.actualArrival}
+    {estimatedDeparture}
+    {estimatedArrival}
+    delayMinutes={flight.delayMinutes}
+    canceled={flight.canceled}
+    {isCompleted}
+  />
 
-      <button
-        onclick={shareFlight}
-      class="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors rounded-md px-2 py-1"
-      aria-label="Share this flight"
-    >
-      {#if shareSuccess}
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-green-500">
-          <path d="M20 6 9 17l-5-5"/>
-        </svg>
-        <span class="text-green-600 text-xs">Copied!</span>
-      {:else}
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16,6 12,2 8,6"/><line x1="12" x2="12" y1="2" y2="15"/>
-        </svg>
-        Share
-      {/if}
-    </button>
-    </div>
-  </div>
+  <FlightMap
+    {position}
+    departureAirport={flight.departureAirport}
+    arrivalAirport={flight.arrivalAirport}
+    {rotationOverridesPosition}
+    {inferredLocation}
+    {isPreDeparture}
+  />
 
-  <!-- Flight Info Header -->
-  <div class="mb-6">
-    <div class="flex items-baseline gap-2 mb-1">
-      <h1 class="text-3xl sm:text-4xl font-bold tracking-tight">{flight.flightNumber}</h1>
-      <span class="rounded-full border px-2 py-0.5 text-xs sm:text-sm font-medium text-muted-foreground">
-        {flight.airlineCode}
-      </span>
-    </div>
-
-    <p class="text-base sm:text-lg text-muted-foreground">
-      {isDeparture ? 'to' : 'from'}
-      <span class="font-semibold text-foreground">{airportName(otherAirport)}</span>
-      <span class="hidden sm:inline text-muted-foreground/50">({otherAirport})</span>
-    </p>
-
-    <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
-      <span class="text-muted-foreground">{shortDate(flight.flightDate)}</span>
-      <span class="opacity-30 hidden sm:inline">·</span>
-      {#if !flight.canceled}
-        <DelayCounter
-          scheduledTime={scheduledTime}
-          estimatedTime={estimatedTime}
-          actualTime={actualTime}
-          isCompleted={isCompleted}
-          class="text-sm"
-        />
-        {#if formattedEarly && !isCompleted && calculatedDelayMinutes < 0}
-          <span class="text-sm font-bold text-green-600">{formattedEarly}</span>
-        {/if}
-      {/if}
-      <div class="flex items-center gap-1.5">
-        <span class="h-2 w-2 rounded-full {getStatusDotColor(calculatedStatus)}"></span>
-        <span class="font-medium {getStatusColor(calculatedStatus)}">
-          {shortenStatus(calculatedStatus)}
-        </span>
-      </div>
-      {#if !flight.canceled && !formattedDelay && !formattedEarly && calculatedDelayMinutes <= 15}
-        <span class="opacity-30 hidden sm:inline">·</span>
-        <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
-          On Time
-        </span>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Full status detail — shown when the status text is longer than the badge label -->
-  {#if statusHasDetail(calculatedStatus)}
-    <div class="mb-4 flex items-start gap-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
-      <span class="mt-0.5 h-2 w-2 shrink-0 rounded-full {getStatusDotColor(calculatedStatus)}"></span>
-      <span class="text-foreground">{calculatedStatus}</span>
-    </div>
-  {/if}
-  {#if delayReason && !flight.canceled}
-    <div class="mb-4 flex items-start gap-3 rounded-lg border px-4 py-3
-      {delayReason.reason === 'weather' ? 'border-blue-300 bg-blue-100' :
-       delayReason.reason === 'holding' ? 'border-blue-300 bg-blue-100' :
-       'border-amber-300 bg-amber-100'}">
-      <div class="shrink-0 mt-0.5">
-        {#if delayReason.reason === 'weather'}
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600 dark:text-blue-400">
-            <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
-            <path d="M22 10a3 3 0 0 0-3-3h-2.207a5.502 5.502 0 0 0-10.702.5"/>
-          </svg>
-        {:else if delayReason.reason === 'holding'}
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600 dark:text-blue-400">
-            <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21 4 19 2c-2-2-4-2-5.5-.5L10 5 1.8 6.2l5 5L5 13l2 2 2-2 5 5Z"/>
-          </svg>
-        {:else if delayReason.reason === 'indefinite'}
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-600 dark:text-amber-400">
-            <circle cx="12" cy="12" r="10"/>
-            <polyline points="12 6 12 12 16 14"/>
-          </svg>
-        {:else}
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-600 dark:text-amber-400">
-            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-        {/if}
-      </div>
-      <div>
-        <p class="text-sm font-semibold
-          {delayReason.reason === 'weather' || delayReason.reason === 'holding' ? 'text-blue-900' : 'text-amber-900'}">
-          {delayReason.label}
-        </p>
-        {#if delayReason.reason === 'weather' && delayReason.nextInfo}
-          <p class="text-xs mt-0.5 text-blue-700">Next update expected at {delayReason.nextInfo}</p>
-        {/if}
-      </div>
-    </div>
-  {/if}
-  {#if showFogWarning && !flight.canceled}
-    <div class="mb-4 flex items-start gap-3 rounded-lg border border-slate-300 bg-slate-100 px-4 py-3">
-      <div class="shrink-0 mt-0.5">
-        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-500">
-          <line x1="3" y1="10" x2="21" y2="10"/>
-          <line x1="3" y1="6" x2="21" y2="6"/>
-          <line x1="3" y1="14" x2="21" y2="14"/>
-          <line x1="3" y1="18" x2="21" y2="18"/>
-        </svg>
-      </div>
-      <div>
-        <p class="text-sm font-semibold text-slate-900">Low visibility at {airportName(fogAirport!.code)}</p>
-        <p class="text-xs mt-0.5 text-slate-600">
-          Current visibility {Math.round(fogAirport!.visibility * 10) / 10}km — fog or low cloud may affect operations
-        </p>
-      </div>
-    </div>
-  {/if}
-  <div class="grid grid-cols-2 gap-4 mb-6">
-    <div class="rounded-lg border bg-card p-4">
-      <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Scheduled {isDeparture ? 'Departure' : 'Arrival'}</p>
-      <p class="text-3xl font-bold tabular-nums">{formatTime(scheduledTime)}</p>
-      <p class="text-sm text-muted-foreground mt-1">
-        {airportName(isDeparture ? flight.departureAirport : flight.arrivalAirport)}
-        <span class="opacity-50">({isDeparture ? flight.departureAirport : flight.arrivalAirport})</span>
-      </p>
-    </div>
-
-    <div class="rounded-lg border bg-card p-4">
-      {#if displayTime}
-        <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-          {isEstimate ? 'Estimated' : 'Actual'} {isDeparture ? 'Departure' : 'Arrival'}
-        </p>
-        <p class="text-3xl font-bold tabular-nums {isEstimate ? 'text-yellow-500' : delayMinutes > 0 ? 'text-red-500' : delayMinutes < 0 ? 'text-green-500' : ''}">
-          {formatTime(displayTime)}
-        </p>
-        {#if isEstimate}
-          <p class="text-xs text-yellow-600 mt-1">Estimated — subject to change</p>
-        {:else}
-          <p class="text-sm text-muted-foreground mt-1">
-            {airportName(isDeparture ? flight.departureAirport : flight.arrivalAirport)}
-            <span class="opacity-50">({isDeparture ? flight.departureAirport : flight.arrivalAirport})</span>
-          </p>
-        {/if}
-      {:else}
-        <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-          {isDeparture ? 'Departure' : 'Arrival'} Time
-        </p>
-        <p class="text-3xl font-bold tabular-nums text-muted-foreground">—</p>
-        <p class="text-sm text-muted-foreground mt-1">Not yet available</p>
-      {/if}
-      {#if !flight.canceled}
-        <DelayCounter
-          scheduledTime={scheduledTime}
-          estimatedTime={estimatedTime}
-          actualTime={actualTime}
-          isCompleted={isCompleted}
-          class="text-sm mt-2 block"
-        />
-      {/if}
-    </div>
-  </div>
-
-  <!-- Live position -->
-  {#if hasPosition && position && !rotationOverridesPosition}
-    {@const isInferred = position.fr24Id?.startsWith('INFERRED_')}
-    <div class="rounded-lg border bg-card mb-6 overflow-hidden">
-      <!-- Header with toggle -->
-      <button
-        class="w-full px-4 py-3 flex items-center justify-between gap-4 hover:bg-muted/50 transition-colors text-left"
-        onclick={toggleMap}
-      >
-        <div class="flex-1">
-          {#if !mapExpanded}
-            <!-- Collapsed: Show clean summary -->
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary">
-                  <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-                  <circle cx="12" cy="10" r="3"/>
-                </svg>
-              </div>
-              <div>
-                <p class="font-semibold text-foreground">{getFlightProgressDescription()}</p>
-                {#if !isInferred && position.altitudeFt != null && !position.onGround}
-                  {@const progress = getProgressPercentage()}
-                  <div class="flex items-center gap-2 mt-1">
-                    <span class="text-xs text-muted-foreground">{airportName(flight.departureAirport)} <span class="opacity-50">({flight.departureAirport})</span></span>
-                    <div class="w-24 h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div class="h-full bg-primary rounded-full" style="width: {progress}%"></div>
-                    </div>
-                    <span class="text-xs text-muted-foreground">{airportName(flight.arrivalAirport)} <span class="opacity-50">({flight.arrivalAirport})</span></span>
-                  </div>
-                {:else if isInferred}
-                  <p class="text-xs text-amber-600 mt-0.5">Last known position • {timeSince(position.positionTimestamp)}</p>
-                {:else}
-                  <p class="text-xs text-muted-foreground mt-0.5">Updated {timeSince(position.positionTimestamp)}</p>
-                {/if}
-              </div>
-            </div>
-          {:else}
-            <!-- Expanded: Show section title -->
-            <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              {#if isInferred}
-                Last Known Position
-                <span class="ml-2 text-amber-600 font-normal normal-case">(inferred)</span>
-              {:else}
-                Live Position
-              {/if}
-            </p>
-            <div class="flex flex-wrap gap-x-5 gap-y-1 text-sm mt-2">
-              {#if isInferred}
-                {@const iata = nearestAirport(position.lat, position.lon) ?? position.destIata ?? '—'}
-                <span class="font-semibold text-amber-600">
-                  On the ground at {airportName(iata)} <span class="opacity-60 font-normal">({iata})</span>
-                </span>
-              {:else}
-                {#if position.altitudeFt != null}
-                  <span><span class="text-muted-foreground">Altitude</span> <span class="font-semibold">{position.altitudeFt.toLocaleString()} ft</span></span>
-                {/if}
-                {#if position.groundSpeedKts != null}
-                  <span><span class="text-muted-foreground">Speed</span> <span class="font-semibold">{position.groundSpeedKts} kts</span></span>
-                {/if}
-                {#if position.heading != null}
-                  <span><span class="text-muted-foreground">Heading</span> <span class="font-semibold">{position.heading}° {compassDir(position.heading)}</span></span>
-                {/if}
-              {/if}
-            </div>
-          {/if}
-        </div>
-        <div class="flex items-center gap-2 shrink-0">
-          {#if mapExpanded}
-            <span class="text-xs text-muted-foreground">{timeSince(position.positionTimestamp)}</span>
-          {/if}
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            class="text-muted-foreground transition-transform duration-200 {mapExpanded ? 'rotate-180' : ''}"
-          >
-            <path d="m6 9 6 6 6-6"/>
-          </svg>
-        </div>
-      </button>
-
-      <!-- Map — only shown when expanded -->
-      {#if mapExpanded}
-        {#if browser && FlightMapComponent}
-          <FlightMapComponent
-            lat={position.lat}
-            lon={position.lon}
-            heading={position.heading ?? 0}
-            depAirport={flight.departureAirport}
-            arrAirport={flight.arrivalAirport}
-          />
-        {:else if browser}
-          <div class="h-72 flex items-center justify-center text-sm text-muted-foreground bg-muted/30">
-            Loading map…
-          </div>
-        {/if}
-      {/if}
-    </div>
-  {:else}
-    {@const inferredLocation = getInferredLocationFromRotation()}
-    <!-- No live position -->
-    <div class="rounded-lg border bg-card px-4 py-3 mb-6">
-      <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Aircraft Location</p>
-      {#if inferredLocation}
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-600">
-              <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-              <circle cx="12" cy="10" r="3"/>
-            </svg>
-          </div>
-          <div>
-            <p class="font-semibold text-foreground">
-              On the ground at {airportName(inferredLocation.airport)} <span class="opacity-50 font-normal">({inferredLocation.airport})</span>
-            </p>
-            <p class="text-xs text-amber-600 mt-0.5">Inferred from flight history</p>
-          </div>
-        </div>
-      {:else}
-        {#if isPreDeparture}
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
-                <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-                <circle cx="12" cy="10" r="3"/>
-              </svg>
-            </div>
-            <div>
-              <p class="font-semibold text-foreground">
-                On the ground at {airportName(flight.departureAirport)} <span class="opacity-50 font-normal">({flight.departureAirport})</span>
-              </p>
-              <p class="text-xs text-muted-foreground mt-0.5">Pre-departure — live tracking starts when airborne</p>
-            </div>
-          </div>
-        {:else}
-          <p class="text-sm text-muted-foreground">
-            Aircraft not currently tracked by Flightradar24. It may be at {airportName(flight.departureAirport)} ({flight.departureAirport}), {airportName(flight.arrivalAirport)} ({flight.arrivalAirport}), or en route to/from base airport. Live tracking will appear once the aircraft transmits position data.
-          </p>
-        {/if}
-      {/if}
-    </div>
+  {#if flight.aircraftRegistration && rotationFlights && rotationFlights.length > 1}
+    <RotationHistory
+      {rotationFlights}
+      aircraftRegistration={flight.aircraftRegistration}
+      currentFlightId={flight.id}
+    />
   {/if}
 
-  <!-- Aircraft rotation history -->
-  {#if rotationFlights && rotationFlights.length > 1 && flight.aircraftRegistration}
-    <div class="rounded-lg border bg-card mb-6 overflow-hidden">
-      <button
-        class="w-full px-4 py-3 flex items-center justify-between gap-4 hover:bg-muted/50 transition-colors text-left"
-        onclick={toggleRotation}
-      >
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary">
-              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>
-            </svg>
-          </div>
-          <div>
-            <p class="font-semibold text-foreground">{flight.aircraftRegistration} · Today's rotation</p>
-            <p class="text-xs text-muted-foreground mt-0.5">
-              {rotationFlights.length} flight{rotationFlights.length !== 1 ? 's' : ''} in the last 24h
-            </p>
-          </div>
-        </div>
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="20" height="20"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="text-muted-foreground transition-transform duration-200 shrink-0 {rotationExpanded ? 'rotate-180' : ''}"
-        >
-          <path d="m6 9 6 6 6-6"/>
-        </svg>
-      </button>
-
-      {#if rotationExpanded}
-        <div class="border-t border-border">
-          <div bind:this={rotationScrollEl} class="max-h-72 overflow-y-auto">
-            <!-- Desktop Table -->
-            <table class="hidden md:table w-full text-sm">
-              <thead class="sticky top-0 bg-muted/80 backdrop-blur-sm">
-                <tr class="text-xs text-muted-foreground uppercase tracking-wide">
-                  <th class="px-4 py-2 text-left font-medium">Flight</th>
-                  <th class="px-3 py-2 text-center font-medium">From</th>
-                  <th class="px-3 py-2 text-center font-medium">To</th>
-                  <th class="px-3 py-2 text-center font-medium">Dep</th>
-                  <th class="px-3 py-2 text-center font-medium">Act Dep</th>
-                  <th class="px-3 py-2 text-center font-medium">Arr</th>
-                  <th class="px-3 py-2 text-center font-medium">Act Arr</th>
-                  <th class="px-3 py-2 text-right font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each rotationFlights as rf}
-                  {@const isCurrent = rf.id === flight.id}
-                  {@const tone = rotationStatusTone(rf.status, rf.canceled)}
-                  {@const delayDelta = rotationDelayDelta(rf.delayMinutes)}
-                  <tr
-                    data-current={isCurrent}
-                    class="border-t border-border/50 transition-colors
-                      {isCurrent ? 'bg-primary/8 border-l-2 border-l-primary' : 'hover:bg-muted/30'}
-                      {rf.canceled ? 'opacity-60' : ''}"
-                  >
-                    <td class="px-4 py-2.5">
-                      <a href="/flights/{rf.id}" class="font-semibold {isCurrent ? 'text-primary' : 'hover:text-primary transition-colors'} {rf.canceled ? 'line-through' : ''}">
-                        {rf.flightNumber}
-                      </a>
-                      {#if isCurrent}
-                        <span class="ml-1.5 text-[10px] font-bold uppercase tracking-wide text-primary opacity-70">this flight</span>
-                      {/if}
-                    </td>
-                    <td class="px-3 py-2.5 text-center">
-                      <span class="font-medium">{rf.departureAirport}</span>
-                    </td>
-                    <td class="px-3 py-2.5 text-center">
-                      <span class="font-medium">{rf.arrivalAirport}</span>
-                    </td>
-                    <td class="px-3 py-2.5 text-center tabular-nums text-muted-foreground">
-                      {formatTime(rf.scheduledDeparture)}
-                    </td>
-                    <td class="px-3 py-2.5 text-center tabular-nums">
-                      {#if rf.actualDeparture}
-                        <span class="{rf.actualDeparture > rf.scheduledDeparture ? 'text-amber-600' : 'text-green-600'} font-medium">
-                          {formatTime(rf.actualDeparture)}
-                        </span>
-                      {:else}
-                        <span class="text-muted-foreground">—</span>
-                      {/if}
-                    </td>
-                    <td class="px-3 py-2.5 text-center tabular-nums text-muted-foreground">
-                      {formatTime(rf.scheduledArrival)}
-                    </td>
-                    <td class="px-3 py-2.5 text-center tabular-nums">
-                      {#if rf.actualArrival}
-                        <span class="{rf.actualArrival > rf.scheduledArrival ? 'text-amber-600' : 'text-green-600'} font-medium">
-                          {formatTime(rf.actualArrival)}
-                        </span>
-                      {:else}
-                        <span class="text-muted-foreground">—</span>
-                      {/if}
-                    </td>
-                    <td class="px-4 py-2.5 text-right">
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium {STATUS_PILL_CLASSES[tone]}">
-                        {shortenStatus(rf.status) ?? 'Scheduled'}{#if delayDelta} · {delayDelta}{/if}
-                      </span>
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-
-            <!-- Mobile Cards -->
-            <div class="md:hidden divide-y divide-border">
-              {#each rotationFlights as rf}
-                {@const isCurrent = rf.id === flight.id}
-                {@const tone = rotationStatusTone(rf.status, rf.canceled)}
-                {@const delayDelta = rotationDelayDelta(rf.delayMinutes)}
-                {@const depShort = airportName(rf.departureAirport)}
-                {@const arrShort = airportName(rf.arrivalAirport)}
-                <a
-                  href="/flights/{rf.id}"
-                  data-current={isCurrent}
-                  class="block px-4 py-3 transition-colors {isCurrent ? 'bg-primary/8' : 'hover:bg-muted/30'} {rf.canceled ? 'opacity-60' : ''}"
-                >
-                  <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center gap-2">
-                      <span class="font-semibold {isCurrent ? 'text-primary' : 'text-foreground'} {rf.canceled ? 'line-through' : ''}">{rf.flightNumber}</span>
-                      {#if isCurrent}
-                        <span class="text-[10px] font-bold uppercase tracking-wide text-primary opacity-70">this flight</span>
-                      {/if}
-                    </div>
-                    <div>
-                      <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium {STATUS_PILL_CLASSES[tone]}">
-                        {shortenStatus(rf.status) ?? 'Scheduled'}{#if delayDelta} · {delayDelta}{/if}
-                      </span>
-                    </div>
-                  </div>
-                  <div class="flex items-center gap-2 text-sm mb-2">
-                    <span class="font-medium text-foreground">{depShort}</span>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
-                      <path d="M5 12h14"/>
-                      <path d="m12 5 7 7-7 7"/>
-                    </svg>
-                    <span class="font-medium text-foreground">{arrShort}</span>
-                  </div>
-
-                  <!-- Times: Act Dep -> Act Arr -->
-                  <div class="flex items-center gap-3 text-sm">
-                    <div class="flex items-center gap-1.5">
-                      <span class="text-xs text-muted-foreground">Dep</span>
-                      {#if rf.actualDeparture}
-                        <span class="tabular-nums font-medium {rf.actualDeparture > rf.scheduledDeparture ? 'text-amber-600' : 'text-green-600'}">
-                          {formatTime(rf.actualDeparture)}
-                        </span>
-                      {:else if rf.scheduledDeparture}
-                        <span class="tabular-nums text-muted-foreground">{formatTime(rf.scheduledDeparture)}</span>
-                      {:else}
-                        <span class="text-muted-foreground">—</span>
-                      {/if}
-                    </div>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
-                      <path d="M5 12h14"/>
-                      <path d="m12 5 7 7-7 7"/>
-                    </svg>
-                    <div class="flex items-center gap-1.5">
-                      <span class="text-xs text-muted-foreground">Arr</span>
-                      {#if rf.actualArrival}
-                        <span class="tabular-nums font-medium {rf.actualArrival > rf.scheduledArrival ? 'text-amber-600' : 'text-green-600'}">
-                          {formatTime(rf.actualArrival)}
-                        </span>
-                      {:else if rf.scheduledArrival}
-                        <span class="tabular-nums text-muted-foreground">{formatTime(rf.scheduledArrival)}</span>
-                      {:else}
-                        <span class="text-muted-foreground">—</span>
-                      {/if}
-                    </div>
-                  </div>
-                </a>
-              {/each}
-            </div>
-          </div>
-        </div>
-      {/if}
-    </div>
-  {/if}
-
-  <!-- Weather: dep + arr side by side -->
-  {#if depWeather || arrWeather}
-    {@const dirs = ['N','NE','E','SE','S','SW','W','NW']}
-    {@const wRow = (w: NonNullable<typeof depWeather>) => [
-      w.temperature != null ? `${Math.round(w.temperature)}°C` : null,
-      w.windSpeed != null ? `${Math.round(w.windSpeed)}mph ${w.windDirection != null ? dirs[Math.round(w.windDirection/45)%8] : ''}`.trim() : null,
-      w.visibility != null ? `${Math.round(w.visibility*10)/10}km vis` : null,
-      w.cloudCover != null ? `${w.cloudCover}% cloud` : null,
-    ].filter(Boolean).join(' · ')}
-    <div class="grid gap-3 mb-6 {depWeather && arrWeather ? 'grid-cols-2' : 'grid-cols-1'}">
-      {#if depWeather}
-        <div class="rounded-lg border bg-card px-4 py-3">
-          <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-            {airportName(flight.departureAirport)} <span class="opacity-60">({flight.departureAirport})</span> · Departure weather
-          </p>
-          <p class="text-2xl mb-1"><Icon name={depWeatherIcon} size="32px" weather /></p>
-          <p class="text-sm text-foreground">{wRow(depWeather)}</p>
-        </div>
-      {/if}
-      {#if arrWeather}
-        <div class="rounded-lg border bg-card px-4 py-3">
-          <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-            {airportName(flight.arrivalAirport)} <span class="opacity-60">({flight.arrivalAirport})</span> · Arrival weather
-          </p>
-          <p class="text-2xl mb-1"><Icon name={arrWeatherIcon} size="32px" weather /></p>
-          <p class="text-sm text-foreground">{wRow(arrWeather)}</p>
-        </div>
-      {/if}
-    </div>
-  {/if}
+  <WeatherDisplay
+    {depWeather}
+    {arrWeather}
+    departureAirport={flight.departureAirport}
+    arrivalAirport={flight.arrivalAirport}
+    isDayAtDep={depIsDay}
+    isDayAtArr={arrIsDay}
+  />
 
   <!-- Flight details -->
   <div class="grid gap-4 mb-6">
-
     <div class="rounded-lg border bg-card p-4">
       <h2 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-3">Flight Details</h2>
       <dl class="space-y-2 text-sm">
@@ -1057,7 +355,6 @@
         </div>
       </dl>
     </div>
-
   </div>
 
   <!-- Status history -->
@@ -1078,6 +375,4 @@
       </ol>
     </div>
   {/if}
-
-
 </div>

@@ -69,6 +69,7 @@ export const flights = pgTable('flights', {
   index('flights_arrival_airport_idx').on(table.arrivalAirport),
   index('flights_status_idx').on(table.status),
   index('flights_airline_date_idx').on(table.airlineCode, table.flightDate),
+  index('flights_registration_idx').on(table.aircraftRegistration),
 ]);
 
 export const flightTimes = pgTable('flight_times', {

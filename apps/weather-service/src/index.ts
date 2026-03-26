@@ -1,25 +1,5 @@
-import { config } from 'dotenv';
-import { resolve, dirname } from 'path';
-import { existsSync } from 'fs';
-
-function findEnvFile(startDir: string): string | null {
-  let dir = startDir;
-  for (let i = 0; i < 10; i++) {
-    const candidate = resolve(dir, '.env');
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
-
-const envPath = findEnvFile(__dirname);
-if (envPath) {
-  config({ path: envPath });
-} else {
-  console.warn('[Weather] Warning: .env file not found');
-}
+import { loadEnv } from '@airways/common';
+loadEnv({ serviceName: 'Weather', startDir: __dirname });
 
 import { fetchAllWeather, fetchWeatherForUpcomingFlights } from './fetcher';
 import { ensureAirportsSynced, startAirportSyncScheduler } from './airports';
@@ -54,6 +34,11 @@ async function main() {
     );
   }, UPCOMING_CHECK_INTERVAL_MS);
 }
+
+process.on('uncaughtException', (err) => {
+  console.error('[Weather] Uncaught exception:', err);
+  process.exit(1);
+});
 
 main().catch(err => {
   console.error('[Weather] Fatal error:', err);

@@ -1,12 +1,20 @@
 import { db, flights, flightTimes, scraperLogs } from '@airways/database';
 import { eq, and, not, inArray, asc, count, desc, max, sql } from 'drizzle-orm';
 import { scrapeDayFlights } from './scraper';
+import {
+  mins,
+  guernseyHour,
+  guernseyDateStr,
+  guernseyTomorrowStr,
+  nextGuernseyTime,
+  TERMINAL_STATUSES,
+  createCircuitBreakerFromEnv,
+  type TimerState,
+} from '@airways/common';
 
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
-
-const mins = (n: number) => n * 60_000;
 
 /** Hour (0–23, Guernsey local) at which the scraper hard-stops for the night */
 const CUTOFF_HOUR          = parseInt(process.env.SCRAPER_CUTOFF_HOUR              || '23', 10);
@@ -23,84 +31,9 @@ const INTERVAL_IDLE_MINS   = parseInt(process.env.SCRAPER_INTERVAL_IDLE_MINS    
 /** Minimum interval between tomorrow scrapes (minutes) */
 const INTERVAL_TOMORROW_MINS = parseInt(process.env.SCRAPER_INTERVAL_TOMORROW_MINS || '360', 10);
 
-/** Circuit breaker: failures before opening */
-const CIRCUIT_BREAKER_THRESHOLD = parseInt(process.env.SCRAPER_CIRCUIT_BREAKER_THRESHOLD || '5', 10);
-/** Circuit breaker: reset timeout (ms) */
-const CIRCUIT_BREAKER_RESET_MS  = parseInt(process.env.SCRAPER_CIRCUIT_BREAKER_RESET_MS  || '60000', 10);
-
-const TERMINAL_STATUSES = ['Landed', 'Cancelled', 'Completed'];
-
-// ---------------------------------------------------------------------------
-// Timezone helpers (Guernsey = Europe/London: UTC+0 in winter, UTC+1 in summer)
-// ---------------------------------------------------------------------------
-
-const GY_TZ = 'Europe/London';
-
-/** Current hour (0–23) in Guernsey local time. */
-function guernseyHour(d: Date = new Date()): number {
-  return parseInt(
-    new Intl.DateTimeFormat('en-GB', { timeZone: GY_TZ, hour: 'numeric', hour12: false }).format(d),
-    10,
-  );
-}
-
-/** Current date as YYYY-MM-DD in Guernsey local time. */
-function guernseyDateStr(d: Date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: GY_TZ }).format(d);
-}
-
-/**
- * Returns tomorrow's date string (YYYY-MM-DD) in Guernsey local time.
- * Adds 1 day in UTC first, then converts — correctly handles BST boundary.
- */
-function guernseyTomorrowStr(): string {
-  const tomorrow = new Date();
-  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-  return new Intl.DateTimeFormat('en-CA', { timeZone: GY_TZ }).format(tomorrow);
-}
-
-/**
- * Returns the next UTC Date at which Guernsey local time will be `hour:minute`.
- * If that time today is already past, returns tomorrow's occurrence.
- */
-function nextGuernseyTime(hour: number, minute: number): Date {
-  const todayGY = guernseyDateStr();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const candidateStr = `${todayGY}T${pad(hour)}:${pad(minute)}:00`;
-
-  const now = new Date();
-  const nowGYStr = new Intl.DateTimeFormat('en-GB', {
-    timeZone: GY_TZ,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false,
-  }).format(now);
-
-  // en-GB format: "DD/MM/YYYY, HH:MM:SS"
-  const [datePart, timePart] = nowGYStr.split(', ');
-  const [dd, mm, yyyy] = datePart.split('/');
-  const gyWallNow = new Date(`${yyyy}-${mm}-${dd}T${timePart}Z`); // treat as UTC for arithmetic
-  const offsetMs = now.getTime() - gyWallNow.getTime();
-
-  const targetGYWall = new Date(`${candidateStr}Z`);
-  let targetUTC = new Date(targetGYWall.getTime() + offsetMs);
-
-  if (targetUTC <= now) {
-    targetUTC = new Date(targetUTC.getTime() + 24 * 60 * 60 * 1000);
-  }
-
-  return targetUTC;
-}
-
 // ---------------------------------------------------------------------------
 // State & Circuit Breaker
 // ---------------------------------------------------------------------------
-
-interface TimerState {
-  scrapeTimeout: ReturnType<typeof setTimeout> | null;
-  wakeTimeout: ReturnType<typeof setTimeout> | null;
-  prefetchSlotTimeout: ReturnType<typeof setTimeout> | null;
-}
 
 const timers: TimerState = {
   scrapeTimeout: null,
@@ -108,17 +41,7 @@ const timers: TimerState = {
   prefetchSlotTimeout: null,
 };
 
-interface CircuitBreakerState {
-  failures: number;
-  lastFailureTime: number | null;
-  isOpen: boolean;
-}
-
-const circuitBreaker: CircuitBreakerState = {
-  failures: 0,
-  lastFailureTime: null,
-  isOpen: false,
-};
+const circuitBreaker = createCircuitBreakerFromEnv('Guernsey', 5, 60000);
 
 let lastTomorrowScrapeAt: Date | null = null;
 let scheduledWakeAtMs: number | null = null;
@@ -131,37 +54,6 @@ function clearAllTimers(): void {
       timers[timerKey] = null;
     }
   });
-}
-
-function checkCircuitBreaker(): boolean {
-  if (circuitBreaker.isOpen) {
-    const now = Date.now();
-    if (circuitBreaker.lastFailureTime &&
-        now - circuitBreaker.lastFailureTime > CIRCUIT_BREAKER_RESET_MS) {
-      circuitBreaker.isOpen = false;
-      circuitBreaker.failures = 0;
-      console.log('[Guernsey Live] Circuit breaker reset, resuming operations');
-      return true;
-    }
-    console.log('[Guernsey Live] Circuit breaker is OPEN, skipping operation');
-    return false;
-  }
-  return true;
-}
-
-function recordFailure(): void {
-  circuitBreaker.failures++;
-  circuitBreaker.lastFailureTime = Date.now();
-  if (circuitBreaker.failures >= CIRCUIT_BREAKER_THRESHOLD) {
-    circuitBreaker.isOpen = true;
-    console.error(`[Guernsey Live] Circuit breaker OPENED after ${circuitBreaker.failures} failures`);
-  }
-}
-
-function recordSuccess(): void {
-  if (circuitBreaker.failures > 0) {
-    circuitBreaker.failures = Math.max(0, circuitBreaker.failures - 1);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -622,7 +514,7 @@ async function schedulePrefetchSlot(): Promise<void> {
   timers.prefetchSlotTimeout = setTimeout(async () => {
     timers.prefetchSlotTimeout = null;
     try {
-      if (!checkCircuitBreaker()) {
+      if (!circuitBreaker.check()) {
         console.log('[Guernsey Live] Circuit breaker open, skipping prefetch slot');
       } else {
         console.log('[Guernsey Live] Prefetch slot fired — running standalone');
@@ -696,7 +588,7 @@ async function scheduleNextScrape(): Promise<void> {
   timers.scrapeTimeout = setTimeout(async () => {
     timers.scrapeTimeout = null;
 
-    if (!checkCircuitBreaker()) {
+    if (!circuitBreaker.check()) {
       console.log('[Guernsey Live] Circuit breaker open, skipping scrape and rescheduling');
       await scheduleNextScrape();
       return;
@@ -704,10 +596,10 @@ async function scheduleNextScrape(): Promise<void> {
 
     try {
       await runLiveScrape(includeTomorrow);
-      recordSuccess();
+      circuitBreaker.recordSuccess();
     } catch (err) {
       console.error('[Guernsey Live] Error in scheduled scrape:', err);
-      recordFailure();
+      circuitBreaker.recordFailure();
     }
     await scheduleNextScrape();
   }, totalMs);
