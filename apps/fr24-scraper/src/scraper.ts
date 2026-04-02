@@ -58,12 +58,27 @@ async function forceKillBrowser(browser: Browser | null): Promise<void> {
   ]).catch(() => {});
   if (pid != null) {
     try {
-      execSync(`kill -9 -$(ps -o pgid= -p ${pid} | tr -d ' ') 2>/dev/null || kill -9 ${pid} 2>/dev/null`, { stdio: 'ignore' });
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+    }
+    try {
+      process.kill(pid, 'SIGKILL');
     } catch {
     }
   }
   try {
-    execSync(`pkill -9 -f 'chrome.*remote-debugging' 2>/dev/null || true`, { stdio: 'ignore' });
+    const { execSync } = require('child_process');
+    const output = execSync('ps aux | grep "chrome.*remote-debugging" | grep -v grep', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+    const lines = output.trim().split('\n');
+    for (const line of lines) {
+      const match = line.match(/^\\S+\\s+(\\d+)/);
+      if (match) {
+        try {
+          process.kill(parseInt(match[1], 10), 'SIGKILL');
+        } catch {
+        }
+      }
+    }
   } catch {
   }
 }
