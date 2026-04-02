@@ -335,7 +335,7 @@ onMount(() => {
         <span class="text-sm text-muted-foreground">Live</span>
         {#if lastUpdated}
           <span class="text-xs text-muted-foreground/70 ml-1 tabular-nums">
-            {lastUpdated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+            {lastUpdated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' })}
           </span>
         {/if}
       </div>

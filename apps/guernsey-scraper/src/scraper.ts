@@ -18,6 +18,32 @@ interface ScrapedFlight {
   statusUpdates: StatusUpdate[];
 }
 
+const GY_TZ = 'Europe/London';
+
+function getLondonOffsetMs(d: Date): number {
+  const londonStr = new Intl.DateTimeFormat('en-GB', {
+    timeZone: GY_TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).format(d);
+  const [datePart, timePart] = londonStr.split(', ');
+  const [dd, mo, yyyy] = datePart.split('/');
+  const londonAsUtc = new Date(`${yyyy}-${mo}-${dd}T${timePart}Z`);
+  return londonAsUtc.getTime() - d.getTime();
+}
+
+function guernseyLocalToUtc(dateStr: string, hh: number, mm: number): Date {
+  const naive = new Date(`${dateStr}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`);
+  const offsetMs = getLondonOffsetMs(naive);
+  return new Date(naive.getTime() - offsetMs);
+}
+
+function guernseyLocalDateToUtc(y: number, mo: number, d: number, h: number, mi: number): Date {
+  const dateStr = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  return guernseyLocalToUtc(dateStr, h, mi);
+}
+
 const BASE_URL = process.env.GUERNSEY_AIRPORT_URL || 'https://www.airport.gg';
 const API_URL = process.env.GUERNSEY_API_URL || 'https://www.airport.gg/arr-dep/json';
 function getApiKey(): string {
@@ -69,9 +95,7 @@ function mapApiEntriesToScrapedFlights(
     if (!timeParts) continue;
     const hh = parseInt(timeParts[1]);
     const mm = parseInt(timeParts[2]);
-
-    const scheduledTime = new Date(`${entry.flight_date}T00:00:00Z`);
-    scheduledTime.setUTCHours(hh, mm, 0, 0);
+    const scheduledTime = guernseyLocalToUtc(entry.flight_date, hh, mm);
 
     const location = entry.flight_locations.join(', ');
     const codes = entry.flight_numbers;
@@ -174,8 +198,7 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
         }
       }
 
-      const scheduledTime = new Date(rowDate);
-      scheduledTime.setHours(hh, mm, 0, 0);
+      const scheduledTime = guernseyLocalToUtc(flightDate, hh, mm);
 
       const location = $row.find('td.airport').text().trim();
 
@@ -202,8 +225,8 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
         const tsMatch = datetimeRaw.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
         if (tsMatch) {
           const [, d, mo, y, h, mi] = tsMatch;
-          const statusTimestamp = new Date(
-            parseInt(y), parseInt(mo) - 1, parseInt(d), parseInt(h), parseInt(mi), 0,
+          const statusTimestamp = guernseyLocalDateToUtc(
+            parseInt(y), parseInt(mo), parseInt(d), parseInt(h), parseInt(mi),
           );
           if (!isNaN(statusTimestamp.getTime())) {
             for (const flightCode of codes) {
@@ -260,9 +283,8 @@ function parseHHMM(text: string): { hh: number; mm: number } | null {
 function parseTimeFromMessage(message: string, referenceDate: Date): Date | null {
   const parsed = parseHHMM(message);
   if (!parsed) return null;
-  const t = new Date(referenceDate);
-  t.setHours(parsed.hh, parsed.mm, 0, 0);
-  return t;
+  const refDateStr = referenceDate.toISOString().split('T')[0];
+  return guernseyLocalToUtc(refDateStr, parsed.hh, parsed.mm);
 }
 
 /**
@@ -344,9 +366,8 @@ function extractActualTime(updates: StatusUpdate[], keyword: string, referenceDa
     if (u.statusMessage.toLowerCase().includes(keyword.toLowerCase())) {
       const parsed = parseHHMM(u.statusMessage);
       if (parsed) {
-        const t = new Date(referenceDate);
-        t.setHours(parsed.hh, parsed.mm, 0, 0);
-        return t;
+        const refDateStr = referenceDate.toISOString().split('T')[0];
+        return guernseyLocalToUtc(refDateStr, parsed.hh, parsed.mm);
       }
     }
   }
@@ -377,11 +398,10 @@ function extractDelayMinutes(updates: StatusUpdate[], scheduledTime: Date): numb
         msg.includes('flight delayed to approx') || msg.includes('next info')) {
       const parsed = parseHHMM(u.statusMessage);
       if (parsed) {
-        const estimatedTime = new Date(scheduledTime);
-        estimatedTime.setHours(parsed.hh, parsed.mm, 0, 0);
+        const refDateStr = scheduledTime.toISOString().split('T')[0];
+        const estimatedTime = guernseyLocalToUtc(refDateStr, parsed.hh, parsed.mm);
         const diffMs = estimatedTime.getTime() - scheduledTime.getTime();
         const diffMins = Math.round(diffMs / 60_000);
-        // Within 5 minutes of scheduled is considered on-time (not delayed)
         if (diffMins <= 5) return 0;
         return diffMins;
       }
@@ -389,12 +409,6 @@ function extractDelayMinutes(updates: StatusUpdate[], scheduledTime: Date): numb
   }
   return null;
 }
-
-/**
- * Extract estimated time from "Delayed To HH:MM" or "Approx HH:MM" messages.
- * Returns the absolute estimated time for use in flightTimes (EstimatedBlockOff/On).
- * Returns the time even if it's earlier than scheduled (early arrival/departure).
- */
 function extractEstimatedTime(updates: StatusUpdate[], scheduledTime: Date): Date | null {
   for (const u of [...updates].reverse()) {
     const msg = u.statusMessage.toLowerCase();
@@ -403,9 +417,8 @@ function extractEstimatedTime(updates: StatusUpdate[], scheduledTime: Date): Dat
         msg.includes('flight delayed to approx') || msg.includes('next info')) {
       const parsed = parseHHMM(u.statusMessage);
       if (parsed) {
-        const estimated = new Date(scheduledTime);
-        estimated.setHours(parsed.hh, parsed.mm, 0, 0);
-        return estimated;
+        const refDateStr = scheduledTime.toISOString().split('T')[0];
+        return guernseyLocalToUtc(refDateStr, parsed.hh, parsed.mm);
       }
     }
   }

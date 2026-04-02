@@ -30,7 +30,7 @@
 
   function fmt(date: string | Date | null | undefined): string {
     if (!date) return '--:--';
-    return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
   }
 
   // Find weather closest to a given timestamp
