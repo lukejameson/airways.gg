@@ -340,6 +340,26 @@
     if (!date) return '--:--';
     return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
   }
+  function formatDateTime(date: string | Date | null | undefined): string {
+    if (!date) return '—';
+    return new Date(date).toLocaleString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Europe/London',
+    });
+  }
+  function shortDate(date: string | Date | null | undefined): string {
+    if (!date) return '';
+    return new Date(date).toLocaleDateString('en-GB', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      timeZone: 'Europe/London',
+    });
+  }
   const getStatusColor = (status: string | null | undefined, canceled?: boolean | null) =>
     STATUS_TEXT_CLASSES[getStatusTone(status, canceled)];
   const getStatusDotColor = (status: string | null | undefined, canceled?: boolean | null) =>
