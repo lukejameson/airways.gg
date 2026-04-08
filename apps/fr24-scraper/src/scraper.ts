@@ -75,6 +75,10 @@ async function forceKillBrowser(browser: Browser | null): Promise<void> {
     execSync(`pkill -9 -f 'chrome.*remote-debugging' 2>/dev/null || true`, { stdio: 'ignore' });
   } catch {
   }
+  try {
+    execSync(`rm -rf /tmp/.org.chromium.* /tmp/puppeteer_* /tmp/lighthouse.* /tmp/.com.google.Chrome.* 2>/dev/null || true`, { stdio: 'ignore' });
+  } catch {
+  }
 }
 
 async function simulateHumanBehavior(page: Page): Promise<void> {

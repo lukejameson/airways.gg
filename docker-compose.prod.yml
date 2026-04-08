@@ -51,6 +51,7 @@ services:
     restart: always
 
   fr24-scraper:
+    init: true
     build:
       context: .
       dockerfile: apps/fr24-scraper/Dockerfile
