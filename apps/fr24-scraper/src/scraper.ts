@@ -874,6 +874,13 @@ async function runBrowserSession(
 
       const arrivalFlights = await extractFlightRows(page, 'arrival', flightDate);
       console.log(`[FR24] Parsed ${arrivalFlights.length} arrival rows`);
+      if (arrivalFlights.length === 0) {
+        const debugTitle = await page.title().catch(() => 'unknown');
+        const debugUrl = page.url();
+        const snippet = await page.evaluate(() => (globalThis as any).document.body?.innerHTML?.slice(0, 2000) || '').catch(() => 'unable to read');
+        console.log(`[FR24] DEBUG arrivals empty — title="${debugTitle}" url="${debugUrl}"`);
+        console.log(`[FR24] DEBUG arrivals HTML snippet: ${snippet}`);
+      }
 
       for (const flight of arrivalFlights) {
         const id = await upsertFR24Flight(flight, flightDate, undefined);
@@ -909,6 +916,13 @@ async function runBrowserSession(
 
       const departureFlights = await extractFlightRows(page, 'departure', flightDate);
       console.log(`[FR24] Parsed ${departureFlights.length} departure rows`);
+      if (departureFlights.length === 0) {
+        const debugTitle = await page.title().catch(() => 'unknown');
+        const debugUrl = page.url();
+        const snippet = await page.evaluate(() => (globalThis as any).document.body?.innerHTML?.slice(0, 2000) || '').catch(() => 'unable to read');
+        console.log(`[FR24] DEBUG departures empty — title="${debugTitle}" url="${debugUrl}"`);
+        console.log(`[FR24] DEBUG departures HTML snippet: ${snippet}`);
+      }
       const detailFetchedThisRun = new Set<string>();
       for (const flight of departureFlights) {
         const flightNumber = flight.flightNumber.replace(/\s+/g, '').toUpperCase();
