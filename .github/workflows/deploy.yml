@@ -82,7 +82,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_SSH_PORT }}
-          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
+
           envs: CHANGED_WEB,CHANGED_GUERNSEY_SCRAPER,CHANGED_FR24_SCRAPER,CHANGED_ADSB_SERVICE,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
           # Pass change flags as env vars into the SSH session via with.envs
           # (appleboy/ssh-action reads these from the runner environment)
@@ -146,7 +146,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_SSH_PORT }}
-          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
+
           envs: CHANGED_WEB,CHANGED_GUERNSEY_SCRAPER,CHANGED_FR24_SCRAPER,CHANGED_ADSB_SERVICE,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
           script: |
             set -e
@@ -206,7 +206,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_SSH_PORT }}
-          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
+
           envs: CHANGED_WEB,CHANGED_GUERNSEY_SCRAPER,CHANGED_FR24_SCRAPER,CHANGED_ADSB_SERVICE,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
           script: |
             set -e
