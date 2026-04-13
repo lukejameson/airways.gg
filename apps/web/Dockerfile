@@ -46,7 +46,7 @@ COPY --from=builder /app/packages/database ./packages/database
 
 EXPOSE 3000
 ENV NODE_ENV=production \
-    TZ=UTC
+    TZ=Europe/London
 # Run migrations via the programmatic migrator (no drizzle-kit needed at runtime),
 # then start the SvelteKit app.
 CMD ["sh", "-c", "node /app/packages/database/migrate.mjs && node --import ./preload-env.js build"]

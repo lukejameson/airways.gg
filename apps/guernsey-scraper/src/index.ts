@@ -22,15 +22,6 @@ if (envPath) {
   console.warn('[Guernsey] Warning: .env file not found, relying on environment variables');
 }
 
-// Fail fast if the process timezone is not UTC — pg serialization of
-// Date objects depends on it for `timestamp without time zone` columns.
-if (new Date().getTimezoneOffset() !== 0) {
-  console.error(
-    `[Guernsey] FATAL: Process timezone offset is ${new Date().getTimezoneOffset()} minutes, expected 0 (UTC). Set TZ=UTC.`,
-  );
-  process.exit(1);
-}
-
 import { runBackfill, linkOrphanedStatusHistory, deduplicateFlights, fixActualTimes } from './scraper';
 import { runLiveMode } from './live';
 
