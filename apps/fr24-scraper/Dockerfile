@@ -62,14 +62,14 @@ RUN apt-get update && apt-get install -y \
     libxkbcommon0 \
     libglu1-mesa \
     --no-install-recommends \
-    && ln -snf /usr/share/zoneinfo/Europe/London /etc/localtime \
-    && echo "Europe/London" > /etc/timezone \
+    && ln -snf /usr/share/zoneinfo/UTC /etc/localtime \
+    && echo "UTC" > /etc/timezone \
     && locale-gen en_GB.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
     HOME=/home/scraper \
-    TZ=Europe/London \
+    TZ=UTC \
     LANG=en_GB.UTF-8 \
     LANGUAGE=en_GB:en
 

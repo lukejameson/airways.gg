@@ -1,6 +1,40 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
+import pg from 'pg';
+const { Pool, types } = pg;
 import * as schema from './schema';
+
+// ---------------------------------------------------------------------------
+// Force pg to handle all timestamps in UTC, regardless of process timezone.
+//
+// Problem: pg's default Date serializer uses local-time methods (getHours etc.)
+// and appends the local offset. PostgreSQL's `timestamp WITHOUT time zone`
+// silently discards that offset, storing only the bare datetime. If the
+// process runs in BST (UTC+1), Date(12:40 UTC) is serialized as
+// "13:40:00+01:00" and PostgreSQL stores "13:40:00" — one hour wrong.
+//
+// Fix: override both the WRITE path (prepareValue) and READ path (type parser)
+// so all timestamp handling is UTC-only.
+// ---------------------------------------------------------------------------
+
+// READ: parse "timestamp without time zone" (OID 1114) values as UTC
+types.setTypeParser(1114, (str: string) => new Date(str + '+00'));
+
+// WRITE: serialize Date objects using UTC methods
+const pgUtils = require('pg/lib/utils');
+const _origPrepareValue = pgUtils.prepareValue;
+function utcDateString(date: Date): string {
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const pad3 = (n: number) => String(n).padStart(3, '0');
+  return (
+    `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}T` +
+    `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}:${pad2(date.getUTCSeconds())}.` +
+    `${pad3(date.getUTCMilliseconds())}+00:00`
+  );
+}
+pgUtils.prepareValue = function prepareValueUTC(val: unknown, seen?: unknown[]): unknown {
+  if (val instanceof Date) return utcDateString(val);
+  return _origPrepareValue(val, seen);
+};
 
 // Re-export schema types and table objects — safe to import anywhere
 export * from './schema';

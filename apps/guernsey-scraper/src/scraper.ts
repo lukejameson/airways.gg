@@ -34,9 +34,11 @@ function getLondonOffsetMs(d: Date): number {
 }
 
 function guernseyLocalToUtc(dateStr: string, hh: number, mm: number): Date {
-  const naive = new Date(`${dateStr}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`);
-  const offsetMs = getLondonOffsetMs(naive);
-  return new Date(naive.getTime() - offsetMs);
+  // Treat the London wall-clock time as a UTC instant, then subtract the London offset.
+  // Using 'Z' suffix makes this TZ-agnostic — correct regardless of process timezone.
+  const asUtc = new Date(`${dateStr}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00Z`);
+  const offsetMs = getLondonOffsetMs(asUtc);
+  return new Date(asUtc.getTime() - offsetMs);
 }
 
 function guernseyLocalDateToUtc(y: number, mo: number, d: number, h: number, mi: number): Date {

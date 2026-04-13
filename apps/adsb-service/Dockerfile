@@ -36,5 +36,6 @@ COPY --from=builder /app/apps/adsb-service/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/database ./packages/database
 
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    TZ=UTC
 CMD ["node", "dist/index.js"]

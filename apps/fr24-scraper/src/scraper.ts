@@ -417,11 +417,11 @@ function parseTimeToDate(timeStr: string, flightDate: string): Date | null {
   if (ampm === 'PM' && hour < 12) hour += 12;
   if (ampm === 'AM' && hour === 12) hour = 0;
 
-  const d = new Date(`${flightDate}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`);
-  // Treat as London time — FR24 shows local time for the airport
-  // Adjust from Europe/London to UTC
-  const londonOffset = getLondonOffsetMs(d);
-  return new Date(d.getTime() - londonOffset);
+  // Treat the London wall-clock time as a UTC instant, then subtract the London offset.
+  // Using 'Z' suffix makes this TZ-agnostic — correct regardless of process timezone.
+  const asUtc = new Date(`${flightDate}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00Z`);
+  const londonOffset = getLondonOffsetMs(asUtc);
+  return new Date(asUtc.getTime() - londonOffset);
 }
 
 function getLondonOffsetMs(d: Date): number {
@@ -752,8 +752,9 @@ async function upsertFR24Flight(
           const ex = existing[0];
           const scheduledMs = ex?.scheduledDeparture ? new Date(ex.scheduledDeparture).getTime() : null;
           if (scheduledMs !== null) {
-            const estMs = new Date(ex.scheduledDeparture!).setHours(hh, mm, 0, 0);
-            if (estMs <= scheduledMs) skipHistory = true;
+            // Convert London local time to UTC for proper comparison
+            const estDate = parseTimeToDate(`${hh}:${String(mm).padStart(2, '0')}`, flightDate);
+            if (estDate && estDate.getTime() <= scheduledMs) skipHistory = true;
           }
         }
       }

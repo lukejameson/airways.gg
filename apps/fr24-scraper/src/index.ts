@@ -22,6 +22,15 @@ if (envPath) {
   console.warn('[FR24] Warning: .env file not found, relying on environment variables');
 }
 
+// Fail fast if the process timezone is not UTC — pg serialization of
+// Date objects depends on it for `timestamp without time zone` columns.
+if (new Date().getTimezoneOffset() !== 0) {
+  console.error(
+    `[FR24] FATAL: Process timezone offset is ${new Date().getTimezoneOffset()} minutes, expected 0 (UTC). Set TZ=UTC.`,
+  );
+  process.exit(1);
+}
+
 import { scrapeOnce, guernseyDateStr } from './scraper';
 import { db, scraperLogs, flights, flightTimes } from '@airways/database';
 import { eq, and, not, inArray, desc, count, max, asc, isNull, sql } from 'drizzle-orm';
