@@ -3,6 +3,7 @@
 
 services:
   app:
+    image: ghcr.io/lukejameson/airways.gg/app:production
     build:
       context: .
       dockerfile: apps/web/Dockerfile
@@ -36,6 +37,7 @@ services:
     restart: unless-stopped
 
   notification-service:
+    image: ghcr.io/lukejameson/airways.gg/notification-service:production
     build:
       context: .
       dockerfile: apps/notification-service/Dockerfile
@@ -51,6 +53,7 @@ services:
     restart: always
 
   fr24-scraper:
+    image: ghcr.io/lukejameson/airways.gg/fr24-scraper:production
     init: true
     build:
       context: .
@@ -74,6 +77,7 @@ services:
     restart: always
 
   adsb-service:
+    image: ghcr.io/lukejameson/airways.gg/adsb-service:production
     build:
       context: .
       dockerfile: apps/adsb-service/Dockerfile
@@ -86,6 +90,7 @@ services:
     restart: always
 
   guernsey-live:
+    image: ghcr.io/lukejameson/airways.gg/guernsey-scraper:production
     build:
       context: .
       dockerfile: apps/guernsey-scraper/Dockerfile
@@ -107,6 +112,7 @@ services:
     restart: always
 
   guernsey-backfill:
+    image: ghcr.io/lukejameson/airways.gg/guernsey-scraper:production
     build:
       context: .
       dockerfile: apps/guernsey-scraper/Dockerfile
@@ -124,6 +130,7 @@ services:
       - backfill
 
   position-service:
+    image: ghcr.io/lukejameson/airways.gg/position-service:production
     build:
       context: .
       dockerfile: apps/position-service/Dockerfile
@@ -137,6 +144,7 @@ services:
     restart: always
 
   weather-service:
+    image: ghcr.io/lukejameson/airways.gg/weather-service:production
     build:
       context: .
       dockerfile: apps/weather-service/Dockerfile
@@ -149,6 +157,7 @@ services:
     restart: always
 
   ml-service:
+    image: ghcr.io/lukejameson/airways.gg/ml-service:production
     build:
       context: apps/ml-service
       dockerfile: Dockerfile
