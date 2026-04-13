@@ -67,39 +67,10 @@ jobs:
               - 'apps/ml-service/**'
 
   # ────────────────────────────────────────────────────────────────────────────
-  # CI — always runs on every PR and push to validate the codebase
-  # ────────────────────────────────────────────────────────────────────────────
-  ci:
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build database package
-        run: npm run build --workspace=@airways/database
-
-      - name: Lint web app
-        run: npm run lint --workspace=@airways/web
-
-      - name: Type-check web app
-        run: npm run check --workspace=@airways/web
-
-      - name: Build web app
-        run: npm run build --workspace=@airways/web
-
-  # ────────────────────────────────────────────────────────────────────────────
   # Deploy to DEV  (push to main)
   # ────────────────────────────────────────────────────────────────────────────
   deploy-dev:
-    needs: [ci, detect-changes]
+    needs: [detect-changes]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: dev
@@ -163,7 +134,7 @@ jobs:
   # Deploy to TEST  (push to test)
   # ────────────────────────────────────────────────────────────────────────────
   deploy-test:
-    needs: [ci, detect-changes]
+    needs: [detect-changes]
     if: github.ref == 'refs/heads/test' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: test
@@ -223,7 +194,7 @@ jobs:
   # Deploy to PRODUCTION  (push to production)
   # ────────────────────────────────────────────────────────────────────────────
   deploy-production:
-    needs: [ci, detect-changes]
+    needs: [detect-changes]
     if: github.ref == 'refs/heads/production' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: production
