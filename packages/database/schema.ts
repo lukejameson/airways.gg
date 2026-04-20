@@ -244,3 +244,16 @@ export const notificationWatermark = pgTable('notification_watermark', {
   lastProcessedId: integer('last_processed_id').notNull().default(0),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+
+export const apnsSubscriptions = pgTable('apns_subscriptions', {
+  id: serial('id').primaryKey(),
+  deviceToken: text('device_token').notNull(),
+  flightId: integer('flight_id').notNull().references(() => flights.id, { onDelete: 'cascade' }),
+  flightCode: text('flight_code').notNull(),
+  flightDate: date('flight_date').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  lastNotifiedAt: timestamp('last_notified_at'),
+}, (table) => [
+  uniqueIndex('apns_subscriptions_device_flight_idx').on(table.deviceToken, table.flightId),
+  index('apns_subscriptions_flight_id_idx').on(table.flightId),
+]);
