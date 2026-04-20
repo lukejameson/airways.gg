@@ -555,9 +555,18 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
 
     // Write estimated time to flightTimes so the web app can display it.
     // Departures use EstimatedBlockOff (pushback time), arrivals use EstimatedBlockOn (landing time).
-    if (flightId !== null && estimatedTime !== null) {
+    // If the delay has resolved (no estimated time now), clear any stale estimate so the UI
+    // doesn't continue showing a delay that no longer exists.
+    if (flightId !== null) {
       const timeType = scrapedFlight.type === 'departures' ? 'EstimatedBlockOff' : 'EstimatedBlockOn';
-      await upsertFlightTime(flightId, timeType, estimatedTime);
+      const isTerminal = ['Airborne', 'Landed', 'Cancelled', 'Diverted'].some(s => status?.includes(s));
+      if (estimatedTime !== null) {
+        await upsertFlightTime(flightId, timeType, estimatedTime);
+      } else if (!isTerminal && !actualDeparture && !actualArrival) {
+        await db.delete(flightTimes).where(
+          and(eq(flightTimes.flightId, flightId), eq(flightTimes.timeType, timeType)),
+        ).catch(() => {});
+      }
     }
 
     return flightId;

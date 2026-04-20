@@ -702,6 +702,30 @@ async function upsertFR24Flight(
             eq(flightTimes.timeType, estTimeType),
           ),
         ).catch(() => {});
+    } else {
+      // FR24 shows on-time (no estimated delay). Clear any stale estimate from a previous
+      // scrape unless guernsey is actively showing a delay. Check by looking for delay keywords
+      // in guernsey's latest status history entry.
+      const [latestGuernsey] = await db
+        .select({ msg: flightStatusHistory.statusMessage })
+        .from(flightStatusHistory)
+        .where(and(eq(flightStatusHistory.flightId, flightId), eq(flightStatusHistory.source, 'guernsey_airport')))
+        .orderBy(desc(flightStatusHistory.statusTimestamp))
+        .limit(1);
+      const guernseyActiveDelay = latestGuernsey?.msg
+        ? (() => {
+            const m = latestGuernsey.msg.toLowerCase();
+            return m.includes('delayed') || m.startsWith('approx') || m.includes('new etd') ||
+              m.includes('expected at') || m.includes('delayed until') || m.includes('boarding expected') ||
+              m.includes('next info');
+          })()
+        : false;
+      if (!guernseyActiveDelay) {
+        await db
+          .delete(flightTimes)
+          .where(and(eq(flightTimes.flightId, flightId), eq(flightTimes.timeType, estTimeType)))
+          .catch(() => {});
+      }
     }
 
     // Write actual times to flightTimes — only if the DB doesn't already have a value
