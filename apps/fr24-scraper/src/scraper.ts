@@ -589,15 +589,9 @@ async function upsertFR24Flight(
     }
   }
 
-  // Compute delay
+  // Compute delay — only from estimated times; guernsey-scraper owns actual departure/arrival
   let delayMinutes: number | null = null;
-  if (actualDeparture && flight.type === 'departure') {
-    const diff = Math.round((actualDeparture.getTime() - scheduledDeparture.getTime()) / 60_000);
-    if (diff > 0 && diff <= 1440) delayMinutes = diff;
-  } else if (actualArrival && flight.type === 'arrival') {
-    const diff = Math.round((actualArrival.getTime() - scheduledArrival.getTime()) / 60_000);
-    if (diff > 0 && diff <= 1440) delayMinutes = diff;
-  } else if (estimatedTime) {
+  if (estimatedTime) {
     const baseTime = flight.type === 'departure' ? scheduledDeparture : scheduledArrival;
     const diff = Math.round((estimatedTime.getTime() - baseTime.getTime()) / 60_000);
     if (diff > 5 && diff <= 1440) delayMinutes = diff;
@@ -648,12 +642,7 @@ async function upsertFR24Flight(
       if (canceled) {
         updateSet.canceled = canceled;
       }
-      if (actualDeparture && ex.actualDeparture == null) {
-        updateSet.actualDeparture = actualDeparture;
-      }
-      if (actualArrival && ex.actualArrival == null) {
-        updateSet.actualArrival = actualArrival;
-      }
+      // Actual departure/arrival are owned by guernsey-scraper — do not overwrite
       if (delayMinutes !== null) {
         updateSet.delayMinutes = delayMinutes;
       } else if (ex.delayMinutes != null && !isTerminalStatus(ex.status)) {
