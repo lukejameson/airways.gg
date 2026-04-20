@@ -35,5 +35,5 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/database ./packages/database
 
 ENV NODE_ENV=production \
-    TZ=Europe/London
+    TZ=UTC
 CMD ["node", "dist/index.js"]

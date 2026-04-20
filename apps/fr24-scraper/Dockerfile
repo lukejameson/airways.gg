@@ -69,7 +69,7 @@ RUN apt-get update && apt-get install -y \
 
 ENV NODE_ENV=production \
     HOME=/home/scraper \
-    TZ=Europe/London \
+    TZ=UTC \
     LANG=en_GB.UTF-8 \
     LANGUAGE=en_GB:en
 
