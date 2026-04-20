@@ -2,7 +2,7 @@
 
 ## Context
 
-airways.gg is a real-time Guernsey Airport flight tracker. The existing SvelteKit web app will be replaced with a **Compose Multiplatform** application — a single Kotlin codebase for iOS, Android, and Web. Shared UI composables and business logic live once; platform-specific code (maps, push notifications) is isolated per target. A new dedicated REST API service (`apps/api`) replaces the SvelteKit SSR loaders as the backend for all platforms.
+airways.gg is a real-time Guernsey Airport flight tracker. The existing SvelteKit web app will be replaced with a **Compose Multiplatform** application — a single Kotlin codebase for iOS, Android, and Web. Shared UI composables and business logic live once; platform-specific code (maps, push notifications) is isolated per target. A new dedicated REST API service (`projects/api`) replaces the SvelteKit SSR loaders as the backend for all platforms.
 
 **v1 scope:** iOS app + web app (replacing SvelteKit). Features: flight board, flight detail with live map, APNs push notifications.  
 **Future:** Android target from the same codebase.
@@ -10,10 +10,8 @@ airways.gg is a real-time Guernsey Airport flight tracker. The existing SvelteKi
 ---
 
 ## Architecture
-
 ```
 apps/
-  api/                  ← NEW: Hono REST API (serves iOS, web, future Android)
   composeapp/           ← NEW: Compose Multiplatform (single UI codebase)
     composeApp/src/
       commonMain/       ← Shared Compose UI + models + logic (all platforms)
@@ -46,14 +44,14 @@ Hono is a TypeScript-first, lightweight HTTP framework — effectively a modern 
 
 ---
 
-## Phase 1: Backend API Service (`apps/api`)
+## Phase 1: Backend API Service (`projects/api`)
 
 **Goal:** Create the JSON REST API that all platforms call. This unblocks every subsequent phase.
 
 ### Files to create
 
 ```
-apps/api/
+projects/api/
   package.json          (name: @airways/api, deps: hono, @hono/node-server, zod, dotenv)
   tsconfig.json         (extends ../../tsconfig.base.json)
   Dockerfile            (multi-stage; mirrors apps/position-service/Dockerfile exactly)
@@ -105,7 +103,7 @@ CREATE TABLE apns_subscriptions (
 
 ### Docker / Compose
 
-- `apps/api/Dockerfile` — follows `apps/position-service/Dockerfile` pattern
+- `projects/api/Dockerfile` — follows `apps/position-service/Dockerfile` pattern
 - Modify `docker-compose.yml`, `.dev.yml`, `.prod.yml` — add `api` service on port `3001`
 - Modify `.env.example` — add `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, `APNS_KEY_PATH`
 
@@ -336,7 +334,7 @@ No UI code changes needed — all screens are already in `commonMain`.
 
 | Path | Action |
 |------|--------|
-| `apps/api/` (entire service) | Create |
+| `projects/api/` (entire service) | Create |
 | `apps/composeapp/` (entire KMP project) | Create |
 | `packages/database/migrations/0007_apns_subscriptions.sql` | Create |
 | `packages/database/schema.ts` | Modify |

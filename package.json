@@ -5,7 +5,8 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "projects/*"
   ],
   "scripts": {
     "dev": "concurrently --names \"web,guernsey,weather,position,adsb,fr24\" --prefix-colors \"cyan,yellow,green,magenta,blue,red\" \"npm run dev:web\" \"npm run dev:guernsey\" \"npm run dev:weather\" \"npm run dev:position\" \"npm run dev:adsb\" \"npm run dev:fr24\"",
