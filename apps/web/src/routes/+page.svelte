@@ -144,10 +144,10 @@
   });
   const completedCount = $derived(activeFlights.filter((f: (typeof data.flights)[0]) => isCompleted(f)).length);
 
-  // Tab badge counts — must match the same filters applied in visibleFlights
-  // (excluding completed and, for departures, airborne-from-GCI flights).
+  // Tab badge counts — exclude completed flights only.
+  // Airborne departures are hidden from the list but still count as remaining.
   const departuresRemainingCount = $derived(
-    departures.filter((f: (typeof data.flights)[0]) => !isCompleted(f) && !isAirborneFromGCI(f)).length
+    departures.filter((f: (typeof data.flights)[0]) => !isCompleted(f)).length
   );
   const arrivalsRemainingCount = $derived(
     arrivals.filter((f: (typeof data.flights)[0]) => !isCompleted(f)).length

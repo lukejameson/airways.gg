@@ -485,8 +485,8 @@ async function upsertFR24Flight(
 
   const airlineCode = extractAirlineCode(flightNumber);
 
-  // Only keep Aurigny (GR) flights — includes Isles of Scilly Skybus which operates under Aurigny
-  if (airlineCode !== 'GR') {
+  // Keep Aurigny (GR) and British Airways (BA) flights only
+  if (airlineCode !== 'GR' && airlineCode !== 'BA') {
     return null;
   }
   let status = normalizeStatus(flight.status);
