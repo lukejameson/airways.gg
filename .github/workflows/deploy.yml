@@ -167,10 +167,10 @@ jobs:
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           format: markdown
           message: |
-            ❌ *Build Failed* — `${{ github.repository }}`
+            ❌ *Build Failed* — Airways.gg
             Branch: `${{ github.ref_name }}`
+            Message: `${{ github.event.commits[0].message }}`
             Commit: `${{ github.sha }}`
-            By: ${{ github.actor }}
 
   # ────────────────────────────────────────────────────────────────────────────
   # Deploy to DEV  (push to main)
@@ -251,10 +251,10 @@ jobs:
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           format: markdown
           message: |
-            ✅ *Dev* Airways.gg`
+            ✅ *Dev* — Airways.gg
             Services: `${{ steps.services.outputs.list }}`
-            Message: ${{ github.event.commits[0].message }}`
-            Commit: `${{ github.sha }}
+            Message: `${{ github.event.commits[0].message }}`
+            Commit: `${{ github.sha }}`
 
       - name: Notify Telegram (Failure)
         if: failure()
@@ -264,10 +264,10 @@ jobs:
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           format: markdown
           message: |
-            ❌ *Dev Deploy Failed* — `${{ github.repository }}`
+            ❌ *Dev Failed* — Airways.gg
             Services: `${{ steps.services.outputs.list }}`
-            Message: ${{ github.event.commits[0].message }}`
-            Commit: `${{ github.sha }}
+            Message: `${{ github.event.commits[0].message }}`
+            Commit: `${{ github.sha }}`
 
   # ────────────────────────────────────────────────────────────────────────────
   # Deploy to TEST  (push to test)
@@ -348,10 +348,10 @@ jobs:
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           format: markdown
           message: |
-            ✅ *Test* Airways.gg`
+            ✅ *Test* — Airways.gg
             Services: `${{ steps.services.outputs.list }}`
-            Message: ${{ github.event.commits[0].message }}`
-            Commit: `${{ github.sha }}
+            Message: `${{ github.event.commits[0].message }}`
+            Commit: `${{ github.sha }}`
 
       - name: Notify Telegram (Failure)
         if: failure()
@@ -361,10 +361,10 @@ jobs:
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           format: markdown
           message: |
-            ❌ *Test Deploy Failed* — `${{ github.repository }}`
+            ❌ *Test Failed* — Airways.gg
             Services: `${{ steps.services.outputs.list }}`
-            Message: ${{ github.event.commits[0].message }}`
-            Commit: `${{ github.sha }}
+            Message: `${{ github.event.commits[0].message }}`
+            Commit: `${{ github.sha }}`
 
   # ────────────────────────────────────────────────────────────────────────────
   # Deploy to PRODUCTION  (push to production)
@@ -445,10 +445,10 @@ jobs:
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           format: markdown
           message: |
-            🚀 *Production* Airways.gg`
+            🚀 *Production* — Airways.gg
             Services: `${{ steps.services.outputs.list }}`
-            Message: ${{ github.event.commits[0].message }}`
-            Commit: `${{ github.sha }}
+            Message: `${{ github.event.commits[0].message }}`
+            Commit: `${{ github.sha }}`
 
       - name: Notify Telegram (Failure)
         if: failure()
@@ -458,7 +458,7 @@ jobs:
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           format: markdown
           message: |
-            🔥 *Production Deploy FAILED* — `${{ github.repository }}`
+            🔥 *Production Failed* — Airways.gg
             Services: `${{ steps.services.outputs.list }}`
-            Message: ${{ github.event.commits[0].message }}`
-            Commit: `${{ github.sha }}
+            Message: `${{ github.event.commits[0].message }}`
+            Commit: `${{ github.sha }}`
