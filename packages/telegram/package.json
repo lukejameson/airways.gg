@@ -1,0 +1,15 @@
+{
+  "name": "@airways/telegram",
+  "version": "1.0.0",
+  "description": "Telegram error alerting utility for airways.gg services",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}

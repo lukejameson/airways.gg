@@ -1,6 +1,7 @@
 import { db, flights, flightTimes, scraperLogs } from '@airways/database';
 import { eq, and, not, inArray, asc, count, desc, max, sql } from 'drizzle-orm';
 import { scrapeDayFlights } from './scraper';
+import { sendAlert } from '@airways/telegram';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -516,6 +517,7 @@ async function runLiveScrape(includeTomorrow: boolean): Promise<void> {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     console.error('[Guernsey Live] Scrape error:', errorMessage);
+    sendAlert('guernsey-scraper', 'warning', 'Live scrape failed', err).catch(() => {});
 
     await db
       .update(scraperLogs)
@@ -665,6 +667,7 @@ async function scheduleNextScrape(): Promise<void> {
         await scheduleNextScrape();
       } catch (err) {
         console.error('[Guernsey Live] Error in wake timeout:', err);
+        sendAlert('guernsey-scraper', 'warning', 'Wake timeout callback error', err).catch(() => {});
         timers.wakeTimeout = null;
         scheduledWakeAtMs = null;
         try { await scheduleNextScrape(); } catch {
@@ -776,7 +779,7 @@ export async function runLiveMode(): Promise<void> {
   process.on('uncaughtException', (err) => {
     console.error('[Guernsey Live] Uncaught exception:', err);
     clearAllTimers();
-    process.exit(1);
+    sendAlert('guernsey-scraper', 'critical', 'Uncaught exception', err).finally(() => process.exit(1));
   });
 
   // Ensure at least 10 days of prior history exist before entering the live loop

@@ -38,6 +38,8 @@ services:
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - VAPID_SUBJECT=${VAPID_SUBJECT}
       - NOTIFY_POLL_INTERVAL_MS=${NOTIFY_POLL_INTERVAL_MS:-15000}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web
@@ -61,6 +63,8 @@ services:
       - PROXY_USERNAME=${PROXY_USERNAME}
       - PROXY_PASSWORD=${PROXY_PASSWORD}
       - PROXY_HOSTS=${PROXY_HOSTS}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web
@@ -73,6 +77,8 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - ADSB_INTERVAL_MS=${ADSB_INTERVAL_MS:-60000}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web
@@ -94,6 +100,8 @@ services:
       - SCRAPER_INTERVAL_TOMORROW_MINS=${SCRAPER_INTERVAL_TOMORROW_MINS:-360}
       - GUERNSEY_AIRPORT_URL=${GUERNSEY_AIRPORT_URL:-https://www.airport.gg}
       - GUERNSEY_API_KEY=${GUERNSEY_API_KEY:?GUERNSEY_API_KEY is required}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web
@@ -124,6 +132,8 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - FR24_API_TOKEN=${FR24_API_TOKEN}
       - POSITION_INTERVAL_MS=${POSITION_INTERVAL_MS:-300000}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web
@@ -136,6 +146,8 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - OPENMETEO_API_URL=${OPENMETEO_API_URL:-https://api.open-meteo.com/v1/forecast}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web

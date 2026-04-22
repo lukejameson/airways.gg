@@ -33,6 +33,7 @@ if (new Date().getTimezoneOffset() !== 0) {
 
 import { scrapeOnce, guernseyDateStr } from './scraper';
 import { db, scraperLogs, flights, flightTimes } from '@airways/database';
+import { sendAlert } from '@airways/telegram';
 import { eq, and, not, inArray, desc, count, max, asc, isNull, sql } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
@@ -110,6 +111,7 @@ function recordFailure(): void {
   if (circuitBreaker.failures >= CIRCUIT_BREAKER_THRESHOLD) {
     circuitBreaker.isOpen = true;
     console.error(`[FR24] Circuit breaker OPENED after ${circuitBreaker.failures} failures`);
+    sendAlert('fr24-scraper', 'critical', `Circuit breaker opened after ${circuitBreaker.failures} consecutive failures — scraper is paused`).catch(() => {});
   }
 }
 
@@ -638,11 +640,13 @@ async function scheduleNextScrape(): Promise<void> {
         await scheduleNextScrape();
       } catch (err) {
         console.error('[FR24] Error in wake timeout callback:', err);
+        sendAlert('fr24-scraper', 'warning', 'Wake timeout callback error', err).catch(() => {});
         timers.wakeTimeout = null;
         try {
           await scheduleNextScrape();
         } catch (err2) {
           console.error('[FR24] Fatal: Failed to reschedule after wake error:', err2);
+          sendAlert('fr24-scraper', 'critical', 'Failed to reschedule after wake error — scheduler may be stuck', err2).catch(() => {});
           timers.wakeTimeout = setTimeout(() => {
             timers.wakeTimeout = null;
             scheduleNextScrape().catch(e => console.error('[FR24] Fatal retry failed:', e));
@@ -680,6 +684,7 @@ async function scheduleNextScrape(): Promise<void> {
       recordSuccess();
     } catch (err) {
       console.error('[FR24] Error in scheduled scrape:', err);
+      sendAlert('fr24-scraper', 'warning', 'Scheduled scrape error', err).catch(() => {});
       recordFailure();
     }
     await scheduleNextScrape();
@@ -744,11 +749,11 @@ process.on('SIGINT', () => {
 process.on('uncaughtException', (err) => {
   console.error('[FR24] Uncaught exception:', err);
   clearAllTimers();
-  process.exit(1);
+  sendAlert('fr24-scraper', 'critical', 'Uncaught exception', err).finally(() => process.exit(1));
 });
 
 main().catch(err => {
   console.error('[FR24] Fatal startup error:', err);
   clearAllTimers();
-  process.exit(1);
+  sendAlert('fr24-scraper', 'critical', 'Fatal startup error', err).finally(() => process.exit(1));
 });

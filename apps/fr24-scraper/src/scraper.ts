@@ -3,6 +3,7 @@ import type { Browser, Page } from 'rebrowser-puppeteer-core';
 import { execSync } from 'child_process';
 import { db, flights as flightsTable, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, isTerminalStatus, routeFlightMinutes, ROUTE_FLIGHT_MINUTES } from '@airways/database';
 import { eq, and, max, desc, count } from 'drizzle-orm';
+import { sendAlert } from '@airways/telegram';
 
 // ---------------------------------------------------------------------------
 // Timezone utility
@@ -995,6 +996,7 @@ async function runBrowserSession(
         await db.update(scraperLogs)
           .set({ status: 'failure', errorMessage: message, completedAt: new Date(), retryCount: maxRetries })
           .where(eq(scraperLogs.id, logId));
+        sendAlert('fr24-scraper', 'critical', `All ${maxRetries} retries exhausted`, message).catch(() => {});
         return { success: false, count: 0, error: message };
       }
     }

@@ -24,6 +24,7 @@ if (envPath) {
 
 import { runBackfill, linkOrphanedStatusHistory, deduplicateFlights, fixActualTimes } from './scraper';
 import { runLiveMode } from './live';
+import { sendAlert } from '@airways/telegram';
 
 async function main() {
   const mode = process.env.SCRAPER_MODE || 'backfill';
@@ -73,10 +74,10 @@ async function main() {
 
 process.on('uncaughtException', (err) => {
   console.error('[Guernsey] Uncaught exception:', err);
-  process.exit(1);
+  sendAlert('guernsey-scraper', 'critical', 'Uncaught exception', err).finally(() => process.exit(1));
 });
 
 main().catch(err => {
   console.error('[Guernsey] Fatal error:', err);
-  process.exit(1);
+  sendAlert('guernsey-scraper', 'critical', 'Fatal error', err).finally(() => process.exit(1));
 });

@@ -23,6 +23,7 @@ if (envPath) {
 }
 
 import { pollPositions } from './poller';
+import { sendAlert } from '@airways/telegram';
 
 async function main() {
   const intervalSecs = parseInt(process.env.POSITION_INTERVAL_LIVE_SECS ?? '300', 10);
@@ -35,6 +36,7 @@ async function main() {
   if (!process.env.FR24_API_TOKEN) {
     console.error('[Position] FR24_API_TOKEN is not set — position service will not run');
     console.error('[Position] Add FR24_API_TOKEN=<your_token> to .env');
+    await sendAlert('position-service', 'critical', 'FR24_API_TOKEN is not set — service will not run');
     process.exit(1);
   }
 
@@ -45,6 +47,7 @@ async function main() {
       setTimeout(runPoll, nextPollIn);
     } catch (err) {
       console.error('[Position] Poll failed:', err);
+      sendAlert('position-service', 'warning', 'Poll failed', err).catch(() => {});
       // Retry in 1 minute on error
       setTimeout(runPoll, 60 * 1000);
     }
@@ -56,5 +59,5 @@ async function main() {
 
 main().catch(err => {
   console.error('[Position] Fatal error:', err);
-  process.exit(1);
+  sendAlert('position-service', 'critical', 'Fatal startup error', err).finally(() => process.exit(1));
 });

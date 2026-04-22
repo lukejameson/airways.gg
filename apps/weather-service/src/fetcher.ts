@@ -2,6 +2,7 @@ import { db, weatherData, flights, airportDaylight, airports } from '@airways/da
 import { sql, inArray } from 'drizzle-orm';
 import { getIcaoMapping } from './airports';
 import SunCalc from 'suncalc';
+import { sendAlert } from '@airways/telegram';
 
 const AVIATION_WEATHER_BASE = 'https://aviationweather.gov/api/data';
 const BATCH_SIZE = 50;
@@ -527,6 +528,7 @@ export async function fetchAllWeather(): Promise<void> {
     console.log(`[Weather] Done. Total: ${metarCount} METAR + ${tafCount} TAF records`);
   } catch (err) {
     console.error('[Weather] Fatal error:', err);
+    sendAlert('weather-service', 'critical', 'fetchAllWeather fatal error', err).catch(() => {});
     throw err;
   }
 }

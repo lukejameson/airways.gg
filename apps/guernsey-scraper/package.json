@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@airways/database": "*",
+    "@airways/telegram": "*",
     "cheerio": "^1.0.0",
     "dotenv": "^16.4.0",
     "drizzle-orm": "^0.45.1"
