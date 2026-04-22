@@ -253,7 +253,7 @@ jobs:
           message: |
             ✅ *Dev* Airways.gg`
             Services: `${{ steps.services.outputs.list }}`
-            Message: ${{ github.event.commits[0].message }`
+            Message: ${{ github.event.commits[0].message }}`
             Commit: `${{ github.sha }}
 
       - name: Notify Telegram (Failure)
@@ -266,7 +266,7 @@ jobs:
           message: |
             ❌ *Dev Deploy Failed* — `${{ github.repository }}`
             Services: `${{ steps.services.outputs.list }}`
-            Message: ${{ github.event.commits[0].message }`
+            Message: ${{ github.event.commits[0].message }}`
             Commit: `${{ github.sha }}
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -350,7 +350,7 @@ jobs:
           message: |
             ✅ *Test* Airways.gg`
             Services: `${{ steps.services.outputs.list }}`
-            Message: ${{ github.event.commits[0].message }`
+            Message: ${{ github.event.commits[0].message }}`
             Commit: `${{ github.sha }}
 
       - name: Notify Telegram (Failure)
@@ -363,7 +363,7 @@ jobs:
           message: |
             ❌ *Test Deploy Failed* — `${{ github.repository }}`
             Services: `${{ steps.services.outputs.list }}`
-            Message: ${{ github.event.commits[0].message }`
+            Message: ${{ github.event.commits[0].message }}`
             Commit: `${{ github.sha }}
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -447,7 +447,7 @@ jobs:
           message: |
             🚀 *Production* Airways.gg`
             Services: `${{ steps.services.outputs.list }}`
-            Message: ${{ github.event.commits[0].message }`
+            Message: ${{ github.event.commits[0].message }}`
             Commit: `${{ github.sha }}
 
       - name: Notify Telegram (Failure)
@@ -460,5 +460,5 @@ jobs:
           message: |
             🔥 *Production Deploy FAILED* — `${{ github.repository }}`
             Services: `${{ steps.services.outputs.list }}`
-            Message: ${{ github.event.commits[0].message }`
+            Message: ${{ github.event.commits[0].message }}`
             Commit: `${{ github.sha }}
