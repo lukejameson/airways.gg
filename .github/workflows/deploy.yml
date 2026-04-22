@@ -11,9 +11,6 @@ on:
       - main
       - test
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Change detection
-# ──────────────────────────────────────────────────────────────────────────────
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/lukejameson/airways.gg
@@ -65,10 +62,6 @@ jobs:
             ml_service:
               - 'apps/ml-service/**'
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # Build images on GitHub Actions and push to ghcr.io
-  # Runs on push only (not PRs) — images are tagged with the branch name.
-  # ────────────────────────────────────────────────────────────────────────────
   build-and-push:
     needs: [detect-changes]
     if: github.event_name == 'push'
@@ -166,6 +159,19 @@ jobs:
           cache-from: type=gha,scope=ml-service
           cache-to: type=gha,mode=max,scope=ml-service
 
+      - name: Notify Telegram (Build Failure)
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            ❌ *Build Failed* — `${{ github.repository }}`
+            Branch: `${{ github.ref_name }}`
+            Commit: `${{ github.sha }}`
+            By: ${{ github.actor }}
+
   # ────────────────────────────────────────────────────────────────────────────
   # Deploy to DEV  (push to main)
   # ────────────────────────────────────────────────────────────────────────────
@@ -175,6 +181,19 @@ jobs:
     runs-on: ubuntu-latest
     environment: dev
     steps:
+      - name: Compute changed services
+        id: services
+        run: |
+          SERVICES=""
+          [ "${{ needs.detect-changes.outputs.web }}"              = "true" ] && SERVICES="$SERVICES app"
+          [ "${{ needs.detect-changes.outputs.guernsey_scraper }}" = "true" ] && SERVICES="$SERVICES guernsey-scraper"
+          [ "${{ needs.detect-changes.outputs.fr24_scraper }}"     = "true" ] && SERVICES="$SERVICES fr24-scraper"
+          [ "${{ needs.detect-changes.outputs.adsb_service }}"     = "true" ] && SERVICES="$SERVICES adsb-service"
+          [ "${{ needs.detect-changes.outputs.position_service }}" = "true" ] && SERVICES="$SERVICES position-service"
+          [ "${{ needs.detect-changes.outputs.weather_service }}"  = "true" ] && SERVICES="$SERVICES weather-service"
+          [ "${{ needs.detect-changes.outputs.ml_service }}"       = "true" ] && SERVICES="$SERVICES ml-service"
+          echo "list=$(echo $SERVICES | xargs || echo 'none')" >> $GITHUB_OUTPUT
+
       - name: Deploy changed services to dev
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -191,7 +210,6 @@ jobs:
             git checkout main
             git pull origin main
 
-            # Pull pre-built images from ghcr.io
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
             COMPOSE="docker compose -f docker-compose.dev.yml --env-file .env.dev"
@@ -225,6 +243,32 @@ jobs:
           CHANGED_WEATHER_SERVICE:  ${{ needs.detect-changes.outputs.weather_service }}
           CHANGED_ML_SERVICE:       ${{ needs.detect-changes.outputs.ml_service }}
 
+      - name: Notify Telegram (Success)
+        if: success()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            ✅ *Dev* Airways.gg`
+            Services: `${{ steps.services.outputs.list }}`
+            Message: ${{ github.event.commits[0].message }`
+            Commit: `${{ github.sha }}
+
+      - name: Notify Telegram (Failure)
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            ❌ *Dev Deploy Failed* — `${{ github.repository }}`
+            Services: `${{ steps.services.outputs.list }}`
+            Message: ${{ github.event.commits[0].message }`
+            Commit: `${{ github.sha }}
+
   # ────────────────────────────────────────────────────────────────────────────
   # Deploy to TEST  (push to test)
   # ────────────────────────────────────────────────────────────────────────────
@@ -234,6 +278,19 @@ jobs:
     runs-on: ubuntu-latest
     environment: test
     steps:
+      - name: Compute changed services
+        id: services
+        run: |
+          SERVICES=""
+          [ "${{ needs.detect-changes.outputs.web }}"              = "true" ] && SERVICES="$SERVICES app"
+          [ "${{ needs.detect-changes.outputs.guernsey_scraper }}" = "true" ] && SERVICES="$SERVICES guernsey-scraper"
+          [ "${{ needs.detect-changes.outputs.fr24_scraper }}"     = "true" ] && SERVICES="$SERVICES fr24-scraper"
+          [ "${{ needs.detect-changes.outputs.adsb_service }}"     = "true" ] && SERVICES="$SERVICES adsb-service"
+          [ "${{ needs.detect-changes.outputs.position_service }}" = "true" ] && SERVICES="$SERVICES position-service"
+          [ "${{ needs.detect-changes.outputs.weather_service }}"  = "true" ] && SERVICES="$SERVICES weather-service"
+          [ "${{ needs.detect-changes.outputs.ml_service }}"       = "true" ] && SERVICES="$SERVICES ml-service"
+          echo "list=$(echo $SERVICES | xargs || echo 'none')" >> $GITHUB_OUTPUT
+
       - name: Deploy changed services to test
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -283,6 +340,32 @@ jobs:
           CHANGED_WEATHER_SERVICE:  ${{ needs.detect-changes.outputs.weather_service }}
           CHANGED_ML_SERVICE:       ${{ needs.detect-changes.outputs.ml_service }}
 
+      - name: Notify Telegram (Success)
+        if: success()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            ✅ *Test* Airways.gg`
+            Services: `${{ steps.services.outputs.list }}`
+            Message: ${{ github.event.commits[0].message }`
+            Commit: `${{ github.sha }}
+
+      - name: Notify Telegram (Failure)
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            ❌ *Test Deploy Failed* — `${{ github.repository }}`
+            Services: `${{ steps.services.outputs.list }}`
+            Message: ${{ github.event.commits[0].message }`
+            Commit: `${{ github.sha }}
+
   # ────────────────────────────────────────────────────────────────────────────
   # Deploy to PRODUCTION  (push to production)
   # ────────────────────────────────────────────────────────────────────────────
@@ -292,6 +375,19 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: Compute changed services
+        id: services
+        run: |
+          SERVICES=""
+          [ "${{ needs.detect-changes.outputs.web }}"              = "true" ] && SERVICES="$SERVICES app"
+          [ "${{ needs.detect-changes.outputs.guernsey_scraper }}" = "true" ] && SERVICES="$SERVICES guernsey-scraper"
+          [ "${{ needs.detect-changes.outputs.fr24_scraper }}"     = "true" ] && SERVICES="$SERVICES fr24-scraper"
+          [ "${{ needs.detect-changes.outputs.adsb_service }}"     = "true" ] && SERVICES="$SERVICES adsb-service"
+          [ "${{ needs.detect-changes.outputs.position_service }}" = "true" ] && SERVICES="$SERVICES position-service"
+          [ "${{ needs.detect-changes.outputs.weather_service }}"  = "true" ] && SERVICES="$SERVICES weather-service"
+          [ "${{ needs.detect-changes.outputs.ml_service }}"       = "true" ] && SERVICES="$SERVICES ml-service"
+          echo "list=$(echo $SERVICES | xargs || echo 'none')" >> $GITHUB_OUTPUT
+
       - name: Deploy changed services to production
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -340,3 +436,29 @@ jobs:
           CHANGED_POSITION_SERVICE: ${{ needs.detect-changes.outputs.position_service }}
           CHANGED_WEATHER_SERVICE:  ${{ needs.detect-changes.outputs.weather_service }}
           CHANGED_ML_SERVICE:       ${{ needs.detect-changes.outputs.ml_service }}
+
+      - name: Notify Telegram (Success)
+        if: success()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            🚀 *Production* Airways.gg`
+            Services: `${{ steps.services.outputs.list }}`
+            Message: ${{ github.event.commits[0].message }`
+            Commit: `${{ github.sha }}
+
+      - name: Notify Telegram (Failure)
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            🔥 *Production Deploy FAILED* — `${{ github.repository }}`
+            Services: `${{ steps.services.outputs.list }}`
+            Message: ${{ github.event.commits[0].message }`
+            Commit: `${{ github.sha }}

@@ -303,14 +303,22 @@ function parseTimeFromMessage(message: string, referenceDate: Date): Date | null
 function deriveStatus(updates: StatusUpdate[], scheduledTime: Date): string | null {
   if (updates.length === 0) return null;
 
-  // Scan all updates for terminal/important statuses (latest wins)
+  // Scan all updates for terminal/important statuses (latest wins).
+  // Ignore Airborne/Landed messages posted more than 30 minutes before the
+  // scheduled time — they are stale data from a previous rotation on the board.
+  const preScheduleCutoff = scheduledTime.getTime() - 30 * 60_000;
   for (const u of [...updates].reverse()) {
     const msg = u.statusMessage.toLowerCase();
-    if (msg.includes('landed') || msg.includes('voyagereported')) return 'Landed';
-    if (msg.includes('airborne')) return 'Airborne';
-    // Preserve diversion details — the raw message carries the destination
-    if (msg.includes('diverted')) return u.statusMessage;
-    if (msg.includes('diverting')) return u.statusMessage;
+    const isPreSchedule = u.statusTimestamp.getTime() < preScheduleCutoff;
+    if (msg.includes('landed') || msg.includes('voyagereported')) {
+      if (!isPreSchedule) return 'Landed';
+    } else if (msg.includes('airborne')) {
+      if (!isPreSchedule) return 'Airborne';
+    } else if (msg.includes('diverted')) {
+      return u.statusMessage;
+    } else if (msg.includes('diverting')) {
+      return u.statusMessage;
+    }
   }
 
   // Now check the latest update for non-terminal statuses
@@ -369,7 +377,11 @@ function extractActualTime(updates: StatusUpdate[], keyword: string, referenceDa
       const parsed = parseHHMM(u.statusMessage);
       if (parsed) {
         const refDateStr = referenceDate.toISOString().split('T')[0];
-        return guernseyLocalToUtc(refDateStr, parsed.hh, parsed.mm);
+        const extracted = guernseyLocalToUtc(refDateStr, parsed.hh, parsed.mm);
+        // Reject times more than 30 minutes before scheduled — stale data from a
+        // previous rotation that the airport board hasn't cleared yet.
+        if (extracted.getTime() < referenceDate.getTime() - 30 * 60_000) continue;
+        return extracted;
       }
     }
   }
