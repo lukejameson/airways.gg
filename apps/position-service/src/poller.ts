@@ -505,7 +505,7 @@ export async function pollPositions(): Promise<number> {
       if (!flight.aircraftRegistration) continue;
       const reg = flight.aircraftRegistration;
       const ownDb = ownDbMap.get(reg);
-      if (ownDb) allAirportCodes.add(ownDb.airportCode);
+      if (ownDb) allAirportCodes.add(locationToIata(ownDb.airportCode) || ownDb.airportCode);
     }
     const coordsMap = await getAirportCoords([...allAirportCodes]);
 
@@ -518,12 +518,12 @@ export async function pollPositions(): Promise<number> {
       const ownDb = ownDbMap.get(reg);
       if (!ownDb) continue;
 
-      const airportCode = ownDb.airportCode;
+      const airportCode = locationToIata(ownDb.airportCode) || ownDb.airportCode;
       const flightNumber = ownDb.flightNumber;
       const arrivedAt = ownDb.arrivedAt;
       console.log(`[Position] Own-DB: ${reg} → ${airportCode} (last flight ${flightNumber})`);
 
-      const coords = coordsMap.get(airportCode) ?? coordsMap.get(locationToIata(airportCode));
+      const coords = coordsMap.get(airportCode);
       if (!coords) {
         console.warn(`[Position] No coordinates for airport ${airportCode} — skipping inferred position for ${flight.flightNumber}`);
         sendAlert('position-service', 'warning', `No coordinates for airport ${airportCode} — inferred position skipped for ${flight.flightNumber}`).catch(() => {});
