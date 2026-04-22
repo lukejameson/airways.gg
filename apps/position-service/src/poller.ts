@@ -1,5 +1,6 @@
-import { db, flights, aircraftPositions, airports } from '@airways/database';
+import { db, flights, aircraftPositions, airports, locationToIata } from '@airways/database';
 import { and, gte, lte, or, eq, desc, isNotNull, not, sql } from 'drizzle-orm';
+import { sendAlert } from '@airways/telegram';
 
 const FR24_BASE = 'https://fr24api.flightradar24.com';
 
@@ -522,9 +523,10 @@ export async function pollPositions(): Promise<number> {
       const arrivedAt = ownDb.arrivedAt;
       console.log(`[Position] Own-DB: ${reg} → ${airportCode} (last flight ${flightNumber})`);
 
-      const coords = coordsMap.get(airportCode);
+      const coords = coordsMap.get(airportCode) ?? coordsMap.get(locationToIata(airportCode));
       if (!coords) {
         console.warn(`[Position] No coordinates for airport ${airportCode} — skipping inferred position for ${flight.flightNumber}`);
+        sendAlert('position-service', 'warning', `No coordinates for airport ${airportCode} — inferred position skipped for ${flight.flightNumber}`).catch(() => {});
         continue;
       }
 
