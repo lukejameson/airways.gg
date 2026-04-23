@@ -111,7 +111,7 @@
   const seoTitle = $derived(`${flight.flightNumber}: ${airportName(flight.departureAirport)} → ${airportName(flight.arrivalAirport)} | airways.gg`);
   const seoDate = $derived(
     flight.scheduledDeparture
-      ? new Date(flight.scheduledDeparture).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
+      ? new Date(flight.scheduledDeparture).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/London' })
       : ''
   );
   const seoDescription = $derived(
@@ -338,7 +338,7 @@
 
   function formatTime(date: string | Date | null | undefined): string {
     if (!date) return '--:--';
-    return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+    return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
   }
   function formatDateTime(date: string | Date | null | undefined): string {
     if (!date) return '—';
@@ -348,7 +348,7 @@
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      timeZone: 'UTC',
+      timeZone: 'Europe/London',
     });
   }
   function shortDate(date: string | Date | null | undefined): string {
@@ -357,7 +357,7 @@
       weekday: 'short',
       day: 'numeric',
       month: 'short',
-      timeZone: 'UTC',
+      timeZone: 'Europe/London',
     });
   }
   const getStatusColor = (status: string | null | undefined, canceled?: boolean | null) =>
