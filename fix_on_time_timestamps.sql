@@ -1,4 +1,4 @@
-docker exec postgres-prod psql -U lukejameson_gg_prod -d lukejameson_gg_prod -c "
+docker exec postgres-prod psql -h airwaysgg -U lukejameson_gg_prod -d airwaysgg -c "
 UPDATE flight_status_history
 SET status_timestamp = status_timestamp - INTERVAL '1 hour'
 WHERE status_message ILIKE '%on time%'
