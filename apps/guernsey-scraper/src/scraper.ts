@@ -122,20 +122,11 @@ function mapApiEntriesToScrapedFlights(
       scheduledTime,
       flightDate: entry.flight_date,
       type,
-      statusUpdates,
+      statusUpdates: statusUpdates.map(u => correctOnTimeTimestamp(u, scheduledTime)),
     });
   }
   return results;
 }
-
-// Known typical flight times in minutes for routes from/to GCI.
-// Used to estimate scheduledDeparture/scheduledArrival when only one end is known.
-
-
-// Map Guernsey Airport location display names → IATA codes
-
-// Derive airline code from the primary flight code (first two non-numeric chars)
-// Skybus (SI) and Blue Islands AT6 series (AT) are codeshares under Aurigny (GR)
 function airlineCode(flightCode: string): string {
   const match = flightCode.match(/^([A-Z]{2})/);
   const code = match ? match[1] : 'XX';
@@ -249,15 +240,13 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
         }
       });
 
-      results.push({ location, codes, scheduledTime, flightDate, type, statusUpdates });
+      results.push({ location, codes, scheduledTime, flightDate, type, statusUpdates: statusUpdates.map(u => correctOnTimeTimestamp(u, scheduledTime)) });
     } catch (err) {
       console.error('[Guernsey] Error parsing row:', err);
     }
   });
-
   return results;
 }
-
 /**
  * Extract hours and minutes from a time string.
  * Handles both "HH:MM" (e.g. "12:10") and "HHMM" (e.g. "1210") formats,
@@ -605,6 +594,14 @@ function statusSingletonPrefix(msg: string): string | null {
 
 function normaliseStatusMessage(msg: string): string {
   return msg.replace(/\bNext Info\s+(\d{2})(\d{2})\b/gi, (_, h, m) => `Next Info ${h}:${m}`);
+}
+function correctOnTimeTimestamp(update: StatusUpdate, scheduledTime: Date): StatusUpdate {
+  if (!update.statusMessage.toLowerCase().includes('on time')) return update;
+  const diffMs = update.statusTimestamp.getTime() - scheduledTime.getTime();
+  if (diffMs >= 60 * 60 * 1000) {
+    return { ...update, statusTimestamp: new Date(update.statusTimestamp.getTime() - 60 * 60 * 1000) };
+  }
+  return update;
 }
 async function saveStatusUpdates(updates: StatusUpdate[], flightId: number | null): Promise<number> {
   let saved = 0;
