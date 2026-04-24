@@ -852,7 +852,6 @@ export async function scrapeDayFlights(date: Date): Promise<{ flights: number; u
         totalUpdates += await saveStatusUpdates(flight.statusUpdates, flightId);
       }
     }
-    return { flights: totalFlights, updates: totalUpdates };
   }
   const html = await fetchDayHtml(date);
   for (const type of ['arrivals', 'departures'] as const) {

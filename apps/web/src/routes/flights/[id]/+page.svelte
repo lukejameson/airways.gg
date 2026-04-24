@@ -338,7 +338,7 @@
 
   function formatTime(date: string | Date | null | undefined): string {
     if (!date) return '--:--';
-    return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
+    return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   }
   function formatDateTime(date: string | Date | null | undefined): string {
     if (!date) return '—';
@@ -347,8 +347,7 @@
       month: 'short',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Europe/London',
+      minute: '2-digit'
     });
   }
   function shortDate(date: string | Date | null | undefined): string {
@@ -357,7 +356,6 @@
       weekday: 'short',
       day: 'numeric',
       month: 'short',
-      timeZone: 'Europe/London',
     });
   }
   const getStatusColor = (status: string | null | undefined, canceled?: boolean | null) =>
