@@ -531,7 +531,7 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
       }
     } else {
       // No existing record — insert a new one with guernsey unique_id
-      const uniqueId = `${primaryCode}_${scrapedFlight.flightDate}`;
+      const uniqueId = `${primaryCode}_${scrapedFlight.flightDate}_${departureAirport}_${arrivalAirport}`;
       const result = await db
         .insert(flights)
         .values({
