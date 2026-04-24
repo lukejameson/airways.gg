@@ -1,4 +1,4 @@
-import { db, weatherData, flights, airportDaylight, airports } from '@airways/database';
+import { db, weatherData, flights, airportDaylight, airports, guernseyTodayStr, guernseyTomorrowStr } from '@airways/database';
 import { sql, inArray } from 'drizzle-orm';
 import { getIcaoMapping } from './airports';
 import SunCalc from 'suncalc';
@@ -321,14 +321,9 @@ async function fetchAllTafs(airports: { code: string; icao: string }[]): Promise
 }
 
 async function getAirportsFromFlights(): Promise<{ code: string; icao: string }[]> {
-  // Use flightDate (YYYY-MM-DD in Guernsey local time) rather than scheduledDeparture
-  // timestamp ranges. Querying by timestamp misses flights whose scheduledArrival
-  // crosses midnight UTC (e.g. a late departure arriving after 00:00 UTC the next day).
   const now = new Date();
-  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(now);
-  const tomorrowDate = new Date(now);
-  tomorrowDate.setUTCDate(tomorrowDate.getUTCDate() + 1);
-  const tomorrowStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(tomorrowDate);
+  const todayStr = guernseyTodayStr(now);
+  const tomorrowStr = guernseyTomorrowStr(now);
 
   // Query unique airports from today's AND tomorrow's flights by Guernsey date
   const todaysFlights = await db

@@ -12,6 +12,7 @@
     "@airways/database": "*",
     "@airways/telegram": "*",
     "dotenv": "^16.0.0",
+    "luxon": "^3.4.0",
     "suncalc": "^1.9.0"
   },
   "devDependencies": {

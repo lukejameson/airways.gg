@@ -1,14 +1,6 @@
 import type { PageServerLoad } from './$types';
-import { db, flights, weatherData, scraperLogs, airportDaylight, flightTimes } from '$lib/server/db';
+import { db, flights, weatherData, scraperLogs, airportDaylight, flightTimes, guernseyTodayStr, guernseyTomorrowStr } from '$lib/server/db';
 import { and, gte, lte, inArray, or, eq, desc, asc, count, not, sql } from 'drizzle-orm';
-
-// Guernsey local timezone
-const GY_TZ = 'Europe/London';
-
-/** Convert Date to YYYY-MM-DD in Guernsey local time */
-function toGuernseyDateStr(d: Date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: GY_TZ }).format(d);
-}
 
 /** Add N days to a date string (YYYY-MM-DD) */
 function addDaysToDateStr(dateStr: string, days: number): string {
@@ -89,8 +81,8 @@ type RecentFlight = { id: number; flightNumber: string; departureAirport: string
 
 export const load: PageServerLoad = async ({ url, cookies }) => {
   const now = new Date();
-  const todayStr = toGuernseyDateStr(now);
-  const tomorrowStr = addDaysToDateStr(todayStr, 1);
+  const todayStr = guernseyTodayStr(now);
+  const tomorrowStr = guernseyTomorrowStr(now);
 
   // Parse ?date= parameter
   const dateParam = url.searchParams.get('date');

@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { db, flights, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, routeFlightMinutes, locationToIata } from '@airways/database';
+import { db, flights, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, routeFlightMinutes, locationToIata, GY_TZ, localToUtc } from '@airways/database';
 import { eq, and, isNull, sql, count, or, isNotNull } from 'drizzle-orm';
 
 interface StatusUpdate {
@@ -18,33 +18,11 @@ interface ScrapedFlight {
   statusUpdates: StatusUpdate[];
 }
 
-const GY_TZ = 'Europe/London';
 
-function getLondonOffsetMs(d: Date): number {
-  const londonStr = new Intl.DateTimeFormat('en-GB', {
-    timeZone: GY_TZ,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false,
-  }).format(d);
-  const [datePart, timePart] = londonStr.split(', ');
-  const [dd, mo, yyyy] = datePart.split('/');
-  const londonAsUtc = new Date(`${yyyy}-${mo}-${dd}T${timePart}Z`);
-  return londonAsUtc.getTime() - d.getTime();
-}
 
-function guernseyLocalToUtc(dateStr: string, hh: number, mm: number): Date {
-  // Treat the London wall-clock time as a UTC instant, then subtract the London offset.
-  // Using 'Z' suffix makes this TZ-agnostic — correct regardless of process timezone.
-  const asUtc = new Date(`${dateStr}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00Z`);
-  const offsetMs = getLondonOffsetMs(asUtc);
-  return new Date(asUtc.getTime() - offsetMs);
-}
 
-function guernseyLocalDateToUtc(y: number, mo: number, d: number, h: number, mi: number): Date {
-  const dateStr = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-  return guernseyLocalToUtc(dateStr, h, mi);
-}
+
+
 
 const BASE_URL = process.env.GUERNSEY_AIRPORT_URL || 'https://www.airport.gg';
 const API_URL = process.env.GUERNSEY_API_URL || 'https://www.airport.gg/arr-dep/json';
@@ -97,7 +75,7 @@ function mapApiEntriesToScrapedFlights(
     if (!timeParts) continue;
     const hh = parseInt(timeParts[1]);
     const mm = parseInt(timeParts[2]);
-    const scheduledTime = guernseyLocalToUtc(entry.flight_date, hh, mm);
+    const scheduledTime = localToUtc(entry.flight_date, hh, mm);
 
     const location = entry.flight_locations.join(', ');
     const codes = entry.flight_numbers;
@@ -191,7 +169,7 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
         }
       }
 
-      const scheduledTime = guernseyLocalToUtc(flightDate, hh, mm);
+      const scheduledTime = localToUtc(flightDate, hh, mm);
 
       const location = $row.find('td.airport').text().trim();
 
@@ -218,9 +196,8 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
         const tsMatch = datetimeRaw.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
         if (tsMatch) {
           const [, d, mo, y, h, mi] = tsMatch;
-          const statusTimestamp = guernseyLocalDateToUtc(
-            parseInt(y), parseInt(mo), parseInt(d), parseInt(h), parseInt(mi),
-          );
+          const dateStr = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+          const statusTimestamp = localToUtc(dateStr, parseInt(h), parseInt(mi));
           if (!isNaN(statusTimestamp.getTime())) {
             for (const flightCode of codes) {
               statusUpdates.push({ flightCode, flightDate, statusTimestamp, statusMessage: comment });
@@ -275,7 +252,7 @@ function parseTimeFromMessage(message: string, referenceDate: Date): Date | null
   const parsed = parseHHMM(message);
   if (!parsed) return null;
   const refDateStr = referenceDate.toISOString().split('T')[0];
-  return guernseyLocalToUtc(refDateStr, parsed.hh, parsed.mm);
+  return localToUtc(refDateStr, parsed.hh, parsed.mm);
 }
 
 /**
@@ -366,7 +343,7 @@ function extractActualTime(updates: StatusUpdate[], keyword: string, referenceDa
       const parsed = parseHHMM(u.statusMessage);
       if (parsed) {
         const refDateStr = referenceDate.toISOString().split('T')[0];
-        const extracted = guernseyLocalToUtc(refDateStr, parsed.hh, parsed.mm);
+        const extracted = localToUtc(refDateStr, parsed.hh, parsed.mm);
         // Reject times more than 30 minutes before scheduled — stale data from a
         // previous rotation that the airport board hasn't cleared yet.
         if (extracted.getTime() < referenceDate.getTime() - 30 * 60_000) continue;
@@ -402,7 +379,7 @@ function extractDelayMinutes(updates: StatusUpdate[], scheduledTime: Date): numb
       const parsed = parseHHMM(u.statusMessage);
       if (parsed) {
         const refDateStr = scheduledTime.toISOString().split('T')[0];
-        const estimatedTime = guernseyLocalToUtc(refDateStr, parsed.hh, parsed.mm);
+        const estimatedTime = localToUtc(refDateStr, parsed.hh, parsed.mm);
         const diffMs = estimatedTime.getTime() - scheduledTime.getTime();
         const diffMins = Math.round(diffMs / 60_000);
         if (diffMins <= 5) return 0;
@@ -421,7 +398,7 @@ function extractEstimatedTime(updates: StatusUpdate[], scheduledTime: Date): Dat
       const parsed = parseHHMM(u.statusMessage);
       if (parsed) {
         const refDateStr = scheduledTime.toISOString().split('T')[0];
-        return guernseyLocalToUtc(refDateStr, parsed.hh, parsed.mm);
+        return localToUtc(refDateStr, parsed.hh, parsed.mm);
       }
     }
   }

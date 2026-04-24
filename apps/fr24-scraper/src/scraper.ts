@@ -1,19 +1,12 @@
 import { connect } from 'puppeteer-real-browser';
 import type { Browser, Page } from 'rebrowser-puppeteer-core';
 import { execSync } from 'child_process';
-import { db, flights as flightsTable, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, isTerminalStatus, routeFlightMinutes, ROUTE_FLIGHT_MINUTES } from '@airways/database';
+import { db, flights as flightsTable, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, isTerminalStatus, routeFlightMinutes, ROUTE_FLIGHT_MINUTES, localToUtc, guernseyTodayStr } from '@airways/database';
 import { eq, and, max, desc, count } from 'drizzle-orm';
 import { sendAlert } from '@airways/telegram';
 
-// ---------------------------------------------------------------------------
-// Timezone utility
-// ---------------------------------------------------------------------------
-
-const GY_TZ = 'Europe/London';
-
-export function guernseyDateStr(d: Date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: GY_TZ }).format(d);
-}
+const guernseyDateStr = guernseyTodayStr;
+export { guernseyDateStr };
 
 // ---------------------------------------------------------------------------
 // Proxy helpers
@@ -414,31 +407,12 @@ function parseTimeToDate(timeStr: string, flightDate: string): Date | null {
   let hour = parseInt(match[1], 10);
   const minute = parseInt(match[2], 10);
   const ampm = match[3]?.toUpperCase();
-
   if (ampm === 'PM' && hour < 12) hour += 12;
   if (ampm === 'AM' && hour === 12) hour = 0;
-
-  // Treat the London wall-clock time as a UTC instant, then subtract the London offset.
-  // Using 'Z' suffix makes this TZ-agnostic — correct regardless of process timezone.
-  const asUtc = new Date(`${flightDate}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00Z`);
-  const londonOffset = getLondonOffsetMs(asUtc);
-  return new Date(asUtc.getTime() - londonOffset);
+  return localToUtc(flightDate, hour, minute);
 }
 
-function getLondonOffsetMs(d: Date): number {
-  // Get the offset by comparing UTC and London representations
-  const londonStr = new Intl.DateTimeFormat('en-GB', {
-    timeZone: GY_TZ,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false,
-  }).format(d);
-  // en-GB: "DD/MM/YYYY, HH:MM:SS"
-  const [datePart, timePart] = londonStr.split(', ');
-  const [dd, mo, yyyy] = datePart.split('/');
-  const londonAsUtc = new Date(`${yyyy}-${mo}-${dd}T${timePart}Z`);
-  return londonAsUtc.getTime() - d.getTime();
-}
+
 
 // ---------------------------------------------------------------------------
 // DB upsert

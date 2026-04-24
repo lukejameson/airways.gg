@@ -2,9 +2,7 @@
 // Vite resolves @airways/database via alias in vite.config.ts → packages/database/index.ts.
 // pg and drizzle-orm are marked as ssr.external so they're never bundled.
 
-export { db, getDb } from '@airways/database';
-
-// Named re-exports so Rollup can statically trace them (avoids `export *` tracing issues)
+export { db, getDb, guernseyTodayStr, guernseyTomorrowStr } from '@airways/database';
 export {
   flights,
   flightTimes,
