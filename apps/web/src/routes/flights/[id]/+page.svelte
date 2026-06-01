@@ -8,6 +8,7 @@
   import Icon from '$lib/components/Icon.svelte';
   import type { IconName } from '$lib/components/Icon.svelte';
   import { getWeatherIconName, isDaytime } from '$lib/daylight';
+  import { formatGuernseyTime, formatGuernseyDateTime, formatGuernseyShortDate } from '$lib/time';
   import { shortenStatus, statusHasDetail, extractDelayReason, isFlightCompleted } from '$lib/status';
   import { getStatusTone, STATUS_TEXT_CLASSES, STATUS_DOT_CLASSES, STATUS_PILL_CLASSES } from '$lib/statusConfig';
   import DelayCounter from '$lib/components/DelayCounter.svelte';
@@ -337,28 +338,13 @@
   const showFogWarning = $derived(!flight.canceled && fogAirport != null);
 
   function formatTime(date: string | Date | null | undefined): string {
-    if (!date) return '--:--';
-    return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+    return formatGuernseyTime(date);
   }
   function formatDateTime(date: string | Date | null | undefined): string {
-    if (!date) return '—';
-    return new Date(date).toLocaleString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'UTC'
-    });
+    return formatGuernseyDateTime(date);
   }
   function shortDate(date: string | Date | null | undefined): string {
-    if (!date) return '';
-    return new Date(date).toLocaleDateString('en-GB', {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-      timeZone: 'UTC'
-    });
+    return formatGuernseyShortDate(date);
   }
   const getStatusColor = (status: string | null | undefined, canceled?: boolean | null) =>
     STATUS_TEXT_CLASSES[getStatusTone(status, canceled)];

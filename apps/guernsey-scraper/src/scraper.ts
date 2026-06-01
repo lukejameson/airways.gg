@@ -572,12 +572,13 @@ function statusSingletonPrefix(msg: string): string | null {
 function normaliseStatusMessage(msg: string): string {
   return msg.replace(/\bNext Info\s+(\d{2})(\d{2})\b/gi, (_, h, m) => `Next Info ${h}:${m}`);
 }
-function correctOnTimeTimestamp(update: StatusUpdate, scheduledTime: Date): StatusUpdate {
-  if (!update.statusMessage.toLowerCase().includes('on time')) return update;
-  const diffMs = update.statusTimestamp.getTime() - scheduledTime.getTime();
-  if (diffMs >= 60 * 60 * 1000) {
-    return { ...update, statusTimestamp: new Date(update.statusTimestamp.getTime() - 60 * 60 * 1000) };
-  }
+/**
+ * No-op — previously corrected "on time" status timestamps that were 1h ahead of
+ * scheduled time due to BST wall-clock storage. Now that all timestamps are stored
+ * in true UTC (migration 0014, TZ=UTC in Docker), this correction is no longer needed.
+ * Kept as a pass-through to avoid breaking call sites.
+ */
+function correctOnTimeTimestamp(update: StatusUpdate, _scheduledTime: Date): StatusUpdate {
   return update;
 }
 async function saveStatusUpdates(updates: StatusUpdate[], flightId: number | null): Promise<number> {

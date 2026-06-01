@@ -195,7 +195,7 @@ export const load: PageServerLoad = async ({ url }) => {
 
     db.execute(sql`
       SELECT
-        EXTRACT(HOUR FROM f.scheduled_departure)::int AS hour,
+        EXTRACT(HOUR FROM f.scheduled_departure AT TIME ZONE 'Europe/London')::int AS hour,
         COUNT(*) AS flights,
         SUM(CASE WHEN NOT f.canceled AND f.delay_minutes > ${threshold} THEN 1 ELSE 0 END) AS delayed,
         SUM(CASE WHEN f.canceled THEN 1 ELSE 0 END) AS cancelled,

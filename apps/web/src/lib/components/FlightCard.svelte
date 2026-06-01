@@ -6,6 +6,7 @@
   import { shortenStatus, isFlightCompleted } from '$lib/status';
   import { getStatusTone, STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from '$lib/statusConfig';
   import DelayCounter from './DelayCounter.svelte';
+  import { formatGuernseyTime } from '$lib/time';
 
   type Flight = typeof flights.$inferSelect & {
     estimatedDeparture?: string | null;
@@ -29,8 +30,7 @@
   let { flight, weatherMap = {}, daylightMap = {}, returnTab }: Props = $props();
 
   function fmt(date: string | Date | null | undefined): string {
-    if (!date) return '--:--';
-    return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' });
+    return formatGuernseyTime(date);
   }
 
   // Find weather closest to a given timestamp
