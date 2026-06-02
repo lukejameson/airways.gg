@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { db, flights, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, routeFlightMinutes, locationToIata, GY_TZ, localToUtc } from '@airways/database';
+import { db, flights, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, routeFlightMinutes, locationToIata, GY_TZ, localToUtc, guernseyTodayStr } from '@airways/database';
 import { eq, and, isNull, sql, count, or, isNotNull } from 'drizzle-orm';
 
 interface StatusUpdate {
@@ -144,7 +144,7 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
   const tableId = type === 'arrivals' ? '#table-arrivals' : '#table-departures';
 
   const results: ScrapedFlight[] = [];
-  const defaultFlightDate = date.toISOString().split('T')[0];
+  const defaultFlightDate = guernseyTodayStr(date);
 
   $(`${tableId} tbody.list tr[data-search="true"]`).each((_, row) => {
     try {
@@ -1008,7 +1008,7 @@ export async function runBackfill(
   onProgress?: (current: Date, total: number, completed: number) => void,
 ): Promise<void> {
   const startDate = new Date(startDateStr || '2019-01-01');
-  const endDate   = new Date(endDateStr   || new Date().toISOString().split('T')[0]);
+  const endDate   = new Date(endDateStr   || guernseyTodayStr());
 
   console.log(`[Guernsey] Starting historical backfill: ${startDate.toISOString().split('T')[0]} → ${endDate.toISOString().split('T')[0]}`);
 

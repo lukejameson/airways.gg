@@ -1,74 +1,58 @@
 # todo.yaml — single source of truth for LLM
-# Updated: 2026-06-01T00:00:00Z
+# Updated: 2026-06-02T00:00:00Z
 
 goal: >
-  Fix 4 timezone bugs causing flights to display 1 hour early/late, as
-  identified in research-brief.md.
+  Add DST transition regression tests and fix three residual time-handling
+  issues to prevent clock-change regressions (autumn fall-back).
 
 why_how: >
-  The codebase has a long history of toggling between timeZone: 'UTC' and
-  timeZone: 'Europe/London' in display format functions, combined with a
-  migration (0014) that converted BST wall-clock timestamps to true UTC.
-  The scrapers now correctly store UTC, and the pg driver reads UTC — but
-  the frontend is inconsistent: the FlightCard correctly uses
-  Europe/London, while the flight detail page and stats page still use
-  UTC or extract raw UTC hours. Some historical data may also be
-  corrupted by migration ping-pong. All fixes are surgical — mostly
-  1-3 line changes in specific files.
+  The research brief confirmed the autumn clock change cannot cause the same
+  bug — the architecture is now unified around UTC storage with DST-aware
+  conversions via luxon. However, three low-severity residual issues were
+  identified (UTC date strings used where Guernsey-local dates are expected)
+  and a defense-in-depth regression test is recommended. All fixes are tiny
+  (1-3 lines each). The test is the main deliverable.
 
 expected: >
-  All times display correctly as Guernsey local (Europe/London) across
-  the flight board, flight detail page, and stats page. Historical
-  actual_departure/actual_arrival times are verified and fixed where
-  needed. A shared format helper prevents future regressions.
+  A vitest test file in packages/database/time.test.ts that exercises
+  localToUtc() and formatGuernseyTime() across BST/GMT boundaries.
+  Three residual fixes in scraper code. All existing tests continue to pass.
 
 status: complete
 
 tasks:
   - phase: 1
-    name: Fix Display Bugs
+    name: Test
     status: done
     items:
       - done: true
-        action: Fix flight detail page — change timeZone: 'UTC' to timeZone: 'Europe/London' in formatTime, formatDateTime, and shortDate in apps/web/src/routes/flights/[id]/+page.svelte
-      - done: true
-        action: Fix stats departure hour chart — change EXTRACT(HOUR FROM f.scheduled_departure) to EXTRACT(HOUR FROM f.scheduled_departure AT TIME ZONE 'Europe/London') in the departureHour query in apps/web/src/routes/stats/+page.server.ts
+        action: Create packages/database/time.test.ts with DST transition regression tests for localToUtc (4 BST/GMT boundary cases) and formatGuernseyTime (4 boundary cases). Verify tests pass.
 
   - phase: 2
-    name: Fix Data Integrity
+    name: Residual Fixes
     status: done
     items:
       - done: true
-        action: Run fixActualTimes() to correct any actual_departure/actual_arrival rows corrupted by migration ping-pong (write and execute a one-off script that invokes this function from guernsey-scraper)
+        action: Fix Residual 1 — in parseFlightHtml (guernsey-scraper/src/scraper.ts ~L130), replace date.toISOString().split('T')[0] with guernseyTodayStr(date) for defaultFlightDate
       - done: true
-        action: Remove or neuter correctOnTimeTimestamp in apps/guernsey-scraper/src/scraper.ts — the BST-wall-clock issue it was working around no longer exists
+        action: Fix Residual 3 — in runBackfill (guernsey-scraper/src/scraper.ts ~L1011), replace new Date().toISOString().split('T')[0] with guernseyTodayStr() for endDateStr default
+      - done: true
+        action: Fix Residual 2 — in fr24-scraper/src/scraper.ts ~L447 and ~L539, add comment clarifying that now (new Date()) is UTC since TZ=UTC
 
   - phase: 3
-    name: Verification & Prevention
+    name: Verify
     status: done
     items:
       - done: true
-        action: Verify stats weather joins return expected row counts (query COUNT(*) from weather-correlated stats queries and compare to flight count) — NOTE: historical_weather only has 2024 data, no 2025-2026 coverage; stats weather sections were already empty before our fix. Not a timezone regression.
+        action: Run full test suite — verify no regressions from the residual fixes
       - done: true
-        action: Create shared formatGuernseyTime() helper in apps/web/src/lib and refactor existing timeZone: 'Europe/London' usages in FlightCard.svelte and +page.svelte to use it
-      - done: true
-        action: End-to-end smoke test — verify a BST-date flight shows correct Guernsey local time on board, detail page, and stats page (build passed successfully)
-
-  - phase: 4
-    name: Cleanup
-    status: done
-    items:
-      - done: true
-        action: Delete update_sched_departure_39441.sql from repo root — one-off SQL hack no longer needed
-      - done: true
-        action: Verify no stale timezone workaround comments remain in scraper code after correctOnTimeTimestamp removal
+        action: Build check — verify the project builds cleanly
 
 notes:
-  - All DB values are stored as UTC (TIMESTAMP WITHOUT TZ) after migration 0014
-  - pg.types.setTypeParser(1114) in packages/database/index.ts forces UTC interpretation
-  - localToUtc() in packages/database/time.ts correctly handles BST/GMT conversions via luxon
-  - FlightCard.svelte fmt() already uses timeZone: 'Europe/London' — use as the reference
-  - fixActualTimes() exists in apps/guernsey-scraper/src/scraper.ts and handles both next-day and unrealistic-delay corruptions
-  - Migrations 0012, 0013, 0016 were already deleted in commit 8b7e242 — confirmed clean
+  - The autumn clock change (BST→GMT) cannot cause the same bug — architecture is unified
+  - All Docker containers run TZ=UTC; all DB connections SET TIME ZONE 'UTC'
+  - pg.types.setTypeParser(1114) forces UTC interpretation
+  - The ambiguous hour (01:00-02:00) has no flights and scrapers sleep during it
+  - Residual fixes are 1-line changes; test file is the main new artifact
 
 discovered: []

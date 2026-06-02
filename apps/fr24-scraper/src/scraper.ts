@@ -444,7 +444,7 @@ async function guernseyEstimatedTimeHasPriority(
   if (!latestGuernsey?.ts || !existing?.timeValue) return false;
   const guernseyTs = new Date(latestGuernsey.ts);
   const existingEstimate = new Date(existing.timeValue);
-  const now = new Date();
+  const now = new Date(); // UTC — container runs TZ=UTC, consistent with DB storage
   const guernseyEstimateStillFuture = existingEstimate > now;
   const guernseyIsNewer = guernseyTs > fr24EstimatedTime;
   return guernseyEstimateStillFuture && guernseyIsNewer;
@@ -536,9 +536,9 @@ async function upsertFR24Flight(
 
   if (flight.actualEstTime) {
     const parsedTime = parseTimeToDate(flight.actualEstTime, flightDate);
-    const now = new Date();
+    const now = new Date(); // UTC — container runs TZ=UTC, consistent with DB storage
     if (parsedTime) {
-      // Only treat times as "actual" if they are in the past
+      // Only treat times as "actual" if they are in the past — all times are UTC
       if (status === 'Landed' && flight.type === 'arrival' && parsedTime <= now) {
         actualArrival = parsedTime;
       } else if ((status === 'Airborne' || status === 'Landed') && flight.type === 'departure' && parsedTime <= now) {

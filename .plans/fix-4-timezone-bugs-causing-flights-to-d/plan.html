@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan — airways.gg Timezone Fix</title>
+<style>
+  :root { --bg: #f8f9fa; --card: #fff; --text: #1a1a2e; --muted: #6b7280;
+          --border: #e5e7eb; --cyan: #0891b2; --green: #16a34a; --blue: #2563eb;
+          --purple: #7c3aed; --amber: #d97706; --red: #dc2626; --radius: 10px; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg);
+         color: var(--text); max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem; }
+  header { margin-bottom: 2rem; }
+  h1 { font-size: 1.8rem; display: flex; align-items: center; gap: 0.5rem; }
+  .meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.25rem; }
+  .badge { display: inline-block; font-size: 0.7rem; font-weight: 600; padding: 2px 10px;
+           border-radius: 99px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .badge-pending { background: #f1f5f9; color: #64748b; }
+  .badge-active  { background: #dbeafe; color: #2563eb; }
+  .badge-done    { background: #dcfce7; color: #16a34a; }
+
+  .goal { background: #ecfeff; border-left: 4px solid var(--cyan); padding: 1rem 1.25rem;
+          border-radius: 0 var(--radius) var(--radius) 0; margin-bottom: 1.25rem;
+          font-size: 1.05rem; line-height: 1.55; }
+  .goal::before { content: "🎯 "; font-size: 1.15rem; }
+
+  .progress-wrap { margin-bottom: 1.5rem; }
+  .progress-label { display: flex; justify-content: space-between; font-size: 0.8rem;
+                    color: var(--muted); margin-bottom: 0.35rem; }
+  .progress-bar { height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--blue));
+                   border-radius: 99px; transition: width 0.4s ease; }
+
+  .info-box { border-radius: 0 var(--radius) var(--radius) 0; padding: 1rem 1.25rem;
+              margin-bottom: 1.25rem; font-size: 0.97rem; line-height: 1.55; }
+  .info-box h3 { font-size: 0.95rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
+  .whyhow-box { background: #eff6ff; border-left: 4px solid var(--blue); }
+  .whyhow-box h3 { color: var(--blue); }
+  .expected-box { background: #f0fdf4; border-left: 4px solid var(--green); }
+  .expected-box h3 { color: var(--green); }
+
+  .phase { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+           padding: 1.25rem 1.5rem; margin-bottom: 1rem; }
+  .phase h2 { font-size: 1.05rem; display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; }
+  .phase-icon { font-size: 1.1rem; line-height: 1; }
+  .task-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; font-size: 0.95rem; }
+  .task-row input[type="checkbox"] { accent-color: var(--cyan); width: 1rem; height: 1rem; flex-shrink: 0; }
+  .task-row.done label { text-decoration: line-through; color: var(--muted); }
+
+  .notes-box { background: #fffbeb; border: 1px solid #fcd34d; border-radius: var(--radius);
+               padding: 1rem 1.25rem; margin-top: 1.5rem; }
+  .notes-box h3 { font-size: 0.95rem; margin-bottom: 0.4rem; color: var(--amber); display: flex; align-items: center; gap: 0.4rem; }
+  .notes-box ul { list-style: disc; margin-left: 1.25rem; font-size: 0.9rem; color: #78350f; }
+  .discovered-box { background: #fef2f2; border: 1px solid #fca5a5; border-radius: var(--radius);
+                    padding: 1rem 1.25rem; margin-top: 1rem; }
+  .discovered-box h3 { font-size: 0.95rem; margin-bottom: 0.4rem; color: var(--red); display: flex; align-items: center; gap: 0.4rem; }
+  .discovered-box .task-row label { color: #991b1b; }
+  .empty-state { color: var(--muted); font-style: italic; font-size: 0.85rem; padding: 0.25rem 0; }
+  .file-path { font-family: monospace; font-size: 0.85rem; color: var(--muted); display: block; }
+  .severity { font-size: 0.75rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-left: 0.5rem; }
+  .sev-critical { background: #fee2e2; color: #dc2626; }
+  .sev-high { background: #fed7aa; color: #c2410c; }
+  .sev-medium { background: #fef3c7; color: #b45309; }
+  .sev-low { background: #e0f2fe; color: #0369a1; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>&#x1F4CB; Plan — Fix Timezone Display Bugs</h1>
+  <!-- STATUS: complete -->
+  <p class="meta">Generated: 2026-06-01 &middot; Status: <span class="badge badge-done">complete</span></p>
+</header>
+
+<div class="goal">Fix 4 timezone bugs causing flights to display 1 hour early/late, as identified in research-brief.md.</div>
+
+<div class="progress-wrap">
+  <div class="progress-label"><span>Progress</span><span>9 / 9</span></div>
+  <div class="progress-bar"><div class="progress-fill" style="width: 100%;"></div></div>
+</div>
+
+<div class="info-box whyhow-box">
+  <h3><span class="section-icon">&#x1F4A1;</span> Why &amp; How</h3>
+  <p>The codebase has a long history of toggling between <code>timeZone: 'UTC'</code> and <code>timeZone: 'Europe/London'</code> in display format functions, combined with a migration (0014) that converted BST wall-clock timestamps to true UTC. The scrapers now correctly store UTC, and the pg driver reads UTC — but the frontend is inconsistent: the FlightCard correctly uses Europe/London, while the flight detail page and stats page still use UTC or extract raw UTC hours. All fixes are surgical — mostly 1-3 line changes in specific files.</p>
+</div>
+
+<div class="info-box expected-box">
+  <h3><span class="section-icon">&#x1F381;</span> Expected Outcome</h3>
+  <p>All times display correctly as Guernsey local (Europe/London) across the flight board, flight detail page, and stats page. Historical actual_departure/actual_arrival times are verified and fixed where needed. A shared format helper prevents future regressions.</p>
+</div>
+
+<!-- PHASE: 1 (status: done) -->
+<div class="phase">
+  <h2><span class="phase-icon">&#x2705;</span> Phase 1: Fix Display Bugs <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Fix flight detail page timezone <span class="severity sev-critical">CRITICAL</span></label></div>
+  <span class="file-path">apps/web/src/routes/flights/[id]/+page.svelte:340-359</span>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Fix stats departure-hour chart <span class="severity sev-high">HIGH</span></label></div>
+  <span class="file-path">apps/web/src/routes/stats/+page.server.ts — departureHour query</span>
+</div>
+
+<!-- PHASE: 2 (status: done) -->
+<div class="phase">
+  <h2><span class="phase-icon">&#x2705;</span> Phase 2: Fix Data Integrity <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Run fixActualTimes() — 0 corrupted rows found <span class="severity sev-medium">MEDIUM</span></label></div>
+  <span class="file-path">scripts/fix-actual-times.ts → fixActualTimes()</span>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Neuter correctOnTimeTimestamp in guernsey-scraper <span class="severity sev-medium">MEDIUM</span></label></div>
+  <span class="file-path">apps/guernsey-scraper/src/scraper.ts:575</span>
+</div>
+
+<!-- PHASE: 3 (status: done) -->
+<div class="phase">
+  <h2><span class="phase-icon">&#x2705;</span> Phase 3: Verification &amp; Prevention <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Verify stats weather joins — historical_weather has 2024-only data (pre-existing gap) <span class="severity sev-low">LOW</span></label></div>
+  <span class="file-path">scripts/verify-weather-joins.ts</span>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create shared formatGuernseyTime() + refactor existing usages</label></div>
+  <span class="file-path">apps/web/src/lib/time.ts (new) → FlightCard, +page.svelte, flights/[id]/+page.svelte</span>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Build passed — BST-date e2e smoke test verified</label></div>
+  <span class="file-path">npm run build — success</span>
+</div>
+
+<!-- PHASE: 4 (status: done) -->
+<div class="phase">
+  <h2><span class="phase-icon">&#x2705;</span> Phase 4: Cleanup <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Delete update_sched_departure_39441.sql from repo root</label></div>
+  <span class="file-path">update_sched_departure_39441.sql — deleted</span>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Verify no stale timezone workaround comments — clean</label></div>
+  <span class="file-path">Only migration 0014 docs + our own neutered-function comment remain</span>
+</div>
+
+<div class="notes-box">
+  <h3><span class="section-icon">&#x1F4DD;</span> Notes</h3>
+  <ul>
+    <li>All DB values are stored as UTC (TIMESTAMP WITHOUT TZ) after migration 0014</li>
+    <li>pg.types.setTypeParser(1114) in packages/database/index.ts forces UTC interpretation</li>
+    <li>localToUtc() in packages/database/time.ts correctly handles BST/GMT transitions via luxon</li>
+    <li>Shared formatGuernseyTime() helper now in apps/web/src/lib/time.ts prevents future regressions</li>
+    <li>Migrations 0012, 0013, 0016 were already deleted in commit 8b7e242 — confirmed clean</li>
+  </ul>
+</div>
+
+</body>
+</html>
