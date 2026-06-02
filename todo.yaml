@@ -1,58 +1,65 @@
 # todo.yaml — single source of truth for LLM
-# Updated: 2026-06-02T00:00:00Z
+# Updated: 2026-06-02T15:00:00Z
 
 goal: >
-  Add DST transition regression tests and fix three residual time-handling
-  issues to prevent clock-change regressions (autumn fall-back).
+  Replace Leaflet with MapLibre GL in FlightMap.svelte, using the same
+  vector-tile map style as roads.gg (map-style.json from OpenFreeMap).
 
 why_how: >
-  The research brief confirmed the autumn clock change cannot cause the same
-  bug — the architecture is now unified around UTC storage with DST-aware
-  conversions via luxon. However, three low-severity residual issues were
-  identified (UTC date strings used where Guernsey-local dates are expected)
-  and a defense-in-depth regression test is recommended. All fixes are tiny
-  (1-3 lines each). The test is the main deliverable.
+  airways.gg currently uses Leaflet 1.9.4 with raster OSM tiles for the
+  flight tracking map on /flights/[id]. The map is functional but visually
+  plain and pixelated at high zoom. roads.gg (sibling project) already uses
+  MapLibre GL 5.17.0 with a polished custom vector-tile style served from
+  OpenFreeMap — free, no API key, and proven. The migration is a focused
+  library swap in one component (~100 lines), plus copying the style file
+  and updating dependencies. The component keeps the same h-72 size and
+  collapsible behavior.
 
 expected: >
-  A vitest test file in packages/database/time.test.ts that exercises
-  localToUtc() and formatGuernseyTime() across BST/GMT boundaries.
-  Three residual fixes in scraper code. All existing tests continue to pass.
+  FlightMap.svelte renders the same departure/arrival airports, route lines
+  (dashed planned, solid flown), and heading-rotated aircraft marker — but
+  now on a smooth vector-tile map with roads.gg's muted, professional style.
+  The plane heading animates with CSS transitions. Build succeeds, existing
+  tests pass, no regressions on the flight detail page.
 
 status: complete
 
 tasks:
   - phase: 1
-    name: Test
+    name: Dependencies & Style
     status: done
     items:
       - done: true
-        action: Create packages/database/time.test.ts with DST transition regression tests for localToUtc (4 BST/GMT boundary cases) and formatGuernseyTime (4 boundary cases). Verify tests pass.
+        action: Remove leaflet and @types/leaflet from apps/web/package.json, add maplibre-gl ^5.17.0
+      - done: false
+        action: Copy roads.gg/static/map-style.json to airways.gg/apps/web/static/map-style.json
+      - done: false
+        action: Run npm install in workspace to install maplibre-gl
 
   - phase: 2
-    name: Residual Fixes
+    name: Rewrite FlightMap
     status: done
     items:
       - done: true
-        action: Fix Residual 1 — in parseFlightHtml (guernsey-scraper/src/scraper.ts ~L130), replace date.toISOString().split('T')[0] with guernseyTodayStr(date) for defaultFlightDate
-      - done: true
-        action: Fix Residual 3 — in runBackfill (guernsey-scraper/src/scraper.ts ~L1011), replace new Date().toISOString().split('T')[0] with guernseyTodayStr() for endDateStr default
-      - done: true
-        action: Fix Residual 2 — in fr24-scraper/src/scraper.ts ~L447 and ~L539, add comment clarifying that now (new Date()) is UTC since TZ=UTC
+        action: Rewrite FlightMap.svelte — replace Leaflet API (L.map, L.tileLayer, L.polyline, L.marker, L.divIcon, L.latLngBounds, fitBounds) with MapLibre GL equivalents (maplibregl.Map, addSource+addLayer for lines, maplibregl.Marker, fitBounds with bbox computation). Import maplibre-gl CSS. Keep same props interface, h-72 size, and collapsible behavior.
 
   - phase: 3
-    name: Verify
+    name: Polish & Verify
     status: done
     items:
       - done: true
-        action: Run full test suite — verify no regressions from the residual fixes
+        action: Update vite.config.ts — remove Leaflet manualChunks entry, replace with maplibre-gl if desired
       - done: true
-        action: Build check — verify the project builds cleanly
+        action: Add CSS transition on plane marker element for smooth heading animation
+      - done: true
+        action: Run npm run build to verify no build errors
+      - done: true
+        action: Visual spot-check — verify map renders correctly on a flight detail page
 
 notes:
-  - The autumn clock change (BST→GMT) cannot cause the same bug — architecture is unified
-  - All Docker containers run TZ=UTC; all DB connections SET TIME ZONE 'UTC'
-  - pg.types.setTypeParser(1114) forces UTC interpretation
-  - The ambiguous hour (01:00-02:00) has no flights and scrapers sleep during it
-  - Residual fixes are 1-line changes; test file is the main new artifact
+  - map-style.json uses OpenFreeMap (openfreemap.org) — free, no API key, reliable
+  - MapLibre GL CSS is namespaced under .maplibregl-*, no Tailwind conflicts expected
+  - FlightMap is only dynamically imported on /flights/[id] when position data exists
+  - Plane heading animation uses CSS transition: transform 0.3s ease on the marker element
 
 discovered: []

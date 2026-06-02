@@ -20,11 +20,13 @@
   .badge-active  { background: #dbeafe; color: #2563eb; }
   .badge-done    { background: #dcfce7; color: #16a34a; }
 
+  /* ── Goal ── */
   .goal { background: #ecfeff; border-left: 4px solid var(--cyan); padding: 1rem 1.25rem;
           border-radius: 0 var(--radius) var(--radius) 0; margin-bottom: 1.25rem;
           font-size: 1.05rem; line-height: 1.55; }
   .goal::before { content: "🎯 "; font-size: 1.15rem; }
 
+  /* ── Progress ── */
   .progress-wrap { margin-bottom: 1.5rem; }
   .progress-label { display: flex; justify-content: space-between; font-size: 0.8rem;
                     color: var(--muted); margin-bottom: 0.35rem; }
@@ -32,6 +34,7 @@
   .progress-fill { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--blue));
                    border-radius: 99px; transition: width 0.4s ease; }
 
+  /* ── Info boxes ── */
   .info-box { border-radius: 0 var(--radius) var(--radius) 0; padding: 1rem 1.25rem;
               margin-bottom: 1.25rem; font-size: 0.97rem; line-height: 1.55; }
   .info-box h3 { font-size: 0.95rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
@@ -40,6 +43,7 @@
   .expected-box { background: #f0fdf4; border-left: 4px solid var(--green); }
   .expected-box h3 { color: var(--green); }
 
+  /* ── Phases ── */
   .phase { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
            padding: 1.25rem 1.5rem; margin-bottom: 1rem; }
   .phase h2 { font-size: 1.05rem; display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; }
@@ -48,6 +52,7 @@
   .task-row input[type="checkbox"] { accent-color: var(--cyan); width: 1rem; height: 1rem; flex-shrink: 0; }
   .task-row.done label { text-decoration: line-through; color: var(--muted); }
 
+  /* ── Notes & Discovered ── */
   .notes-box { background: #fffbeb; border: 1px solid #fcd34d; border-radius: var(--radius);
                padding: 1rem 1.25rem; margin-top: 1.5rem; }
   .notes-box h3 { font-size: 0.95rem; margin-bottom: 0.4rem; color: var(--amber); display: flex; align-items: center; gap: 0.4rem; }
@@ -64,64 +69,61 @@
 <!-- HEADER -->
 <header>
   <h1>&#x1F4CB; Plan — airways.gg</h1>
-  <!-- STATUS: complete -->
+  <!-- STATUS: done -->
   <p class="meta">Generated: 2026-06-02 &middot; Status: <span class="badge badge-done">complete</span></p>
 </header>
 
 <!-- GOAL -->
-<div class="goal">Replace Leaflet with MapLibre GL in FlightMap.svelte, using the same vector-tile map style as roads.gg (map-style.json from OpenFreeMap).</div>
+<div class="goal">Add DST transition regression tests and fix three residual time-handling issues to prevent clock-change regressions (autumn fall-back).</div>
 
 <!-- PROGRESS -->
 <div class="progress-wrap">
-  <div class="progress-label"><span>Progress</span><span>8 / 8</span></div>
+  <div class="progress-label"><span>Progress</span><span>7 / 7</span></div>
   <div class="progress-bar"><div class="progress-fill" style="width: 100%;"></div></div>
 </div>
 
 <!-- WHY & HOW -->
 <div class="info-box whyhow-box">
   <h3><span class="section-icon">💡</span> Why &amp; How</h3>
-  <p>airways.gg currently uses Leaflet 1.9.4 with raster OSM tiles for the flight tracking map on /flights/[id]. The map is functional but visually plain and pixelated at high zoom. roads.gg (sibling project) already uses MapLibre GL 5.17.0 with a polished custom vector-tile style served from OpenFreeMap — free, no API key, and proven. The migration is a focused library swap in one component (~100 lines), plus copying the style file and updating dependencies. The component keeps the same h-72 size and collapsible behavior.</p>
+  <p>The research brief confirmed the autumn clock change cannot cause the same bug — the architecture is now unified around UTC storage with DST-aware conversions via luxon. However, three low-severity residual issues were identified (UTC date strings used where Guernsey-local dates are expected) and a defense-in-depth regression test is recommended. All fixes are tiny (1-3 lines each). The test is the main deliverable.</p>
 </div>
 
 <!-- EXPECTED -->
 <div class="info-box expected-box">
   <h3><span class="section-icon">🎁</span> Expected Outcome</h3>
-  <p>FlightMap.svelte renders the same departure/arrival airports, route lines (dashed planned, solid flown), and heading-rotated aircraft marker — but now on a smooth vector-tile map with roads.gg's muted, professional style. The plane heading animates with CSS transitions. Build succeeds, existing tests pass, no regressions on the flight detail page.</p>
+  <p>A vitest test file in packages/database/time.test.ts that exercises localToUtc() and formatGuernseyTime() across BST/GMT boundaries. Three residual fixes in scraper code. All existing tests continue to pass.</p>
 </div>
-
-<!-- PHASES -->
 
 <!-- PHASE: 1 (status: done) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 1: Dependencies &amp; Style <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Remove leaflet and @types/leaflet from apps/web/package.json, add maplibre-gl ^5.17.0</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Copy roads.gg/static/map-style.json to airways.gg/apps/web/static/map-style.json</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Run npm install in workspace to install maplibre-gl</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 1: Test <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create packages/database/time.test.ts with DST transition regression tests for localToUtc (4 BST/GMT boundary cases) and formatGuernseyTime (4 boundary cases). Verify tests pass.</label></div>
 </div>
 
 <!-- PHASE: 2 (status: done) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 2: Rewrite FlightMap <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Rewrite FlightMap.svelte — replace Leaflet API with MapLibre GL equivalents. Keep same props interface, h-72 size, and collapsible behavior.</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 2: Residual Fixes <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Fix Residual 1 — in parseFlightHtml (guernsey-scraper/src/scraper.ts ~L130), replace date.toISOString().split('T')[0] with guernseyTodayStr(date) for defaultFlightDate</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Fix Residual 3 — in runBackfill (guernsey-scraper/src/scraper.ts ~L1011), replace new Date().toISOString().split('T')[0] with guernseyTodayStr() for endDateStr default</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Fix Residual 2 — in fr24-scraper/src/scraper.ts ~L447 and ~L539, add comment clarifying that now (new Date()) is UTC since TZ=UTC</label></div>
 </div>
 
 <!-- PHASE: 3 (status: done) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 3: Polish &amp; Verify <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Update vite.config.ts — remove Leaflet manualChunks, add maplibre-gl if desired</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Add CSS transition on plane marker element for smooth heading animation</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Run npm run build to verify no build errors</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Visual spot-check — verify map renders correctly on a flight detail page</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 3: Verify <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Run full test suite — verify no regressions from the residual fixes</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Build check — verify the project builds cleanly</label></div>
 </div>
 
 <!-- NOTES -->
 <div class="notes-box">
   <h3><span class="section-icon">📝</span> Notes</h3>
   <ul>
-    <li>map-style.json uses OpenFreeMap (openfreemap.org) — free, no API key, reliable</li>
-    <li>MapLibre GL CSS is namespaced under .maplibregl-*, no Tailwind conflicts expected</li>
-    <li>FlightMap is only dynamically imported on /flights/[id] when position data exists</li>
-    <li>Plane heading animation uses CSS transition: transform 0.3s ease on the marker element</li>
+    <li>The autumn clock change (BST→GMT) cannot cause the same bug — architecture is unified</li>
+    <li>All Docker containers run TZ=UTC; all DB connections SET TIME ZONE 'UTC'</li>
+    <li>pg.types.setTypeParser(1114) forces UTC interpretation</li>
+    <li>The ambiguous hour (01:00-02:00) has no flights and scrapers sleep during it</li>
+    <li>Residual fixes are 1-line changes; test file is the main new artifact</li>
   </ul>
 </div>
 

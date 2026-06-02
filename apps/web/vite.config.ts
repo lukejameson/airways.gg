@@ -27,10 +27,10 @@ export default defineConfig({
         id === 'pg' ||
         id.startsWith('drizzle-orm'),
       output: {
-        // Keep Leaflet in its own named lazy chunk — it's already dynamically
+        // Keep MapLibre GL in its own chunk — it's already dynamically
         // imported and this prevents it from leaking into eagerly-loaded bundles.
         manualChunks(id) {
-          if (id.includes('leaflet')) return 'leaflet';
+          if (id.includes('maplibre-gl')) return 'maplibre-gl';
         },
       },
     },

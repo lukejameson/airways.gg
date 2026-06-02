@@ -1,4 +1,4 @@
-# Research Brief: Autumn Clock-Change Resilience Audit
+# Research Brief: Migrate FlightMap from Leaflet to MapLibre GL with roads.gg-style OSM
 
 **Date:** 2026-06-02
 **Status:** ready-for-planning
@@ -6,163 +6,90 @@
 
 ## Goal
 
-Verify that the recent BST timezone fixes will not regress when clocks go back
-(BST → GMT, last Sunday of October 2026), and identify any residual risks.
+Replace Leaflet with MapLibre GL in `FlightMap.svelte`, using the same vector-tile map style as roads.gg.
 
 ## Context
 
-airways.gg suffered from a long-running timezone bug that caused flights to
-display 1 hour early or late after the UK entered BST in late March 2026. This
-was recently fixed in commits `8b7e242` through `6dc371b`. The fix centralised
-all timezone handling around a clean UTC-storage model with DST-aware
-conversions via luxon.
+airways.gg is a SvelteKit 5 monorepo. The web app (`apps/web/`) uses **Leaflet 1.9.4** with raster OSM tiles (`tile.openstreetmap.org`) for the flight tracking map. The map is a 288px, collapsible component on the flight detail page (`/flights/[id]`). It draws a dashed planned route, a solid flown route, airport markers, and a heading-rotated aircraft marker.
 
-The March BST bug was caused by an architectural ping-pong between three
-competing strategies:
-1. BST wall-clock storage (TZ=Europe/London in Docker)
-2. UTC storage with UTC display
-3. UTC storage with Europe/London display
+roads.gg — one directory over — is also a SvelteKit app using **MapLibre GL 5.17.0** with a custom `map-style.json` served from `static/`. That style uses OpenFreeMap's vector tile endpoint (`tiles.openfreemap.org/planet`), a muted beige/brown/blue pallete, white roads with grey casings, and no POI labels. It renders beautifully, is free, and requires no API key.
 
-The current architecture has been fully unified into strategy 3. This audit
-checks whether the autumn clock change (clocks going back, BST → GMT) could
-trigger a similar regression — the "fall back" creates a 1-hour overlap that
-is the mirror image of the spring-forward gap.
-
-## Current Architecture (After All Fixes)
-
-| Layer | Mechanism | DST-Aware? |
-|-------|-----------|------------|
-| **DB Storage** | UTC in `TIMESTAMP WITHOUT TIME ZONE` | N/A (no timezone in values) |
-| **pg driver** | `setTypeParser(1114)` appends `Z` → forces UTC interpretation | N/A |
-| **DB connections** | `SET TIME ZONE 'UTC'` on every connect | N/A |
-| **Docker** | `TZ=UTC` in all Dockerfiles | N/A |
-| **Guernsey→UTC** | `localToUtc()` via luxon `DateTime.fromFormat({ zone: 'Europe/London' }).toUTC()` | ✅ DST-aware |
-| **UTC→display** | `formatGuernseyTime()` via `toLocaleTimeString({ timeZone: 'Europe/London' })` | ✅ DST-aware |
-| **Date strings** | `guernseyTodayStr()` via luxon `DateTime.fromJSDate({ zone: 'Europe/London' }).toFormat('yyyy-MM-dd')` | ✅ DST-aware |
-| **Stats SQL** | `EXTRACT(HOUR FROM ... AT TIME ZONE 'Europe/London')` | ✅ DST-aware |
-| **FR24 TZ guard** | Fails fast if `getTimezoneOffset() !== 0` | N/A |
-| **Weather TAF** | All date construction uses `Date.UTC()` | N/A |
-| **SunCalc** | Uses UTC noon as anchor, no local-time dependency | N/A |
+The user wants the same map style for airways.gg, keeping the existing component size and layout. No extra features (no custom zoom controls, no offline caching, no location tracking) — just the library swap and an animated plane marker.
 
 ## Alternatives Considered
 
-### Option A: Do nothing (Recommended)
+### Option A: MapLibre GL with roads.gg style (Recommended)
 
-The current architecture is robust against the autumn clock change. Every
-timezone-sensitive operation goes through a DST-aware path. The same bug
-pattern cannot recur because the three-competing-strategies root cause has
-been eliminated.
+- **Description:** Add `maplibre-gl` dependency, copy `map-style.json` to `apps/web/static/`, rewrite `FlightMap.svelte` to use the MapLibre GL imperative API. The component remains the same size (h-72 / 288px) and collapsible.
+- **Pros:**
+  - Same clean, professional look as roads.gg
+  - Vector tiles are smaller and faster than raster tiles
+  - Free tile source, no API key needed
+  - MapLibre has smooth `flyTo` / `easeTo` for plane animation
+  - CSS marker transitions for smooth heading changes
+- **Cons:**
+  - ~30% larger bundle than Leaflet (~200KB vs ~150KB gzipped)
+  - Different imperative API — rewrite all marker/line logic
+  - Must handle SSR (MapLibre needs `browser` guard, same as Leaflet)
+- **Best for:** This exact use case — a clean, modern map with the same style as the sibling project.
 
-### Option B: Add an explicit DST transition test
+### Option B: Keep Leaflet, switch to MapLibre/vector tile source via plugin
 
-Add a test that simulates the autumn transition by running `localToUtc()` and
-`formatGuernseyTime()` on a date that spans the change, verifying correct
-behaviour across the boundary.
+- **Description:** Keep Leaflet but use `maplibre-gl-leaflet` to render MapLibre vector tiles as a Leaflet layer.
+- **Pros:** Minimal code changes to FlightMap.svelte
+- **Cons:**
+  - Extra dependency (`maplibre-gl-leaflet`) with 3 years of stale maintenance
+  - Still ships both Leaflet (~150KB) and MapLibre (~200KB) — largest bundle
+  - Cannot use MapLibre's native animation primitives
+  - Brittle integration layer
+- **Best for:** Not recommended — worse bundle size with worse developer experience.
+
+### Option C: Do nothing
+
+- **Description:** Keep Leaflet with raster OSM tiles. Replace style by switching to a different tile provider URL or adding a CSS filter.
+- **Pros:** Zero code changes, zero risk
+- **Cons:** Raster tiles are pixelated at high zoom, slower to load, no smooth vector-tile zoom, doesn't match roads.gg's look
+- **Best for:** If the perceived benefit isn't worth the ~2-hour migration effort.
 
 ## Recommendation
 
-**No changes are needed to prevent the autumn clock-change regression.** The
-architecture is sound. The BST bug was caused by inconsistent timezone
-handling across the stack — not by any inherent fragility around the DST
-boundary itself. With all timezone paths now unified through a single
-DST-aware pipeline, the autumn transition is a non-event for the application.
+**Option A — MapLibre GL with roads.gg style.** The tile source and style file are already proven in roads.gg, the dependency is well-maintained (v5.x), and the FlightMap component is self-contained (one file to rewrite, ~100 lines of Leaflet logic). The migration is low-risk: MapLibre also needs a browser-only dynamic import, same as the current Leaflet setup.
 
-The recommended course of action:
-1. Add the optional regression test (Option B) for defense-in-depth
-2. Fix the three residual issues identified below (none are clock-change
-   related, but all improve overall time correctness)
+The user explicitly ruled out custom zoom controls, offline caching, and location tracking — so this stays a straightforward library swap. The animated plane marker can be achieved with CSS `transition` on the marker element's `transform` property when heading changes, plus MapLibre's `flyTo` for smooth map centering.
 
 ## Key Findings
 
-1. **The autumn clock change cannot cause the same bug.** The BST bug was
-   architectural (three competing strategies), not temporal (the transition
-   itself). The unified architecture handles both spring-forward and
-   fall-back correctly.
-
-2. **`localToUtc()` handles the ambiguous hour correctly.** Luxon's
-   `DateTime.fromFormat({ zone: 'Europe/London' })` uses IANA timezone data
-   and correctly distinguishes BST from GMT. For the overlapping 01:00-02:00
-   hour on the fall-back day, luxon's default behaviour (earlier occurrence =
-   BST) is reasonable. No flights operate during this window, so the ambiguity
-   is academic.
-
-3. **All scrapers sleep during the transition window.** Both the
-   guernsey-scraper and fr24-scraper hard-stop at 23:00 Guernsey local and
-   wake at ~05:00. The DST transition happens at 02:00 BST → 01:00 GMT, while
-   the scrapers are sleeping. No live data is ingested during the ambiguous
-   hour.
-
-4. **The `pg.types.setTypeParser(1114)` fix is critical and correct.**
-   Without it, a UTC Docker container would interpret the same DB value
-   differently than a BST dev machine. This fix ensures consistent
-   interpretation regardless of environment.
-
-5. **Three residual time-related issues were identified:**
-
-   - **Residual 1 (LOW):** `scrapeDayFlights` in guernsey-scraper uses
-     `new Date().toISOString().split('T')[0]` for the `defaultFlightDate`
-     in `parseFlightHtml`. This is UTC-based and will produce a UTC date.
-     All flight date comparisons use `guernseyTodayStr()` which is
-     Guernsey-local. For ~1 hour around Guernsey midnight (23:00-00:00 UTC
-     during BST), the UTC date and Guernsey date could differ. In practice
-     this is unlikely to matter because the scraper sleeps during this window,
-     but it's a fragile pattern.
-
-   - **Residual 2 (LOW):** `fr24-scraper/src/scraper.ts` line 447 and 539
-     use `new Date()` (UTC) for comparing actual times. The comparison
-     `parsedTime <= now` is correct since both sides are UTC, but the comment
-     could be misleading — it should clarify that `now` is UTC, not local.
-
-   - **Residual 3 (LOW):** `apps/guernsey-scraper/src/scraper.ts` line 1011
-     computes `endDateStr` as `new Date().toISOString().split('T')[0]` for
-     historical backfill. This is a UTC date string, but it's compared against
-     `flight_date` which stores Guernsey local dates. A backfill run near
-     Guernsey midnight could miss or include an extra day. This only affects
-     historical backfill, not live scraping.
+- **roads.gg's `map-style.json`** is standalone — it references `tiles.openfreemap.org` for both vector tiles and glyphs/sprites. No secrets, no environment variables. It can be copied verbatim.
+- **OpenFreeMap** (openfreemap.org) is a free, community-maintained tile service built on OpenMapTiles. No API key or registration required.
+- **MapLibre GL 5.17.0** is the same version roads.gg uses. Its CSS must be imported: `import 'maplibre-gl/dist/maplibre-gl.css'`.
+- **FlightMap.svelte** is only used on the flight detail page and loads dynamically (`import('$lib/components/FlightMap.svelte')`). The parent page guards with `browser` before mounting.
+- **vite.config.ts** currently has `manualChunks` for Leaflet — this can be updated to handle `maplibre-gl` instead.
+- **MapLibre bundles its own web worker** — Vite handles this automatically; no special config needed.
 
 ## Open Questions
 
-1. Should `flight_date` be documented explicitly as "Guernsey local calendar
-   date" in the database schema to prevent future confusion?
-
-2. Should the scraper add a 30-minute buffer around the sleep window to ensure
-   it never operates during the DST transition (2 AM local)?
-
-3. Is there value in adding a `test/timezone.test.ts` that exercises
-   `localToUtc()` and `formatGuernseyTime()` across BST/GMT boundaries?
+- None — scope is well-defined.
 
 ## Risks & Mitigations
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| Autumn clock change causes time display regressions | low | No mitigation needed — architecture is DST-agnostic |
-| Dev machine in non-UTC timezone interprets DB values differently | low | Already mitigated by `pg.types.setTypeParser(1114)` |
-| Flight date mismatch near midnight boundary (Residual 1) | low | Accept as-is — scraper sleeps during this window |
-| Historical backfill off-by-one day (Residual 3) | low | Document that backfill should use Guernsey-local date |
+| MapLibre GL CSS conflicts with existing Tailwind styles | low | Test in dev; MapLibre CSS is namespaced under `.maplibregl-*` prefixes |
+| Vector tiles fail to load (OpenFreeMap outage) | low | Same risk as current raster tiles; OpenFreeMap has been reliable for roads.gg |
+| Bundle size increase | low | MapLibre is ~50KB larger than Leaflet gzipped. Dynamic import keeps it out of initial bundle. Acceptable trade-off. |
 
 ## Implementation Hints
 
-- **Defense-in-depth test:** Create `packages/database/time.test.ts` with
-  test cases for `localToUtc()` across the BST/GMT boundary:
-  - October 25 10:00 → 10:00 UTC (GMT)
-  - October 24 10:00 → 09:00 UTC (BST)
-  - March 30 10:00 → 09:00 UTC (BST, day after spring-forward)
-  - March 29 10:00 → 10:00 UTC (GMT, day before spring-forward)
-
-- **Residual 1 fix:** In `parseFlightHtml`, use `guernseyTodayStr()` instead
-  of `date.toISOString().split('T')[0]` for the `defaultFlightDate`:
-  ```ts
-  // Before (line ~130 in scraper.ts):
-  const defaultFlightDate = date.toISOString().split('T')[0];
-  // After:
-  const defaultFlightDate = guernseyTodayStr(date);
-  ```
-
-- **Residual 3 fix:** Same approach for the historical backfill default date.
-
-- **Monitor around October 25, 2026:** Set a calendar reminder to check the
-  app's display on the Sunday of the clock change. Verify that flights
-  scheduled for 07:00 show as 07:00 Guernsey local, not 06:00 or 08:00.
+1. **Dependency changes** in `apps/web/package.json`: remove `leaflet` and `@types/leaflet`, add `maplibre-gl` (`^5.17.0`)
+2. **Copy** `roads.gg/static/map-style.json` → `airways.gg/apps/web/static/map-style.json`
+3. **Rewrite** `FlightMap.svelte` — the Leaflet-to-MapLibre mapping:
+   - `L.map(el, {...})` → `new maplibregl.Map({container: el, style: '/map-style.json', ...})`
+   - `L.tileLayer(...)` → not needed (style defines tiles)
+   - `L.polyline(coords, {...})` → `map.addSource(...)` + `map.addLayer({type: 'line', ...})`
+   - `L.marker(coords, {icon})` → `new maplibregl.Marker({element, anchor}).setLngLat(coords).addTo(map)`
+   - `L.latLngBounds(points)` / `fitBounds()` → `map.fitBounds(bbox, {padding})` — compute bbox from coords
+4. **Animation**: wrap the aircraft marker element in CSS `transition: transform 0.3s ease` so heading changes animate smoothly. Re-set marker position on a short interval for movement illusion, or simply let MapLibre's `flyTo` handle smooth centering.
+5. **Update `vite.config.ts`**: remove Leaflet `manualChunks` entry, add `maplibre-gl` if desired (optional — MapLibre handles its own chunking).
 
 ---
 
