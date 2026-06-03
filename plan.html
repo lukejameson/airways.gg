@@ -64,64 +64,98 @@
 <!-- HEADER -->
 <header>
   <h1>&#x1F4CB; Plan — airways.gg</h1>
-  <!-- STATUS: complete -->
-  <p class="meta">Generated: 2026-06-02 &middot; Status: <span class="badge badge-done">complete</span></p>
+  <!-- STATUS: pending -->
+  <p class="meta">Generated: 2026-06-02 &middot; Status: <span class="badge badge-pending">pending</span></p>
 </header>
 
 <!-- GOAL -->
-<div class="goal">Replace Leaflet with MapLibre GL in FlightMap.svelte, using the same vector-tile map style as roads.gg (map-style.json from OpenFreeMap).</div>
+<div class="goal">Address 23 UI/UX issues identified in the airways.gg code review — 4 high, 12 medium, 7 low — covering dark mode, accessibility, stats page UX, search, navigation, and polish.</div>
 
 <!-- PROGRESS -->
 <div class="progress-wrap">
-  <div class="progress-label"><span>Progress</span><span>8 / 8</span></div>
-  <div class="progress-bar"><div class="progress-fill" style="width: 100%;"></div></div>
+  <div class="progress-label"><span>Progress</span><span>0 / 23</span></div>
+  <div class="progress-bar"><div class="progress-fill" style="width: 0%;"></div></div>
 </div>
 
 <!-- WHY & HOW -->
 <div class="info-box whyhow-box">
   <h3><span class="section-icon">💡</span> Why &amp; How</h3>
-  <p>airways.gg currently uses Leaflet 1.9.4 with raster OSM tiles for the flight tracking map on /flights/[id]. The map is functional but visually plain and pixelated at high zoom. roads.gg (sibling project) already uses MapLibre GL 5.17.0 with a polished custom vector-tile style served from OpenFreeMap — free, no API key, and proven. The migration is a focused library swap in one component (~100 lines), plus copying the style file and updating dependencies. The component keeps the same h-72 size and collapsible behavior.</p>
+  <p>A top-down UI/UX audit of the airways.gg SvelteKit 5 web app found the site well-crafted but with concrete gaps: no dark mode, no reduced-motion support, an overwhelming stats page, missing search autocomplete, and various interaction polish issues. Each task targets a specific finding from code-review-report.md with clear, independently verifiable actions. Prioritized by severity — high items first, then medium, then low.</p>
 </div>
 
 <!-- EXPECTED -->
 <div class="info-box expected-box">
   <h3><span class="section-icon">🎁</span> Expected Outcome</h3>
-  <p>FlightMap.svelte renders the same departure/arrival airports, route lines (dashed planned, solid flown), and heading-rotated aircraft marker — but now on a smooth vector-tile map with roads.gg's muted, professional style. The plane heading animates with CSS transitions. Build succeeds, existing tests pass, no regressions on the flight detail page.</p>
+  <p>The site gains dark mode with a theme toggle, respects prefers-reduced-motion, has a streamlined stats page with TOC and simplified route filter, adds search autocomplete, improves flight detail navigation with breadcrumbs and section jump links, adds aria-live regions, shows weather on mobile cards, adds chart loading skeletons, and addresses all remaining medium/low items. Total: ~23 actionable changes across 11 files.</p>
 </div>
 
 <!-- PHASES -->
 
-<!-- PHASE: 1 (status: done) -->
+<!-- PHASE: 1 (status: pending) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 1: Dependencies &amp; Style <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Remove leaflet and @types/leaflet from apps/web/package.json, add maplibre-gl ^5.17.0</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Copy roads.gg/static/map-style.json to airways.gg/apps/web/static/map-style.json</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Run npm install in workspace to install maplibre-gl</label></div>
+  <h2><span class="phase-icon">⏳</span> Phase 1: Dark Mode &amp; Reduced Motion <span class="badge badge-pending">pending</span></h2>
+  <div class="task-row"><input type="checkbox" disabled><label>Add :root.dark CSS custom property block to app.css with inverted color values (navy/indigo-toned dark palette)</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add theme toggle button (sun/moon icon) to +layout.svelte header, persisting choice to localStorage</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add @media (prefers-reduced-motion: reduce) block to app.css disabling all animations/transitions</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add dark: Tailwind variants to remaining hardcoded color classes across all pages</label></div>
 </div>
 
-<!-- PHASE: 2 (status: done) -->
+<!-- PHASE: 2 (status: pending) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 2: Rewrite FlightMap <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Rewrite FlightMap.svelte — replace Leaflet API with MapLibre GL equivalents. Keep same props interface, h-72 size, and collapsible behavior.</label></div>
+  <h2><span class="phase-icon">⏳</span> Phase 2: Stats Page UX Overhaul <span class="badge badge-pending">pending</span></h2>
+  <div class="task-row"><input type="checkbox" disabled><label>Add sticky sidebar table of contents with anchor links to each stats section</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Collapse secondary sections (aircraft usage, visibility impact, wind impact, weather days) behind expandable toggles</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Replace two-tier route filter (top-10 pills + search input) with a single scrollable multi-select list with search at top</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Replace hidden custom date range toggle with a dedicated date range picker component</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Convert full-screen disclaimer modal to a dismissible banner (like roads.gg banner pattern)</label></div>
 </div>
 
-<!-- PHASE: 3 (status: done) -->
+<!-- PHASE: 3 (status: pending) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 3: Polish &amp; Verify <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Update vite.config.ts — remove Leaflet manualChunks, add maplibre-gl if desired</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Add CSS transition on plane marker element for smooth heading animation</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Run npm run build to verify no build errors</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Visual spot-check — verify map renders correctly on a flight detail page</label></div>
+  <h2><span class="phase-icon">⏳</span> Phase 3: Search Autocomplete &amp; Navigation <span class="badge badge-pending">pending</span></h2>
+  <div class="task-row"><input type="checkbox" disabled><label>Add debounced suggestion dropdown to home page inline search and /search page search input</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add visible breadcrumb trail (Home &gt; Flights &gt; GR602) to flight detail page</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add sticky mini-nav row with section jump links below flight detail header</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add Search link and active-state indicator (aria-current) to header navigation</label></div>
+</div>
+
+<!-- PHASE: 4 (status: pending) -->
+<div class="phase">
+  <h2><span class="phase-icon">⏳</span> Phase 4: Accessibility &amp; Dynamic Content <span class="badge badge-pending">pending</span></h2>
+  <div class="task-row"><input type="checkbox" disabled><label>Add aria-live="polite" regions to DelayCounter and flight board container</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add hidden accessible data tables alongside Chart.js charts on stats page</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add loading skeletons for Chart.js chart containers on stats page</label></div>
+</div>
+
+<!-- PHASE: 5 (status: pending) -->
+<div class="phase">
+  <h2><span class="phase-icon">⏳</span> Phase 5: Mobile &amp; Component Polish <span class="badge badge-pending">pending</span></h2>
+  <div class="task-row"><input type="checkbox" disabled><label>Show condensed one-line weather on mobile FlightCard instead of hiding entirely</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add spinner to "Loading map…" state in flight detail map expand section</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Improve share button fallback — show toast on desktop, URL on share failure</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add relative timestamps to recently-viewed flight chips</label></div>
+</div>
+
+<!-- PHASE: 6 (status: pending) -->
+<div class="phase">
+  <h2><span class="phase-icon">⏳</span> Phase 6: Low-Severity Cleanup <span class="badge badge-pending">pending</span></h2>
+  <div class="task-row"><input type="checkbox" disabled><label>Add @media print styles to app.css — hide chrome, show clean flight data tables</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add favicon.ico link to app.html for legacy browser support</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Standardize flight detail section headers to consistent style</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Make error page "Go to flight board" primary CTA, hide "Go back" when no same-origin referrer</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Show threshold value prominently in stats "On-Time Rate" hero card</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Make auto-advance banner more prominent (amber tone + "Switch to today" button)</label></div>
 </div>
 
 <!-- NOTES -->
 <div class="notes-box">
   <h3><span class="section-icon">📝</span> Notes</h3>
   <ul>
-    <li>map-style.json uses OpenFreeMap (openfreemap.org) — free, no API key, reliable</li>
-    <li>MapLibre GL CSS is namespaced under .maplibregl-*, no Tailwind conflicts expected</li>
-    <li>FlightMap is only dynamically imported on /flights/[id] when position data exists</li>
-    <li>Plane heading animation uses CSS transition: transform 0.3s ease on the marker element</li>
+    <li>Dark palette should use navy/indigo tones matching the aviation theme (--background: 222 47% 8%, etc.)</li>
+    <li>Theme toggle persists to localStorage; default follows prefers-color-scheme on first visit</li>
+    <li>All changes are additive — existing functionality must not regress</li>
+    <li>Build and tests must pass after each phase</li>
+    <li>See code-review-report.md for full context on each finding</li>
   </ul>
 </div>
 

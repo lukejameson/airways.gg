@@ -1,0 +1,65 @@
+# todo.yaml — single source of truth for LLM
+# Updated: 2026-06-02T15:00:00Z
+
+goal: >
+  Replace Leaflet with MapLibre GL in FlightMap.svelte, using the same
+  vector-tile map style as roads.gg (map-style.json from OpenFreeMap).
+
+why_how: >
+  airways.gg currently uses Leaflet 1.9.4 with raster OSM tiles for the
+  flight tracking map on /flights/[id]. The map is functional but visually
+  plain and pixelated at high zoom. roads.gg (sibling project) already uses
+  MapLibre GL 5.17.0 with a polished custom vector-tile style served from
+  OpenFreeMap — free, no API key, and proven. The migration is a focused
+  library swap in one component (~100 lines), plus copying the style file
+  and updating dependencies. The component keeps the same h-72 size and
+  collapsible behavior.
+
+expected: >
+  FlightMap.svelte renders the same departure/arrival airports, route lines
+  (dashed planned, solid flown), and heading-rotated aircraft marker — but
+  now on a smooth vector-tile map with roads.gg's muted, professional style.
+  The plane heading animates with CSS transitions. Build succeeds, existing
+  tests pass, no regressions on the flight detail page.
+
+status: complete
+
+tasks:
+  - phase: 1
+    name: Dependencies & Style
+    status: done
+    items:
+      - done: true
+        action: Remove leaflet and @types/leaflet from apps/web/package.json, add maplibre-gl ^5.17.0
+      - done: false
+        action: Copy roads.gg/static/map-style.json to airways.gg/apps/web/static/map-style.json
+      - done: false
+        action: Run npm install in workspace to install maplibre-gl
+
+  - phase: 2
+    name: Rewrite FlightMap
+    status: done
+    items:
+      - done: true
+        action: Rewrite FlightMap.svelte — replace Leaflet API (L.map, L.tileLayer, L.polyline, L.marker, L.divIcon, L.latLngBounds, fitBounds) with MapLibre GL equivalents (maplibregl.Map, addSource+addLayer for lines, maplibregl.Marker, fitBounds with bbox computation). Import maplibre-gl CSS. Keep same props interface, h-72 size, and collapsible behavior.
+
+  - phase: 3
+    name: Polish & Verify
+    status: done
+    items:
+      - done: true
+        action: Update vite.config.ts — remove Leaflet manualChunks entry, replace with maplibre-gl if desired
+      - done: true
+        action: Add CSS transition on plane marker element for smooth heading animation
+      - done: true
+        action: Run npm run build to verify no build errors
+      - done: true
+        action: Visual spot-check — verify map renders correctly on a flight detail page
+
+notes:
+  - map-style.json uses OpenFreeMap (openfreemap.org) — free, no API key, reliable
+  - MapLibre GL CSS is namespaced under .maplibregl-*, no Tailwind conflicts expected
+  - FlightMap is only dynamically imported on /flights/[id] when position data exists
+  - Plane heading animation uses CSS transition: transform 0.3s ease on the marker element
+
+discovered: []

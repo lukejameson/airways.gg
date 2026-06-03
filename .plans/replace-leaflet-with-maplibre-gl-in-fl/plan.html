@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan — airways.gg</title>
+<style>
+  :root { --bg: #f8f9fa; --card: #fff; --text: #1a1a2e; --muted: #6b7280;
+          --border: #e5e7eb; --cyan: #0891b2; --green: #16a34a; --blue: #2563eb;
+          --purple: #7c3aed; --amber: #d97706; --red: #dc2626; --radius: 10px; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg);
+         color: var(--text); max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem; }
+  header { margin-bottom: 2rem; }
+  h1 { font-size: 1.8rem; display: flex; align-items: center; gap: 0.5rem; }
+  .meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.25rem; }
+  .badge { display: inline-block; font-size: 0.7rem; font-weight: 600; padding: 2px 10px;
+           border-radius: 99px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .badge-pending { background: #f1f5f9; color: #64748b; }
+  .badge-active  { background: #dbeafe; color: #2563eb; }
+  .badge-done    { background: #dcfce7; color: #16a34a; }
+
+  .goal { background: #ecfeff; border-left: 4px solid var(--cyan); padding: 1rem 1.25rem;
+          border-radius: 0 var(--radius) var(--radius) 0; margin-bottom: 1.25rem;
+          font-size: 1.05rem; line-height: 1.55; }
+  .goal::before { content: "🎯 "; font-size: 1.15rem; }
+
+  .progress-wrap { margin-bottom: 1.5rem; }
+  .progress-label { display: flex; justify-content: space-between; font-size: 0.8rem;
+                    color: var(--muted); margin-bottom: 0.35rem; }
+  .progress-bar { height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--blue));
+                   border-radius: 99px; transition: width 0.4s ease; }
+
+  .info-box { border-radius: 0 var(--radius) var(--radius) 0; padding: 1rem 1.25rem;
+              margin-bottom: 1.25rem; font-size: 0.97rem; line-height: 1.55; }
+  .info-box h3 { font-size: 0.95rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
+  .whyhow-box { background: #eff6ff; border-left: 4px solid var(--blue); }
+  .whyhow-box h3 { color: var(--blue); }
+  .expected-box { background: #f0fdf4; border-left: 4px solid var(--green); }
+  .expected-box h3 { color: var(--green); }
+
+  .phase { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+           padding: 1.25rem 1.5rem; margin-bottom: 1rem; }
+  .phase h2 { font-size: 1.05rem; display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; }
+  .phase-icon { font-size: 1.1rem; line-height: 1; }
+  .task-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; font-size: 0.95rem; }
+  .task-row input[type="checkbox"] { accent-color: var(--cyan); width: 1rem; height: 1rem; flex-shrink: 0; }
+  .task-row.done label { text-decoration: line-through; color: var(--muted); }
+
+  .notes-box { background: #fffbeb; border: 1px solid #fcd34d; border-radius: var(--radius);
+               padding: 1rem 1.25rem; margin-top: 1.5rem; }
+  .notes-box h3 { font-size: 0.95rem; margin-bottom: 0.4rem; color: var(--amber); display: flex; align-items: center; gap: 0.4rem; }
+  .notes-box ul { list-style: disc; margin-left: 1.25rem; font-size: 0.9rem; color: #78350f; }
+  .discovered-box { background: #fef2f2; border: 1px solid #fca5a5; border-radius: var(--radius);
+                    padding: 1rem 1.25rem; margin-top: 1rem; }
+  .discovered-box h3 { font-size: 0.95rem; margin-bottom: 0.4rem; color: var(--red); display: flex; align-items: center; gap: 0.4rem; }
+  .discovered-box .task-row label { color: #991b1b; }
+  .empty-state { color: var(--muted); font-style: italic; font-size: 0.85rem; padding: 0.25rem 0; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <h1>&#x1F4CB; Plan — airways.gg</h1>
+  <!-- STATUS: complete -->
+  <p class="meta">Generated: 2026-06-02 &middot; Status: <span class="badge badge-done">complete</span></p>
+</header>
+
+<!-- GOAL -->
+<div class="goal">Replace Leaflet with MapLibre GL in FlightMap.svelte, using the same vector-tile map style as roads.gg (map-style.json from OpenFreeMap).</div>
+
+<!-- PROGRESS -->
+<div class="progress-wrap">
+  <div class="progress-label"><span>Progress</span><span>8 / 8</span></div>
+  <div class="progress-bar"><div class="progress-fill" style="width: 100%;"></div></div>
+</div>
+
+<!-- WHY & HOW -->
+<div class="info-box whyhow-box">
+  <h3><span class="section-icon">💡</span> Why &amp; How</h3>
+  <p>airways.gg currently uses Leaflet 1.9.4 with raster OSM tiles for the flight tracking map on /flights/[id]. The map is functional but visually plain and pixelated at high zoom. roads.gg (sibling project) already uses MapLibre GL 5.17.0 with a polished custom vector-tile style served from OpenFreeMap — free, no API key, and proven. The migration is a focused library swap in one component (~100 lines), plus copying the style file and updating dependencies. The component keeps the same h-72 size and collapsible behavior.</p>
+</div>
+
+<!-- EXPECTED -->
+<div class="info-box expected-box">
+  <h3><span class="section-icon">🎁</span> Expected Outcome</h3>
+  <p>FlightMap.svelte renders the same departure/arrival airports, route lines (dashed planned, solid flown), and heading-rotated aircraft marker — but now on a smooth vector-tile map with roads.gg's muted, professional style. The plane heading animates with CSS transitions. Build succeeds, existing tests pass, no regressions on the flight detail page.</p>
+</div>
+
+<!-- PHASES -->
+
+<!-- PHASE: 1 (status: done) -->
+<div class="phase">
+  <h2><span class="phase-icon">✅</span> Phase 1: Dependencies &amp; Style <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Remove leaflet and @types/leaflet from apps/web/package.json, add maplibre-gl ^5.17.0</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Copy roads.gg/static/map-style.json to airways.gg/apps/web/static/map-style.json</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Run npm install in workspace to install maplibre-gl</label></div>
+</div>
+
+<!-- PHASE: 2 (status: done) -->
+<div class="phase">
+  <h2><span class="phase-icon">✅</span> Phase 2: Rewrite FlightMap <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Rewrite FlightMap.svelte — replace Leaflet API with MapLibre GL equivalents. Keep same props interface, h-72 size, and collapsible behavior.</label></div>
+</div>
+
+<!-- PHASE: 3 (status: done) -->
+<div class="phase">
+  <h2><span class="phase-icon">✅</span> Phase 3: Polish &amp; Verify <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Update vite.config.ts — remove Leaflet manualChunks, add maplibre-gl if desired</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add CSS transition on plane marker element for smooth heading animation</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Run npm run build to verify no build errors</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Visual spot-check — verify map renders correctly on a flight detail page</label></div>
+</div>
+
+<!-- NOTES -->
+<div class="notes-box">
+  <h3><span class="section-icon">📝</span> Notes</h3>
+  <ul>
+    <li>map-style.json uses OpenFreeMap (openfreemap.org) — free, no API key, reliable</li>
+    <li>MapLibre GL CSS is namespaced under .maplibregl-*, no Tailwind conflicts expected</li>
+    <li>FlightMap is only dynamically imported on /flights/[id] when position data exists</li>
+    <li>Plane heading animation uses CSS transition: transform 0.3s ease on the marker element</li>
+  </ul>
+</div>
+
+<!-- DISCOVERED (hidden if empty) -->
+<!-- No discovered tasks yet -->
+
+</body>
+</html>
