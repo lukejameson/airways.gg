@@ -1,0 +1,117 @@
+# todo.yaml — single source of truth for LLM
+# Updated: 2026-06-02T16:00:00Z
+
+goal: >
+  Address 23 UI/UX issues identified in the airways.gg code review —
+  4 high, 12 medium, 7 low — covering dark mode, accessibility, stats page
+  UX, search, navigation, and polish.
+
+why_how: >
+  A top-down UI/UX audit of the airways.gg SvelteKit 5 web app found the
+  site well-crafted but with concrete gaps: no dark mode, no reduced-motion
+  support, an overwhelming stats page, missing search autocomplete, and
+  various interaction polish issues. Each task targets a specific finding
+  from code-review-report.md with clear, independently verifiable actions.
+  Prioritized by severity — high items first, then medium, then low.
+
+expected: >
+  The site gains dark mode with a theme toggle, respects prefers-reduced-motion,
+  has a streamlined stats page with TOC and simplified route filter, adds
+  search autocomplete, improves flight detail navigation with breadcrumbs
+  and section jump links, adds aria-live regions, shows weather on mobile
+  cards, adds chart loading skeletons, and addresses all remaining medium/low
+  items. Total: ~23 actionable changes across 11 files.
+
+status: pending
+
+tasks:
+  - phase: 1
+    name: Dark Mode & Reduced Motion
+    status: pending
+    items:
+      - done: false
+        action: Add :root.dark CSS custom property block to app.css with inverted color values (navy/indigo-toned dark palette)
+      - done: false
+        action: Add theme toggle button (sun/moon icon) to +layout.svelte header, persisting choice to localStorage
+      - done: false
+        action: Add @media (prefers-reduced-motion: reduce) block to app.css disabling all animations/transitions
+      - done: false
+        action: Add dark: Tailwind variants to remaining hardcoded color classes across all pages
+
+  - phase: 2
+    name: Stats Page UX Overhaul
+    status: pending
+    items:
+      - done: false
+        action: Add sticky sidebar table of contents with anchor links to each stats section
+      - done: false
+        action: Collapse secondary sections (aircraft usage, visibility impact, wind impact, weather days) behind expandable toggles
+      - done: false
+        action: Replace two-tier route filter (top-10 pills + search input) with a single scrollable multi-select list with search at top
+      - done: false
+        action: Replace hidden custom date range toggle with a dedicated date range picker component
+      - done: false
+        action: Convert full-screen disclaimer modal to a dismissible banner (like roads.gg banner pattern)
+
+  - phase: 3
+    name: Search Autocomplete & Navigation
+    status: pending
+    items:
+      - done: false
+        action: Add debounced suggestion dropdown to home page inline search and /search page search input
+      - done: false
+        action: Add visible breadcrumb trail (Home > Flights > GR602) to flight detail page replacing or augmenting Back link
+      - done: false
+        action: Add sticky mini-nav row with section jump links below flight detail header (Status · Map · Rotation · Weather · Details · History)
+      - done: false
+        action: Add Search link and active-state indicator (aria-current) to header navigation
+
+  - phase: 4
+    name: Accessibility & Dynamic Content
+    status: pending
+    items:
+      - done: false
+        action: Add aria-live="polite" regions to DelayCounter and flight board container for screen reader announcements
+      - done: false
+        action: Add hidden accessible data tables alongside Chart.js charts on stats page
+      - done: false
+        action: Add loading skeletons for Chart.js chart containers on stats page
+
+  - phase: 5
+    name: Mobile & Component Polish
+    status: pending
+    items:
+      - done: false
+        action: Show condensed one-line weather on mobile FlightCard (e.g. "GCI ☀️ 18°C → LGW ☁️ 15°C") instead of hiding entirely
+      - done: false
+        action: Add spinner to "Loading map…" state in flight detail map expand section
+      - done: false
+        action: Improve share button fallback — show toast "Link copied" on desktop, show URL on share failure
+      - done: false
+        action: Add relative timestamps ("2h ago", "Yesterday") to recently-viewed flight chips
+
+  - phase: 6
+    name: Low-Severity Cleanup
+    status: pending
+    items:
+      - done: false
+        action: Add @media print styles to app.css — hide chrome, show clean flight data tables
+      - done: false
+        action: Add favicon.ico link to app.html for legacy browser support
+      - done: false
+        action: Standardize flight detail section headers to consistent style (choose uppercase tracking-wide or sentence case)
+      - done: false
+        action: Make error page "Go to flight board" primary CTA, hide "Go back" when no same-origin referrer
+      - done: false
+        action: Show threshold value prominently in stats "On-Time Rate" hero card (e.g. "On-Time Rate (≤15 min)")
+      - done: false
+        action: Make auto-advance banner more prominent (amber tone + "Switch to today" button)
+
+notes:
+  - Dark palette should use navy/indigo tones matching the aviation theme (--background: 222 47% 8%, etc.)
+  - Theme toggle persists to localStorage; default follows prefers-color-scheme on first visit
+  - All changes are additive — existing functionality must not regress
+  - Build and tests must pass after each phase
+  - See code-review-report.md for full context on each finding
+
+discovered: []

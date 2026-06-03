@@ -40,6 +40,8 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/database ./packages/database
 COPY --from=builder /app/packages/telegram ./packages/telegram
 
+RUN apk add --no-cache tzdata
+
 ENV NODE_ENV=production \
     TZ=UTC
 CMD ["node", "dist/index.js"]

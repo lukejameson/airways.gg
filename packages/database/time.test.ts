@@ -207,3 +207,79 @@ describe('edge cases', () => {
     expect(guernseyHour(new Date('2026-01-15T00:00:00Z'))).toBe(0);
   });
 });
+
+// ── Regression: production bug (2026-06-03 GR634) ──────────────────────────
+
+describe('regression: BST scheduled times must store as true UTC', () => {
+  it('GR634 scenario: 09:15 BST on 2026-06-03 stores as 08:15Z', () => {
+    // This was the exact bug: scheduled departure showed 10:15 instead of 09:15.
+    // If localToUtc incorrectly treats zone as UTC, it returns 09:15Z instead of 08:15Z.
+    const result = localToUtc('2026-06-03', 9, 15);
+    expect(result.toISOString()).toBe('2026-06-03T08:15:00.000Z');
+  });
+
+  it('15:45 BST stores as 14:45Z (afternoon BST window)', () => {
+    const result = localToUtc('2026-06-03', 15, 45);
+    expect(result.toISOString()).toBe('2026-06-03T14:45:00.000Z');
+  });
+
+  it('winter (GMT) times are unchanged by the fix', () => {
+    // Ensure the tzdata fix doesn't break GMT winter dates
+    const result = localToUtc('2026-01-15', 10, 30);
+    expect(result.toISOString()).toBe('2026-01-15T10:30:00.000Z');
+  });
+});
+
+// ── Round-trip: scraper write → web display ────────────────────────────────
+
+describe('round-trip: localToUtc → display', () => {
+  it('BST time round-trips through UTC storage and back to local display', () => {
+    // Simulate the full pipeline:
+    //   1. Scraper calls localToUtc('2026-06-03', 9, 15) → stores UTC in DB
+    //   2. DB stores as timestamp without tz (value: '2026-06-03 08:15:00')
+    //   3. Web reads via pg type parser (appends 'Z'): 2026-06-03T08:15:00.000Z
+    //   4. formatGuernseyTime(new Date('2026-06-03T08:15:00.000Z')) → '09:15'
+
+    const utc = localToUtc('2026-06-03', 9, 15);
+    // Step 3: simulate what the pg type parser does (appends 'Z')
+    const dbTimestamp = utc.toISOString(); // 2026-06-03T08:15:00.000Z
+    const readBack = new Date(dbTimestamp);
+
+    // Step 4: simulate formatGuernseyTime using native Intl (same API as web app)
+    const displayed = readBack.toLocaleTimeString('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: GY_TZ,
+    });
+    expect(displayed).toBe('09:15');
+  });
+
+  it('round-trip produces correct display for GMT winter date', () => {
+    const utc = localToUtc('2026-01-15', 14, 45);
+    const readBack = new Date(utc.toISOString());
+    const displayed = readBack.toLocaleTimeString('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: GY_TZ,
+    });
+    expect(displayed).toBe('14:45');
+  });
+
+  it('native Intl and Luxon produce the same display for BST', () => {
+    // Verify the two code paths agree — this is the asymmetry that caused the bug.
+    // If they differ, one of them has broken timezone data.
+    const utc = localToUtc('2026-06-03', 9, 15);
+
+    const nativeDisplay = new Date(utc.toISOString()).toLocaleTimeString('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: GY_TZ,
+    });
+
+    const luxonDisplay = DateTime.fromJSDate(utc, { zone: 'UTC' })
+      .setZone(GY_TZ)
+      .toFormat('HH:mm');
+
+    expect(nativeDisplay).toBe(luxonDisplay);
+  });
+});

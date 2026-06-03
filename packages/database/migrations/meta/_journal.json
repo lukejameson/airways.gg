@@ -99,6 +99,13 @@
       "when": 1775600000000,
       "tag": "0015_add_lhr_airport",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1776800000000,
+      "tag": "0016_fix_bst_scheduled_times",
+      "breakpoints": true
     }
   ]
 }

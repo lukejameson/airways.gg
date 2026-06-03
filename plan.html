@@ -64,98 +64,75 @@
 <!-- HEADER -->
 <header>
   <h1>&#x1F4CB; Plan — airways.gg</h1>
-  <!-- STATUS: pending -->
-  <p class="meta">Generated: 2026-06-02 &middot; Status: <span class="badge badge-pending">pending</span></p>
+  <!-- STATUS: active -->
+  <p class="meta">Generated: 2026-06-03 &middot; Status: <span class="badge badge-active">in progress</span></p>
 </header>
 
 <!-- GOAL -->
-<div class="goal">Address 23 UI/UX issues identified in the airways.gg code review — 4 high, 12 medium, 7 low — covering dark mode, accessibility, stats page UX, search, navigation, and polish.</div>
+<div class="goal">Fix systemic 1-hour offset in all flight scheduled departure/arrival times caused by Luxon failing to resolve the Europe/London timezone on Alpine Docker images during BST.</div>
 
 <!-- PROGRESS -->
 <div class="progress-wrap">
-  <div class="progress-label"><span>Progress</span><span>0 / 23</span></div>
+  <div class="progress-label"><span>Progress</span><span>0 / 10</span></div>
   <div class="progress-bar"><div class="progress-fill" style="width: 0%;"></div></div>
 </div>
 
 <!-- WHY & HOW -->
 <div class="info-box whyhow-box">
   <h3><span class="section-icon">💡</span> Why &amp; How</h3>
-  <p>A top-down UI/UX audit of the airways.gg SvelteKit 5 web app found the site well-crafted but with concrete gaps: no dark mode, no reduced-motion support, an overwhelming stats page, missing search autocomplete, and various interaction polish issues. Each task targets a specific finding from code-review-report.md with clear, independently verifiable actions. Prioritized by severity — high items first, then medium, then low.</p>
+  <p>Every flight displays scheduled times 1 hour later than reality during BST (e.g., GR634 shows 10:15 instead of 09:15). The root cause is that <code>localToUtc()</code> uses Luxon's <code>DateTime.fromFormat</code> with <code>zone:'Europe/London'</code>, but the <code>node:20-alpine</code> Docker images lack <code>tzdata</code>, causing Luxon to fall back to UTC and store times as-if-UTC instead of true UTC. The display layer (<code>formatGuernseyTime</code>) uses native <code>Intl.DateTimeFormat</code> which resolves the timezone correctly, converting the wrongly-stored UTC value back to BST as BST+1 — producing the 1-hour offset.</p>
+  <p style="margin-top:0.5rem"><strong>Fix:</strong> install <code>tzdata</code> in guernsey-scraper and web Dockerfiles, run a SQL migration to correct already-stored bad data, and add an integration test to prevent regression.</p>
 </div>
 
 <!-- EXPECTED -->
 <div class="info-box expected-box">
   <h3><span class="section-icon">🎁</span> Expected Outcome</h3>
-  <p>The site gains dark mode with a theme toggle, respects prefers-reduced-motion, has a streamlined stats page with TOC and simplified route filter, adds search autocomplete, improves flight detail navigation with breadcrumbs and section jump links, adds aria-live regions, shows weather on mobile cards, adds chart loading skeletons, and addresses all remaining medium/low items. Total: ~23 actionable changes across 11 files.</p>
+  <p>After deployment, all flight scheduled departure/arrival times display correctly in BST (09:15 instead of 10:15 for GR634). The fix is durable: <code>tzdata</code> installed in affected containers, regression test in place, and existing bad data corrected via migration.</p>
 </div>
 
 <!-- PHASES -->
 
-<!-- PHASE: 1 (status: pending) -->
+<!-- PHASE: 1 (status: done) -->
 <div class="phase">
-  <h2><span class="phase-icon">⏳</span> Phase 1: Dark Mode &amp; Reduced Motion <span class="badge badge-pending">pending</span></h2>
-  <div class="task-row"><input type="checkbox" disabled><label>Add :root.dark CSS custom property block to app.css with inverted color values (navy/indigo-toned dark palette)</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Add theme toggle button (sun/moon icon) to +layout.svelte header, persisting choice to localStorage</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Add @media (prefers-reduced-motion: reduce) block to app.css disabling all animations/transitions</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Add dark: Tailwind variants to remaining hardcoded color classes across all pages</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 1: Fix Dockerfiles <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add <code>RUN apk add --no-cache tzdata</code> to apps/guernsey-scraper/Dockerfile (production stage, before ENV)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add <code>RUN apk add --no-cache tzdata</code> to apps/web/Dockerfile (production stage, before ENV)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Verify the fr24-scraper Dockerfile already has tzdata (it does via apt-get) — no changes needed</label></div>
 </div>
 
-<!-- PHASE: 2 (status: pending) -->
+<!-- PHASE: 2 (status: done) -->
 <div class="phase">
-  <h2><span class="phase-icon">⏳</span> Phase 2: Stats Page UX Overhaul <span class="badge badge-pending">pending</span></h2>
-  <div class="task-row"><input type="checkbox" disabled><label>Add sticky sidebar table of contents with anchor links to each stats section</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Collapse secondary sections (aircraft usage, visibility impact, wind impact, weather days) behind expandable toggles</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Replace two-tier route filter (top-10 pills + search input) with a single scrollable multi-select list with search at top</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Replace hidden custom date range toggle with a dedicated date range picker component</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Convert full-screen disclaimer modal to a dismissible banner (like roads.gg banner pattern)</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 2: Data Fix Migration <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Write SQL migration 0016_fix_bst_scheduled_times.sql that adds 1 hour to scheduled_departure/scheduled_arrival for BST-date flights</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add the migration to the Drizzle migrations directory with proper meta files</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Test the migration on a development database with sample BST-date flight data</label></div>
 </div>
 
-<!-- PHASE: 3 (status: pending) -->
+<!-- PHASE: 3 (status: active) -->
 <div class="phase">
-  <h2><span class="phase-icon">⏳</span> Phase 3: Search Autocomplete &amp; Navigation <span class="badge badge-pending">pending</span></h2>
-  <div class="task-row"><input type="checkbox" disabled><label>Add debounced suggestion dropdown to home page inline search and /search page search input</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Add visible breadcrumb trail (Home &gt; Flights &gt; GR602) to flight detail page</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Add sticky mini-nav row with section jump links below flight detail header</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Add Search link and active-state indicator (aria-current) to header navigation</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 3: Regression Test <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add integration test verifying localToUtc('2026-06-15', 10, 30) returns 09:30Z (BST→UTC -1h)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add round-trip test: localToUtc → store → read → formatGuernseyTime produces original local time</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Run full test suite and verify all tests pass</label></div>
 </div>
 
-<!-- PHASE: 4 (status: pending) -->
+<!-- PHASE: 4 (status: active) -->
 <div class="phase">
-  <h2><span class="phase-icon">⏳</span> Phase 4: Accessibility &amp; Dynamic Content <span class="badge badge-pending">pending</span></h2>
-  <div class="task-row"><input type="checkbox" disabled><label>Add aria-live="polite" regions to DelayCounter and flight board container</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Add hidden accessible data tables alongside Chart.js charts on stats page</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Add loading skeletons for Chart.js chart containers on stats page</label></div>
-</div>
-
-<!-- PHASE: 5 (status: pending) -->
-<div class="phase">
-  <h2><span class="phase-icon">⏳</span> Phase 5: Mobile &amp; Component Polish <span class="badge badge-pending">pending</span></h2>
-  <div class="task-row"><input type="checkbox" disabled><label>Show condensed one-line weather on mobile FlightCard instead of hiding entirely</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Add spinner to "Loading map…" state in flight detail map expand section</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Improve share button fallback — show toast on desktop, URL on share failure</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Add relative timestamps to recently-viewed flight chips</label></div>
-</div>
-
-<!-- PHASE: 6 (status: pending) -->
-<div class="phase">
-  <h2><span class="phase-icon">⏳</span> Phase 6: Low-Severity Cleanup <span class="badge badge-pending">pending</span></h2>
-  <div class="task-row"><input type="checkbox" disabled><label>Add @media print styles to app.css — hide chrome, show clean flight data tables</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Add favicon.ico link to app.html for legacy browser support</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Standardize flight detail section headers to consistent style</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Make error page "Go to flight board" primary CTA, hide "Go back" when no same-origin referrer</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Show threshold value prominently in stats "On-Time Rate" hero card</label></div>
-  <div class="task-row"><input type="checkbox" disabled><label>Make auto-advance banner more prominent (amber tone + "Switch to today" button)</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 4: Deploy &amp; Verify <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Deploy updated Docker images to production</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Run the data fix migration in production</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Verify GR634 and a sample of other flights show correct scheduled times on the live site</label></div>
 </div>
 
 <!-- NOTES -->
 <div class="notes-box">
   <h3><span class="section-icon">📝</span> Notes</h3>
   <ul>
-    <li>Dark palette should use navy/indigo tones matching the aviation theme (--background: 222 47% 8%, etc.)</li>
-    <li>Theme toggle persists to localStorage; default follows prefers-color-scheme on first visit</li>
-    <li>All changes are additive — existing functionality must not regress</li>
-    <li>Build and tests must pass after each phase</li>
-    <li>See code-review-report.md for full context on each finding</li>
+    <li><code>tzdata</code> is already installed in fr24-scraper (via <code>apt-get tzdata</code> in the slim image) — only guernsey-scraper and web need the fix</li>
+    <li>The SQL migration must only affect flights where <code>scheduled_departure</code> is stored as-if-UTC (1 hour ahead). Use the same BST date predicate from migration 0014.</li>
+    <li>Unlike migration 0014 which SUBTRACTED 1 hour (wall-clock → UTC), this migration must ADD 1 hour (as-if-UTC → true UTC)</li>
+    <li>Only <code>scheduled_departure</code> and <code>scheduled_arrival</code> need correction; actual times come from status message timestamps</li>
+    <li>The <code>formatGuernseyTime</code> display layer uses native Intl which already works correctly — no changes needed there</li>
   </ul>
 </div>
 

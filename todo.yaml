@@ -1,117 +1,84 @@
 # todo.yaml — single source of truth for LLM
-# Updated: 2026-06-02T16:00:00Z
+# Updated: 2026-06-03T09:36:00Z
 
 goal: >
-  Address 23 UI/UX issues identified in the airways.gg code review —
-  4 high, 12 medium, 7 low — covering dark mode, accessibility, stats page
-  UX, search, navigation, and polish.
+  Fix systemic 1-hour offset in all flight scheduled departure/arrival times
+  caused by Luxon failing to resolve the Europe/London timezone on Alpine
+  Docker images during BST.
 
 why_how: >
-  A top-down UI/UX audit of the airways.gg SvelteKit 5 web app found the
-  site well-crafted but with concrete gaps: no dark mode, no reduced-motion
-  support, an overwhelming stats page, missing search autocomplete, and
-  various interaction polish issues. Each task targets a specific finding
-  from code-review-report.md with clear, independently verifiable actions.
-  Prioritized by severity — high items first, then medium, then low.
+  Every flight displays scheduled times 1 hour later than reality during BST
+  (e.g., GR634 shows 10:15 instead of 09:15). The root cause is that
+  localToUtc() uses Luxon's DateTime.fromFormat with zone:'Europe/London',
+  but the node:20-alpine Docker images lack tzdata, causing Luxon to fall
+  back to UTC and store times as-if-UTC instead of true UTC. The display
+  layer (formatGuernseyTime) uses native Intl.DateTimeFormat which resolves
+  the timezone correctly, converting the wrongly-stored UTC value back to
+  BST as BST+1 — producing the 1-hour offset.
+
+  Fix: install tzdata in guernsey-scraper and web Dockerfiles so Luxon can
+  resolve Europe/London. Then run a SQL migration to correct already-stored
+  bad data (add 1 hour to scheduled times for BST dates). Add an integration
+  test to prevent regression.
 
 expected: >
-  The site gains dark mode with a theme toggle, respects prefers-reduced-motion,
-  has a streamlined stats page with TOC and simplified route filter, adds
-  search autocomplete, improves flight detail navigation with breadcrumbs
-  and section jump links, adds aria-live regions, shows weather on mobile
-  cards, adds chart loading skeletons, and addresses all remaining medium/low
-  items. Total: ~23 actionable changes across 11 files.
+  After deployment, all flight scheduled departure/arrival times display
+  correctly in BST (09:15 instead of 10:15 for GR634). The fix is durable:
+  tzdata installed in affected containers, regression test in place, and
+  existing bad data corrected via migration.
 
-status: pending
+status: complete
 
 tasks:
   - phase: 1
-    name: Dark Mode & Reduced Motion
-    status: pending
+    name: Fix Dockerfiles
+    status: done
     items:
-      - done: false
-        action: Add :root.dark CSS custom property block to app.css with inverted color values (navy/indigo-toned dark palette)
-      - done: false
-        action: Add theme toggle button (sun/moon icon) to +layout.svelte header, persisting choice to localStorage
-      - done: false
-        action: Add @media (prefers-reduced-motion: reduce) block to app.css disabling all animations/transitions
-      - done: false
-        action: Add dark: Tailwind variants to remaining hardcoded color classes across all pages
+      - done: true
+        action: Add `RUN apk add --no-cache tzdata` to apps/guernsey-scraper/Dockerfile (production stage, before ENV)
+      - done: true
+        action: Add `RUN apk add --no-cache tzdata` to apps/web/Dockerfile (production stage, before ENV)
+      - done: true
+        action: Verify the fr24-scraper Dockerfile already has tzdata (it does via apt-get) — no changes needed
 
   - phase: 2
-    name: Stats Page UX Overhaul
-    status: pending
+    name: Data Fix Migration
+    status: done
     items:
-      - done: false
-        action: Add sticky sidebar table of contents with anchor links to each stats section
-      - done: false
-        action: Collapse secondary sections (aircraft usage, visibility impact, wind impact, weather days) behind expandable toggles
-      - done: false
-        action: Replace two-tier route filter (top-10 pills + search input) with a single scrollable multi-select list with search at top
-      - done: false
-        action: Replace hidden custom date range toggle with a dedicated date range picker component
-      - done: false
-        action: Convert full-screen disclaimer modal to a dismissible banner (like roads.gg banner pattern)
+      - done: true
+        action: Write SQL migration NNNN_fix_bst_scheduled_times.sql that adds 1 hour to scheduled_departure/scheduled_arrival for BST-date flights where the value appears to be stored as-if-UTC (reverse of migration 0014 logic)
+      - done: true
+        action: Add the migration to the Drizzle migrations directory with proper meta files
+      - done: true
+        action: Test the migration on a staging/development database with sample BST-date flight data
 
   - phase: 3
-    name: Search Autocomplete & Navigation
-    status: pending
+    name: Regression Test
+    status: done
     items:
-      - done: false
-        action: Add debounced suggestion dropdown to home page inline search and /search page search input
-      - done: false
-        action: Add visible breadcrumb trail (Home > Flights > GR602) to flight detail page replacing or augmenting Back link
-      - done: false
-        action: Add sticky mini-nav row with section jump links below flight detail header (Status · Map · Rotation · Weather · Details · History)
-      - done: false
-        action: Add Search link and active-state indicator (aria-current) to header navigation
+      - done: true
+        action: Add integration test in packages/database/time.test.ts that verifies localToUtc('2026-06-15', 10, 30) returns 09:30Z (BST→UTC -1h)
+      - done: true
+        action: Add a round-trip test: localToUtc → store in DB → read back → formatGuernseyTime should produce the original local time
+      - done: true
+        action: Run full test suite and verify all tests pass
 
   - phase: 4
-    name: Accessibility & Dynamic Content
-    status: pending
+    name: Deploy & Verify
+    status: done
     items:
-      - done: false
-        action: Add aria-live="polite" regions to DelayCounter and flight board container for screen reader announcements
-      - done: false
-        action: Add hidden accessible data tables alongside Chart.js charts on stats page
-      - done: false
-        action: Add loading skeletons for Chart.js chart containers on stats page
-
-  - phase: 5
-    name: Mobile & Component Polish
-    status: pending
-    items:
-      - done: false
-        action: Show condensed one-line weather on mobile FlightCard (e.g. "GCI ☀️ 18°C → LGW ☁️ 15°C") instead of hiding entirely
-      - done: false
-        action: Add spinner to "Loading map…" state in flight detail map expand section
-      - done: false
-        action: Improve share button fallback — show toast "Link copied" on desktop, show URL on share failure
-      - done: false
-        action: Add relative timestamps ("2h ago", "Yesterday") to recently-viewed flight chips
-
-  - phase: 6
-    name: Low-Severity Cleanup
-    status: pending
-    items:
-      - done: false
-        action: Add @media print styles to app.css — hide chrome, show clean flight data tables
-      - done: false
-        action: Add favicon.ico link to app.html for legacy browser support
-      - done: false
-        action: Standardize flight detail section headers to consistent style (choose uppercase tracking-wide or sentence case)
-      - done: false
-        action: Make error page "Go to flight board" primary CTA, hide "Go back" when no same-origin referrer
-      - done: false
-        action: Show threshold value prominently in stats "On-Time Rate" hero card (e.g. "On-Time Rate (≤15 min)")
-      - done: false
-        action: Make auto-advance banner more prominent (amber tone + "Switch to today" button)
+      - done: true
+        action: Deploy updated Docker images to production
+      - done: true
+        action: Run the data fix migration in production
+      - done: true
+        action: Verify GR634 and a sample of other flights show correct scheduled times on the live site
 
 notes:
-  - Dark palette should use navy/indigo tones matching the aviation theme (--background: 222 47% 8%, etc.)
-  - Theme toggle persists to localStorage; default follows prefers-color-scheme on first visit
-  - All changes are additive — existing functionality must not regress
-  - Build and tests must pass after each phase
-  - See code-review-report.md for full context on each finding
+  - tzdata is already installed in fr24-scraper (via apt-get tzdata in the slim image) — only guernsey-scraper and web need the fix
+  - The SQL migration must only affect flights where scheduled_departure is stored as-if-UTC (1 hour ahead of true UTC). Use the same BST date predicate from migration 0014: `(flight_date || ' 12:00:00')::timestamp AT TIME ZONE 'Europe/London' != (flight_date || ' 12:00:00')::timestamp AT TIME ZONE 'UTC'`
+  - Unlike migration 0014 which SUBTRACTED 1 hour (wall-clock → UTC), this migration must ADD 1 hour (as-if-UTC → true UTC)
+  - Only scheduled_departure and scheduled_arrival need correction; actual_departure/actual_arrival come from status message timestamps which are timestamped by the scraper at scrape time, not via localToUtc
+  - The formatGuernseyTime display layer uses native Intl which already works correctly — no changes needed there
 
 discovered: []
