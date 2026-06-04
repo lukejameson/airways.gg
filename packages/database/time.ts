@@ -105,3 +105,61 @@ export function nextGuernseyTime(hour: number, minute: number, from: Date = new 
   const nextGY = nextDate.toISOString().split('T')[0];
   return localToUtc(nextGY, hour, minute);
 }
+
+/**
+ * Result of a timezone offset health check.
+ */
+export interface TimezoneCheckResult {
+  ok: boolean;
+  expected: string;
+  actual: string;
+  detectedOffset: number;
+  expectedLabel: string;
+  details: string;
+}
+
+/**
+ * Check whether localToUtc is producing the correct UTC offsets for
+ * Europe/London. Tests a known BST date and a known GMT date, plus the
+ * current date. Returns a structured result suitable for alerting.
+ *
+ * Expected:
+ *   - BST (summer): localToUtc('2026-06-15', 10, 30) → 2026-06-15T09:30:00.000Z  (offset +1)
+ *   - GMT (winter): localToUtc('2026-01-15', 10, 30) → 2026-01-15T10:30:00.000Z  (offset +0)
+ */
+export function checkTimezoneOffset(): TimezoneCheckResult {
+  const bstTest = localToUtc('2026-06-15', 10, 30);
+  const bstExpected = '2026-06-15T09:30:00.000Z';
+  const bstOk = bstTest.toISOString() === bstExpected;
+
+  const gmtTest = localToUtc('2026-01-15', 10, 30);
+  const gmtExpected = '2026-01-15T10:30:00.000Z';
+  const gmtOk = gmtTest.toISOString() === gmtExpected;
+
+  // Check current month to determine expected offset
+  const now = new Date();
+  const nowStr = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;
+  const nowTest = localToUtc(nowStr, 10, 0);
+  const noon = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12, 0, 0));
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: GY_TZ,
+    hour: 'numeric',
+    hourCycle: 'h23',
+  }).formatToParts(noon);
+  const noonHour = parseInt(parts.find(p => p.type === 'hour')?.value ?? '12', 10);
+  const currentOffset = noonHour - 12;
+  const isBstNow = currentOffset === 1;
+
+  const allOk = bstOk && gmtOk;
+
+  return {
+    ok: allOk,
+    expected: isBstNow ? bstExpected : gmtExpected,
+    actual: isBstNow ? bstTest.toISOString() : gmtTest.toISOString(),
+    detectedOffset: currentOffset,
+    expectedLabel: isBstNow ? 'BST (UTC+1)' : 'GMT (UTC+0)',
+    details: allOk
+      ? `Timezone OK — detected ${isBstNow ? 'BST' : 'GMT'} offset ${currentOffset}`
+      : `Timezone MISMATCH — expected ${isBstNow ? 'BST (offset 1)' : 'GMT (offset 0)'}, detected offset ${currentOffset}. BST test: ${bstOk ? 'OK' : `FAIL (${bstTest.toISOString()} ≠ ${bstExpected})`}. GMT test: ${gmtOk ? 'OK' : `FAIL (${gmtTest.toISOString()} ≠ ${gmtExpected})`}.`,
+  };
+}

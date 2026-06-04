@@ -12,7 +12,8 @@ pg.types.setTypeParser(1114, (val: string) => new Date(val + 'Z'));
 export * from './schema';
 export { canUpgradeStatus, isTerminalStatus } from './statusPriority';
 export { ROUTE_FLIGHT_MINUTES, LOCATION_TO_IATA, routeFlightMinutes, locationToIata } from './constants';
-export { GY_TZ, localToUtc, guernseyTodayStr, guernseyTomorrowStr, guernseyHour, nextGuernseyTime } from './time';
+export { GY_TZ, localToUtc, guernseyTodayStr, guernseyTomorrowStr, guernseyHour, nextGuernseyTime, checkTimezoneOffset } from './time';
+export type { TimezoneCheckResult } from './time';
 
 export type DbClient = ReturnType<typeof drizzle<typeof schema>>;
 

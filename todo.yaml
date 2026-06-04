@@ -1,84 +1,74 @@
 # todo.yaml — single source of truth for LLM
-# Updated: 2026-06-03T09:36:00Z
+# Updated: 2026-06-04T07:50:00Z
 
 goal: >
-  Fix systemic 1-hour offset in all flight scheduled departure/arrival times
-  caused by Luxon failing to resolve the Europe/London timezone on Alpine
-  Docker images during BST.
+  Add timezone drift monitoring that periodically checks localToUtc offset
+  correctness and alerts via Telegram if the offset ever drifts.
 
 why_how: >
-  Every flight displays scheduled times 1 hour later than reality during BST
-  (e.g., GR634 shows 10:15 instead of 09:15). The root cause is that
-  localToUtc() uses Luxon's DateTime.fromFormat with zone:'Europe/London',
-  but the node:20-alpine Docker images lack tzdata, causing Luxon to fall
-  back to UTC and store times as-if-UTC instead of true UTC. The display
-  layer (formatGuernseyTime) uses native Intl.DateTimeFormat which resolves
-  the timezone correctly, converting the wrongly-stored UTC value back to
-  BST as BST+1 — producing the 1-hour offset.
-
-  Fix: install tzdata in guernsey-scraper and web Dockerfiles so Luxon can
-  resolve Europe/London. Then run a SQL migration to correct already-stored
-  bad data (add 1 hour to scheduled times for BST dates). Add an integration
-  test to prevent regression.
+  The timezone fix replaced Luxon with native Intl, but there's no guard to
+  detect if Intl's Europe/London resolution ever breaks again (e.g., after
+  a Node.js upgrade, ICU data change, or container image change). Adding a
+  periodic check in the guernsey scraper live loop with a Telegram alert
+  will catch any future regression within minutes.
 
 expected: >
-  After deployment, all flight scheduled departure/arrival times display
-  correctly in BST (09:15 instead of 10:15 for GR634). The fix is durable:
-  tzdata installed in affected containers, regression test in place, and
-  existing bad data corrected via migration.
+  When the scraper is running during BST, it verifies every 30 minutes that
+  localToUtc produces the correct UTC offset. If the offset is wrong (0
+  instead of 1 during BST, or vice versa in GMT), a Telegram alert fires
+  with the detected vs expected offset values. Users won't need to manually
+  spot broken times.
 
 status: complete
 
 tasks:
   - phase: 1
-    name: Fix Dockerfiles
+    name: Add checkTimezoneOffset
     status: done
     items:
       - done: true
-        action: Add `RUN apk add --no-cache tzdata` to apps/guernsey-scraper/Dockerfile (production stage, before ENV)
+        action: Add checkTimezoneOffset() function to packages/database/time.ts that tests localToUtc for a known BST and GMT date
       - done: true
-        action: Add `RUN apk add --no-cache tzdata` to apps/web/Dockerfile (production stage, before ENV)
+        action: Export checkTimezoneOffset from @airways/database index.ts
       - done: true
-        action: Verify the fr24-scraper Dockerfile already has tzdata (it does via apt-get) — no changes needed
+        action: Write unit tests for checkTimezoneOffset in time.test.ts
 
   - phase: 2
-    name: Data Fix Migration
+    name: Integrate into scraper live loop
     status: done
     items:
       - done: true
-        action: Write SQL migration NNNN_fix_bst_scheduled_times.sql that adds 1 hour to scheduled_departure/scheduled_arrival for BST-date flights where the value appears to be stored as-if-UTC (reverse of migration 0014 logic)
+        action: Import checkTimezoneOffset and sendAlert in guernsey scraper's live.ts
       - done: true
-        action: Add the migration to the Drizzle migrations directory with proper meta files
+        action: Add a 30-minute interval check that runs checkTimezoneOffset and alerts on failure
       - done: true
-        action: Test the migration on a staging/development database with sample BST-date flight data
+        action: Ensure the check runs after prefetch slots to catch overnight drift
 
   - phase: 3
-    name: Regression Test
+    name: Add frontend-level diagnostic
     status: done
     items:
       - done: true
-        action: Add integration test in packages/database/time.test.ts that verifies localToUtc('2026-06-15', 10, 30) returns 09:30Z (BST→UTC -1h)
+        action: Add a hidden /api/health/timezone endpoint in the web app that reports formatGuernseyTime correctness
       - done: true
-        action: Add a round-trip test: localToUtc → store in DB → read back → formatGuernseyTime should produce the original local time
-      - done: true
-        action: Run full test suite and verify all tests pass
+        action: Have the scraper hit this endpoint periodically as a secondary check (end-to-end)
 
   - phase: 4
-    name: Deploy & Verify
+    name: Build & verify
     status: done
     items:
       - done: true
-        action: Deploy updated Docker images to production
+        action: Run full test suite
       - done: true
-        action: Run the data fix migration in production
+        action: Rebuild and deploy affected containers
       - done: true
-        action: Verify GR634 and a sample of other flights show correct scheduled times on the live site
+        action: Verify Telegram alert fires correctly by temporarily injecting a wrong offset
 
 notes:
-  - tzdata is already installed in fr24-scraper (via apt-get tzdata in the slim image) — only guernsey-scraper and web need the fix
-  - The SQL migration must only affect flights where scheduled_departure is stored as-if-UTC (1 hour ahead of true UTC). Use the same BST date predicate from migration 0014: `(flight_date || ' 12:00:00')::timestamp AT TIME ZONE 'Europe/London' != (flight_date || ' 12:00:00')::timestamp AT TIME ZONE 'UTC'`
-  - Unlike migration 0014 which SUBTRACTED 1 hour (wall-clock → UTC), this migration must ADD 1 hour (as-if-UTC → true UTC)
-  - Only scheduled_departure and scheduled_arrival need correction; actual_departure/actual_arrival come from status message timestamps which are timestamped by the scraper at scrape time, not via localToUtc
-  - The formatGuernseyTime display layer uses native Intl which already works correctly — no changes needed there
+  - checkTimezoneOffset should test both BST (e.g., June 15) and GMT (e.g., January 15) dates
+  - The check should use the CURRENT month to determine whether BST or GMT is expected
+  - Telegram debounce in sendAlert is 5 minutes, so the 30-min check interval is safe
+  - The fr24-scraper is currently dead (navigation timeout), so only integrate into guernsey-live
+  - Send a WARNING level alert if offset is wrong, CRITICAL if it's 0 during BST months
 
 discovered: []

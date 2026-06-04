@@ -25,13 +25,6 @@
           font-size: 1.05rem; line-height: 1.55; }
   .goal::before { content: "🎯 "; font-size: 1.15rem; }
 
-  .progress-wrap { margin-bottom: 1.5rem; }
-  .progress-label { display: flex; justify-content: space-between; font-size: 0.8rem;
-                    color: var(--muted); margin-bottom: 0.35rem; }
-  .progress-bar { height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; }
-  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--blue));
-                   border-radius: 99px; transition: width 0.4s ease; }
-
   .info-box { border-radius: 0 var(--radius) var(--radius) 0; padding: 1rem 1.25rem;
               margin-bottom: 1.25rem; font-size: 0.97rem; line-height: 1.55; }
   .info-box h3 { font-size: 0.95rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
@@ -52,92 +45,68 @@
                padding: 1rem 1.25rem; margin-top: 1.5rem; }
   .notes-box h3 { font-size: 0.95rem; margin-bottom: 0.4rem; color: var(--amber); display: flex; align-items: center; gap: 0.4rem; }
   .notes-box ul { list-style: disc; margin-left: 1.25rem; font-size: 0.9rem; color: #78350f; }
-  .discovered-box { background: #fef2f2; border: 1px solid #fca5a5; border-radius: var(--radius);
-                    padding: 1rem 1.25rem; margin-top: 1rem; }
-  .discovered-box h3 { font-size: 0.95rem; margin-bottom: 0.4rem; color: var(--red); display: flex; align-items: center; gap: 0.4rem; }
-  .discovered-box .task-row label { color: #991b1b; }
-  .empty-state { color: var(--muted); font-style: italic; font-size: 0.85rem; padding: 0.25rem 0; }
 </style>
 </head>
 <body>
 
-<!-- HEADER -->
 <header>
   <h1>&#x1F4CB; Plan — airways.gg</h1>
   <!-- STATUS: active -->
-  <p class="meta">Generated: 2026-06-03 &middot; Status: <span class="badge badge-done">complete</span></p>
+  <p class="meta">Generated: 2026-06-04 &middot; Status: <span class="badge badge-active">complete</span></p>
 </header>
 
-<!-- GOAL -->
-<div class="goal">Fix systemic 1-hour offset in all flight scheduled departure/arrival times caused by Luxon failing to resolve the Europe/London timezone on Alpine Docker images during BST.</div>
+<div class="goal">Add timezone drift monitoring that periodically checks localToUtc offset correctness and alerts via Telegram if the offset ever drifts.</div>
 
-<!-- PROGRESS -->
-<div class="progress-wrap">
-  <div class="progress-label"><span>Progress</span><span>0 / 10</span></div>
-  <div class="progress-bar"><div class="progress-fill" style="width: 0%;"></div></div>
-</div>
-
-<!-- WHY & HOW -->
 <div class="info-box whyhow-box">
   <h3><span class="section-icon">💡</span> Why &amp; How</h3>
-  <p>Every flight displays scheduled times 1 hour later than reality during BST (e.g., GR634 shows 10:15 instead of 09:15). The root cause is that <code>localToUtc()</code> uses Luxon's <code>DateTime.fromFormat</code> with <code>zone:'Europe/London'</code>, but the <code>node:20-alpine</code> Docker images lack <code>tzdata</code>, causing Luxon to fall back to UTC and store times as-if-UTC instead of true UTC. The display layer (<code>formatGuernseyTime</code>) uses native <code>Intl.DateTimeFormat</code> which resolves the timezone correctly, converting the wrongly-stored UTC value back to BST as BST+1 — producing the 1-hour offset.</p>
-  <p style="margin-top:0.5rem"><strong>Fix:</strong> install <code>tzdata</code> in guernsey-scraper and web Dockerfiles, run a SQL migration to correct already-stored bad data, and add an integration test to prevent regression.</p>
+  <p>The timezone fix replaced Luxon with native Intl, but there's no guard to detect if Intl's Europe/London resolution ever breaks again (e.g., after a Node.js upgrade, ICU data change, or container image change). Adding a periodic check in the guernsey scraper live loop with a Telegram alert will catch any future regression within minutes.</p>
 </div>
 
-<!-- EXPECTED -->
 <div class="info-box expected-box">
   <h3><span class="section-icon">🎁</span> Expected Outcome</h3>
-  <p>After deployment, all flight scheduled departure/arrival times display correctly in BST (09:15 instead of 10:15 for GR634). The fix is durable: <code>tzdata</code> installed in affected containers, regression test in place, and existing bad data corrected via migration.</p>
+  <p>When the scraper is running during BST, it verifies every 30 minutes that localToUtc produces the correct UTC offset. If the offset is wrong (0 instead of 1 during BST, or vice versa in GMT), a Telegram alert fires with the detected vs expected offset values.</p>
 </div>
-
-<!-- PHASES -->
 
 <!-- PHASE: 1 (status: done) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 1: Fix Dockerfiles <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Add <code>RUN apk add --no-cache tzdata</code> to apps/guernsey-scraper/Dockerfile (production stage, before ENV)</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Add <code>RUN apk add --no-cache tzdata</code> to apps/web/Dockerfile (production stage, before ENV)</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Verify the fr24-scraper Dockerfile already has tzdata (it does via apt-get) — no changes needed</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 1: Add checkTimezoneOffset <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add <code>checkTimezoneOffset()</code> to <code>packages/database/time.ts</code></label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Export from <code>@airways/database</code> index.ts</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Write unit tests in <code>time.test.ts</code></label></div>
 </div>
 
 <!-- PHASE: 2 (status: done) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 2: Data Fix Migration <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Write SQL migration 0016_fix_bst_scheduled_times.sql that adds 1 hour to scheduled_departure/scheduled_arrival for BST-date flights</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Add the migration to the Drizzle migrations directory with proper meta files</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Test the migration on a development database with sample BST-date flight data</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 2: Integrate into scraper live loop <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Import <code>checkTimezoneOffset</code> + <code>sendAlert</code> in live.ts</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add 30-min interval check with Telegram alert on failure</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Scheduled in <code>runLiveMode</code> after prefetch slots</label></div>
 </div>
 
-<!-- PHASE: 3 (status: active) -->
+<!-- PHASE: 3 (status: done) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 3: Regression Test <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Add integration test verifying localToUtc('2026-06-15', 10, 30) returns 09:30Z (BST→UTC -1h)</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Add round-trip test: localToUtc → store → read → formatGuernseyTime produces original local time</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Run full test suite and verify all tests pass</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 3: Frontend diagnostic endpoint <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add <code>/api/health/timezone</code> endpoint in web app</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Reports BST and GMT offset correctness as JSON</label></div>
 </div>
 
-<!-- PHASE: 4 (status: active) -->
+<!-- PHASE: 4 (status: done) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 4: Deploy &amp; Verify <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Deploy updated Docker images to production</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Run the data fix migration in production</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Verify GR634 and a sample of other flights show correct scheduled times on the live site</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 4: Build &amp; verify <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>42 tests pass</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Database package builds</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Full TypeScript compilation succeeds</label></div>
 </div>
 
-<!-- NOTES -->
 <div class="notes-box">
   <h3><span class="section-icon">📝</span> Notes</h3>
   <ul>
-    <li><code>tzdata</code> is already installed in fr24-scraper (via <code>apt-get tzdata</code> in the slim image) — only guernsey-scraper and web need the fix</li>
-    <li>The SQL migration must only affect flights where <code>scheduled_departure</code> is stored as-if-UTC (1 hour ahead). Use the same BST date predicate from migration 0014.</li>
-    <li>Unlike migration 0014 which SUBTRACTED 1 hour (wall-clock → UTC), this migration must ADD 1 hour (as-if-UTC → true UTC)</li>
-    <li>Only <code>scheduled_departure</code> and <code>scheduled_arrival</code> need correction; actual times come from status message timestamps</li>
-    <li>The <code>formatGuernseyTime</code> display layer uses native Intl which already works correctly — no changes needed there</li>
+    <li><code>checkTimezoneOffset</code> should test both BST (June 15) and GMT (Jan 15) dates</li>
+    <li>Telegram debounce in <code>sendAlert</code> is 5 minutes, resets after 30 min</li>
+    <li>Send WARNING if offset is wrong, CRITICAL if 0 during BST months (June-August)</li>
+    <li>FR24 scraper is currently dead — only integrate into guernsey-live</li>
   </ul>
 </div>
-
-<!-- DISCOVERED (hidden if empty) -->
-<!-- No discovered tasks yet -->
 
 </body>
 </html>

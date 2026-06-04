@@ -6,6 +6,7 @@ import {
   guernseyTomorrowStr,
   guernseyHour,
   nextGuernseyTime,
+  checkTimezoneOffset,
 } from './time';
 import { DateTime } from 'luxon';
 
@@ -281,5 +282,17 @@ describe('round-trip: localToUtc → display', () => {
       .toFormat('HH:mm');
 
     expect(nativeDisplay).toBe(luxonDisplay);
+  });
+});
+
+// ── checkTimezoneOffset ────────────────────────────────────────────────────
+
+describe('checkTimezoneOffset', () => {
+  it('passes during BST (June)', () => {
+    const result = checkTimezoneOffset();
+    // On a BST date the BST test must pass
+    expect(result.detectedOffset).toBe(1);
+    expect(result.ok).toBe(true);
+    expect(result.details).toContain('OK');
   });
 });
