@@ -470,6 +470,8 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
   if (status)                 updateSet.status          = status;
   if (canceled)               updateSet.canceled        = canceled;
   if (delayMinutes !== null)  updateSet.delayMinutes    = delayMinutes;
+  if (scheduledDeparture)     updateSet.scheduledDeparture = scheduledDeparture;
+  if (scheduledArrival)       updateSet.scheduledArrival   = scheduledArrival;
 
   try {
     // First check if a flight already exists for this flight_number + flight_date.
