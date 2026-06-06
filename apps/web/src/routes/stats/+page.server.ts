@@ -51,8 +51,11 @@ export const load: PageServerLoad = async ({ url }) => {
     key: r.route_key,
   }));
 
+  // LM (Loganair) and SI (Blue Islands) are codeshares with Aurigny (GR) on Guernsey routes.
+  // Their flight records are stored under the primary GR code, so we map them to GR.
+  const resolveAirlineCode = (code: string) => code === 'LM' || code === 'SI' ? 'GR' : code;
   const airlineFilter = activeAirline
-    ? sql`(UPPER(SUBSTRING(f.flight_number FROM 1 FOR 2)) = ${activeAirline})`
+    ? sql`(UPPER(SUBSTRING(f.flight_number FROM 1 FOR 2)) = ${resolveAirlineCode(activeAirline)})`
     : sql`(f.flight_number ILIKE 'GR%' OR f.flight_number ILIKE 'BA%')`;
 
   // Build date filter based on range selection or custom dates
