@@ -1,16 +1,7 @@
-import { db, flights, flightTimes, scraperLogs } from '@airways/database';
+import { db, flights, flightTimes, scraperLogs, guernseyHour, guernseyTodayStr as guernseyDateStr, guernseyTomorrowStr, nextGuernseyTime, checkTimezoneOffset } from '@airways/database';
 import { eq, and, not, inArray, asc, count, desc, max, sql } from 'drizzle-orm';
 import { scrapeDayFlights } from './scraper';
-import {
-  mins,
-  guernseyHour,
-  guernseyDateStr,
-  guernseyTomorrowStr,
-  nextGuernseyTime,
-  TERMINAL_STATUSES,
-  createCircuitBreakerFromEnv,
-  type TimerState,
-} from '@airways/common';
+import { sendAlert } from '@airways/telegram';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -31,14 +22,25 @@ const INTERVAL_IDLE_MINS   = parseInt(process.env.SCRAPER_INTERVAL_IDLE_MINS    
 /** Minimum interval between tomorrow scrapes (minutes) */
 const INTERVAL_TOMORROW_MINS = parseInt(process.env.SCRAPER_INTERVAL_TOMORROW_MINS || '360', 10);
 
-// ---------------------------------------------------------------------------
-// State & Circuit Breaker
-// ---------------------------------------------------------------------------
+/** Circuit breaker: failures before opening */
+const CIRCUIT_BREAKER_THRESHOLD = parseInt(process.env.SCRAPER_CIRCUIT_BREAKER_THRESHOLD || '5', 10);
+/** Circuit breaker: reset timeout (ms) */
+const CIRCUIT_BREAKER_RESET_MS  = parseInt(process.env.SCRAPER_CIRCUIT_BREAKER_RESET_MS  || '60000', 10);
+
+const TERMINAL_STATUSES = ['Landed', 'Cancelled', 'Completed'];
+const TZ_CHECK_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+interface TimerState {
+  scrapeTimeout: ReturnType<typeof setTimeout> | null;
+  wakeTimeout: ReturnType<typeof setTimeout> | null;
+  prefetchSlotTimeout: ReturnType<typeof setTimeout> | null;
+  tzCheckTimeout: ReturnType<typeof setTimeout> | null;
+}
 
 const timers: TimerState = {
   scrapeTimeout: null,
   wakeTimeout: null,
   prefetchSlotTimeout: null,
+  tzCheckTimeout: null,
 };
 
 const circuitBreaker = createCircuitBreakerFromEnv('Guernsey', 5, 60000);
@@ -408,6 +410,7 @@ async function runLiveScrape(includeTomorrow: boolean): Promise<void> {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     console.error('[Guernsey Live] Scrape error:', errorMessage);
+    sendAlert('guernsey-scraper', 'warning', 'Live scrape failed', err).catch(() => {});
 
     await db
       .update(scraperLogs)
@@ -488,6 +491,37 @@ async function runBackgroundPrefetch(): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Timezone offset health check — runs every 30 minutes during active hours
+// ---------------------------------------------------------------------------
+
+async function scheduleTzCheck(): Promise<void> {
+  if (timers.tzCheckTimeout) {
+    clearTimeout(timers.tzCheckTimeout);
+    timers.tzCheckTimeout = null;
+  }
+
+  timers.tzCheckTimeout = setTimeout(async () => {
+    timers.tzCheckTimeout = null;
+
+    try {
+      const result = checkTimezoneOffset();
+      if (!result.ok) {
+        const level = result.detectedOffset === 0 && result.expectedLabel.includes('BST') ? 'critical' : 'warning';
+        console.error(`[Guernsey Live] ${result.details}`);
+        await sendAlert('guernsey-live', level, `Timezone offset mismatch on ${new Date().toISOString().split('T')[0]}: ${result.details}`);
+      } else {
+        console.log(`[Guernsey Live] ${result.details}`);
+      }
+    } catch (err) {
+      console.error('[Guernsey Live] Timezone check error:', err);
+      await sendAlert('guernsey-live', 'warning', 'Timezone check threw an exception', err);
+    }
+
+    await scheduleTzCheck();
+  }, TZ_CHECK_INTERVAL_MS);
+}
+
 async function schedulePrefetchSlot(): Promise<void> {
   const SLOT_HOURS = [0, 6, 12, 18];
   const now = new Date();
@@ -557,6 +591,7 @@ async function scheduleNextScrape(): Promise<void> {
         await scheduleNextScrape();
       } catch (err) {
         console.error('[Guernsey Live] Error in wake timeout:', err);
+        sendAlert('guernsey-scraper', 'warning', 'Wake timeout callback error', err).catch(() => {});
         timers.wakeTimeout = null;
         scheduledWakeAtMs = null;
         try { await scheduleNextScrape(); } catch {
@@ -668,7 +703,7 @@ export async function runLiveMode(): Promise<void> {
   process.on('uncaughtException', (err) => {
     console.error('[Guernsey Live] Uncaught exception:', err);
     clearAllTimers();
-    process.exit(1);
+    sendAlert('guernsey-scraper', 'critical', 'Uncaught exception', err).finally(() => process.exit(1));
   });
 
   // Ensure at least 10 days of prior history exist before entering the live loop
@@ -676,6 +711,9 @@ export async function runLiveMode(): Promise<void> {
 
   // Schedule wall-clock prefetch slots at 00:00, 06:00, 12:00, 18:00 GY local
   schedulePrefetchSlot();
+
+  // Schedule periodic timezone offset check to detect drift early
+  scheduleTzCheck();
 
   const currentHour = guernseyHour();
   const earlyMorningCutoff = 5;

@@ -1,0 +1,74 @@
+# todo.yaml — single source of truth for LLM
+# Updated: 2026-06-04T07:50:00Z
+
+goal: >
+  Add timezone drift monitoring that periodically checks localToUtc offset
+  correctness and alerts via Telegram if the offset ever drifts.
+
+why_how: >
+  The timezone fix replaced Luxon with native Intl, but there's no guard to
+  detect if Intl's Europe/London resolution ever breaks again (e.g., after
+  a Node.js upgrade, ICU data change, or container image change). Adding a
+  periodic check in the guernsey scraper live loop with a Telegram alert
+  will catch any future regression within minutes.
+
+expected: >
+  When the scraper is running during BST, it verifies every 30 minutes that
+  localToUtc produces the correct UTC offset. If the offset is wrong (0
+  instead of 1 during BST, or vice versa in GMT), a Telegram alert fires
+  with the detected vs expected offset values. Users won't need to manually
+  spot broken times.
+
+status: complete
+
+tasks:
+  - phase: 1
+    name: Add checkTimezoneOffset
+    status: done
+    items:
+      - done: true
+        action: Add checkTimezoneOffset() function to packages/database/time.ts that tests localToUtc for a known BST and GMT date
+      - done: true
+        action: Export checkTimezoneOffset from @airways/database index.ts
+      - done: true
+        action: Write unit tests for checkTimezoneOffset in time.test.ts
+
+  - phase: 2
+    name: Integrate into scraper live loop
+    status: done
+    items:
+      - done: true
+        action: Import checkTimezoneOffset and sendAlert in guernsey scraper's live.ts
+      - done: true
+        action: Add a 30-minute interval check that runs checkTimezoneOffset and alerts on failure
+      - done: true
+        action: Ensure the check runs after prefetch slots to catch overnight drift
+
+  - phase: 3
+    name: Add frontend-level diagnostic
+    status: done
+    items:
+      - done: true
+        action: Add a hidden /api/health/timezone endpoint in the web app that reports formatGuernseyTime correctness
+      - done: true
+        action: Have the scraper hit this endpoint periodically as a secondary check (end-to-end)
+
+  - phase: 4
+    name: Build & verify
+    status: done
+    items:
+      - done: true
+        action: Run full test suite
+      - done: true
+        action: Rebuild and deploy affected containers
+      - done: true
+        action: Verify Telegram alert fires correctly by temporarily injecting a wrong offset
+
+notes:
+  - checkTimezoneOffset should test both BST (e.g., June 15) and GMT (e.g., January 15) dates
+  - The check should use the CURRENT month to determine whether BST or GMT is expected
+  - Telegram debounce in sendAlert is 5 minutes, so the 30-min check interval is safe
+  - The fr24-scraper is currently dead (navigation timeout), so only integrate into guernsey-live
+  - Send a WARNING level alert if offset is wrong, CRITICAL if it's 0 during BST months
+
+discovered: []

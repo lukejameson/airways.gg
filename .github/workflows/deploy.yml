@@ -1,4 +1,4 @@
-name: CI / Deploy
+name: Build & Deploy
 
 on:
   push:
@@ -11,14 +11,10 @@ on:
       - main
       - test
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Change detection
-# Each service is rebuilt only when its own source OR the shared database
-# package changes. This keeps builds fast by only rebuilding what changed.
-#
-# NOTE: output key names must use underscores — hyphens are invalid in GitHub
-# Actions expression syntax (parsed as the minus operator).
-# ──────────────────────────────────────────────────────────────────────────────
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/lukejameson/airways.gg
+
 jobs:
   detect-changes:
     runs-on: ubuntu-latest
@@ -33,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history required for accurate diff
+          fetch-depth: 0
 
       - uses: dorny/paths-filter@v3
         id: changes
@@ -66,44 +62,138 @@ jobs:
             ml_service:
               - 'apps/ml-service/**'
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # CI — always runs on every PR and push to validate the codebase
-  # ────────────────────────────────────────────────────────────────────────────
-  ci:
+  build-and-push:
+    needs: [detect-changes]
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    needs: detect-changes
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          node-version: "20"
-          cache: "npm"
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Build database package
-        run: npm run build --workspace=@airways/database
+      - name: Build & push web app
+        if: needs.detect-changes.outputs.web == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/app:${{ github.ref_name }}
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
 
-      - name: Lint web app
-        run: npm run lint --workspace=@airways/web
+      - name: Build & push guernsey-scraper
+        if: needs.detect-changes.outputs.guernsey_scraper == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/guernsey-scraper/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/guernsey-scraper:${{ github.ref_name }}
+          cache-from: type=gha,scope=guernsey-scraper
+          cache-to: type=gha,mode=max,scope=guernsey-scraper
 
-      - name: Type-check web app
-        run: npm run check --workspace=@airways/web
+      - name: Build & push fr24-scraper
+        if: needs.detect-changes.outputs.fr24_scraper == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/fr24-scraper/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/fr24-scraper:${{ github.ref_name }}
+          cache-from: type=gha,scope=fr24-scraper
+          cache-to: type=gha,mode=max,scope=fr24-scraper
 
-      - name: Build web app
-        run: npm run build --workspace=@airways/web
+      - name: Build & push adsb-service
+        if: needs.detect-changes.outputs.adsb_service == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/adsb-service/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/adsb-service:${{ github.ref_name }}
+          cache-from: type=gha,scope=adsb-service
+          cache-to: type=gha,mode=max,scope=adsb-service
+
+      - name: Build & push position-service
+        if: needs.detect-changes.outputs.position_service == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/position-service/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/position-service:${{ github.ref_name }}
+          cache-from: type=gha,scope=position-service
+          cache-to: type=gha,mode=max,scope=position-service
+
+      - name: Build & push weather-service
+        if: needs.detect-changes.outputs.weather_service == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/weather-service/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/weather-service:${{ github.ref_name }}
+          cache-from: type=gha,scope=weather-service
+          cache-to: type=gha,mode=max,scope=weather-service
+
+      - name: Build & push ml-service
+        if: needs.detect-changes.outputs.ml_service == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/ml-service
+          file: apps/ml-service/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/ml-service:${{ github.ref_name }}
+          cache-from: type=gha,scope=ml-service
+          cache-to: type=gha,mode=max,scope=ml-service
+
+      - name: Notify Telegram (Build Failure)
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            ❌ *Build Failed* — Airways.gg
+            Branch: `${{ github.ref_name }}`
+            Message: `${{ github.event.commits[0].message }}`
+            Commit: `${{ github.sha }}`
 
   # ────────────────────────────────────────────────────────────────────────────
   # Deploy to DEV  (push to main)
   # ────────────────────────────────────────────────────────────────────────────
   deploy-dev:
-    needs: [ci, detect-changes]
+    needs: [detect-changes, build-and-push]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: dev
     steps:
+      - name: Compute changed services
+        id: services
+        run: |
+          SERVICES=""
+          [ "${{ needs.detect-changes.outputs.web }}"              = "true" ] && SERVICES="$SERVICES app"
+          [ "${{ needs.detect-changes.outputs.guernsey_scraper }}" = "true" ] && SERVICES="$SERVICES guernsey-scraper"
+          [ "${{ needs.detect-changes.outputs.fr24_scraper }}"     = "true" ] && SERVICES="$SERVICES fr24-scraper"
+          [ "${{ needs.detect-changes.outputs.adsb_service }}"     = "true" ] && SERVICES="$SERVICES adsb-service"
+          [ "${{ needs.detect-changes.outputs.position_service }}" = "true" ] && SERVICES="$SERVICES position-service"
+          [ "${{ needs.detect-changes.outputs.weather_service }}"  = "true" ] && SERVICES="$SERVICES weather-service"
+          [ "${{ needs.detect-changes.outputs.ml_service }}"       = "true" ] && SERVICES="$SERVICES ml-service"
+          echo "list=$(echo $SERVICES | xargs || echo 'none')" >> $GITHUB_OUTPUT
+
       - name: Deploy changed services to dev
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -111,10 +201,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_SSH_PORT }}
-          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
           envs: CHANGED_WEB,CHANGED_GUERNSEY_SCRAPER,CHANGED_FR24_SCRAPER,CHANGED_ADSB_SERVICE,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
-          # Pass change flags as env vars into the SSH session via with.envs
-          # (appleboy/ssh-action reads these from the runner environment)
           script: |
             set -e
             cd /opt/airways.gg-dev
@@ -123,32 +210,29 @@ jobs:
             git checkout main
             git pull origin main
 
-            COMPOSE="docker compose -f docker-compose.dev.yml --env-file .env.dev"
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-            # Build only changed services
+            COMPOSE="docker compose -f docker-compose.dev.yml --env-file .env.dev"
+            PREFIX="ghcr.io/lukejameson/airways.gg"
+            TAG="main"
+
             SERVICES=""
-            [ "$CHANGED_WEB"               = "true" ] && SERVICES="$SERVICES app"
-            [ "$CHANGED_GUERNSEY_SCRAPER"  = "true" ] && SERVICES="$SERVICES guernsey-scraper"
-            [ "$CHANGED_FR24_SCRAPER"      = "true" ] && SERVICES="$SERVICES fr24-scraper"
-            [ "$CHANGED_ADSB_SERVICE"      = "true" ] && SERVICES="$SERVICES adsb-service"
-            [ "$CHANGED_POSITION_SERVICE"  = "true" ] && SERVICES="$SERVICES position-service"
-            [ "$CHANGED_WEATHER_SERVICE"   = "true" ] && SERVICES="$SERVICES weather-service"
-            [ "$CHANGED_ML_SERVICE"        = "true" ] && SERVICES="$SERVICES ml-service"
+            [ "$CHANGED_WEB"               = "true" ] && docker pull $PREFIX/app:$TAG               && SERVICES="$SERVICES app"
+            [ "$CHANGED_GUERNSEY_SCRAPER"  = "true" ] && docker pull $PREFIX/guernsey-scraper:$TAG  && SERVICES="$SERVICES guernsey-live"
+            [ "$CHANGED_FR24_SCRAPER"      = "true" ] && docker pull $PREFIX/fr24-scraper:$TAG      && SERVICES="$SERVICES fr24-scraper"
+            [ "$CHANGED_ADSB_SERVICE"      = "true" ] && docker pull $PREFIX/adsb-service:$TAG      && SERVICES="$SERVICES adsb-service"
+            [ "$CHANGED_POSITION_SERVICE"  = "true" ] && docker pull $PREFIX/position-service:$TAG  && SERVICES="$SERVICES position-service"
+            [ "$CHANGED_WEATHER_SERVICE"   = "true" ] && docker pull $PREFIX/weather-service:$TAG   && SERVICES="$SERVICES weather-service"
+            [ "$CHANGED_ML_SERVICE"        = "true" ] && docker pull $PREFIX/ml-service:$TAG        && SERVICES="$SERVICES ml-service"
 
             if [ -z "$(echo $SERVICES | tr -d ' ')" ]; then
-              echo "No service changes detected — skipping rebuild."
+              echo "No service changes detected — skipping deploy."
             else
-              echo "Building: $SERVICES"
-              $COMPOSE build --no-cache $SERVICES
-              # Restart only changed services — leaves unchanged containers running
+              echo "Deploying: $SERVICES"
               $COMPOSE up -d --no-deps $SERVICES
             fi
 
-            echo "Cleaning up Docker resources..."
             docker image prune -af --filter "until=24h"
-            docker builder prune -af --filter "until=24h"
-            docker container prune -f
-            echo "Docker cleanup complete"
             docker system df
         env:
           CHANGED_WEB:              ${{ needs.detect-changes.outputs.web }}
@@ -159,15 +243,54 @@ jobs:
           CHANGED_WEATHER_SERVICE:  ${{ needs.detect-changes.outputs.weather_service }}
           CHANGED_ML_SERVICE:       ${{ needs.detect-changes.outputs.ml_service }}
 
+      - name: Notify Telegram (Success)
+        if: success()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            ✅ *Dev* — Airways.gg
+            Services: `${{ steps.services.outputs.list }}`
+            Message: `${{ github.event.commits[0].message }}`
+            Commit: `${{ github.sha }}`
+
+      - name: Notify Telegram (Failure)
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            ❌ *Dev Failed* — Airways.gg
+            Services: `${{ steps.services.outputs.list }}`
+            Message: `${{ github.event.commits[0].message }}`
+            Commit: `${{ github.sha }}`
+
   # ────────────────────────────────────────────────────────────────────────────
   # Deploy to TEST  (push to test)
   # ────────────────────────────────────────────────────────────────────────────
   deploy-test:
-    needs: [ci, detect-changes]
+    needs: [detect-changes, build-and-push]
     if: github.ref == 'refs/heads/test' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: test
     steps:
+      - name: Compute changed services
+        id: services
+        run: |
+          SERVICES=""
+          [ "${{ needs.detect-changes.outputs.web }}"              = "true" ] && SERVICES="$SERVICES app"
+          [ "${{ needs.detect-changes.outputs.guernsey_scraper }}" = "true" ] && SERVICES="$SERVICES guernsey-scraper"
+          [ "${{ needs.detect-changes.outputs.fr24_scraper }}"     = "true" ] && SERVICES="$SERVICES fr24-scraper"
+          [ "${{ needs.detect-changes.outputs.adsb_service }}"     = "true" ] && SERVICES="$SERVICES adsb-service"
+          [ "${{ needs.detect-changes.outputs.position_service }}" = "true" ] && SERVICES="$SERVICES position-service"
+          [ "${{ needs.detect-changes.outputs.weather_service }}"  = "true" ] && SERVICES="$SERVICES weather-service"
+          [ "${{ needs.detect-changes.outputs.ml_service }}"       = "true" ] && SERVICES="$SERVICES ml-service"
+          echo "list=$(echo $SERVICES | xargs || echo 'none')" >> $GITHUB_OUTPUT
+
       - name: Deploy changed services to test
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -175,7 +298,6 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_SSH_PORT }}
-          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
           envs: CHANGED_WEB,CHANGED_GUERNSEY_SCRAPER,CHANGED_FR24_SCRAPER,CHANGED_ADSB_SERVICE,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
           script: |
             set -e
@@ -185,30 +307,29 @@ jobs:
             git checkout test
             git pull origin test
 
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
             COMPOSE="docker compose -f docker-compose.test.yml --env-file .env.test"
+            PREFIX="ghcr.io/lukejameson/airways.gg"
+            TAG="test"
 
             SERVICES=""
-            [ "$CHANGED_WEB"               = "true" ] && SERVICES="$SERVICES app"
-            [ "$CHANGED_GUERNSEY_SCRAPER"  = "true" ] && SERVICES="$SERVICES guernsey-scraper"
-            [ "$CHANGED_FR24_SCRAPER"      = "true" ] && SERVICES="$SERVICES fr24-scraper"
-            [ "$CHANGED_ADSB_SERVICE"      = "true" ] && SERVICES="$SERVICES adsb-service"
-            [ "$CHANGED_POSITION_SERVICE"  = "true" ] && SERVICES="$SERVICES position-service"
-            [ "$CHANGED_WEATHER_SERVICE"   = "true" ] && SERVICES="$SERVICES weather-service"
-            [ "$CHANGED_ML_SERVICE"        = "true" ] && SERVICES="$SERVICES ml-service"
+            [ "$CHANGED_WEB"               = "true" ] && docker pull $PREFIX/app:$TAG               && SERVICES="$SERVICES app"
+            [ "$CHANGED_GUERNSEY_SCRAPER"  = "true" ] && docker pull $PREFIX/guernsey-scraper:$TAG  && SERVICES="$SERVICES guernsey-live"
+            [ "$CHANGED_FR24_SCRAPER"      = "true" ] && docker pull $PREFIX/fr24-scraper:$TAG      && SERVICES="$SERVICES fr24-scraper"
+            [ "$CHANGED_ADSB_SERVICE"      = "true" ] && docker pull $PREFIX/adsb-service:$TAG      && SERVICES="$SERVICES adsb-service"
+            [ "$CHANGED_POSITION_SERVICE"  = "true" ] && docker pull $PREFIX/position-service:$TAG  && SERVICES="$SERVICES position-service"
+            [ "$CHANGED_WEATHER_SERVICE"   = "true" ] && docker pull $PREFIX/weather-service:$TAG   && SERVICES="$SERVICES weather-service"
+            [ "$CHANGED_ML_SERVICE"        = "true" ] && docker pull $PREFIX/ml-service:$TAG        && SERVICES="$SERVICES ml-service"
 
             if [ -z "$(echo $SERVICES | tr -d ' ')" ]; then
-              echo "No service changes detected — skipping rebuild."
+              echo "No service changes detected — skipping deploy."
             else
-              echo "Building: $SERVICES"
-              $COMPOSE build --no-cache $SERVICES
+              echo "Deploying: $SERVICES"
               $COMPOSE up -d --no-deps $SERVICES
             fi
 
-            echo "Cleaning up Docker resources..."
             docker image prune -af --filter "until=24h"
-            docker builder prune -af --filter "until=24h"
-            docker container prune -f
-            echo "Docker cleanup complete"
             docker system df
         env:
           CHANGED_WEB:              ${{ needs.detect-changes.outputs.web }}
@@ -219,15 +340,54 @@ jobs:
           CHANGED_WEATHER_SERVICE:  ${{ needs.detect-changes.outputs.weather_service }}
           CHANGED_ML_SERVICE:       ${{ needs.detect-changes.outputs.ml_service }}
 
+      - name: Notify Telegram (Success)
+        if: success()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            ✅ *Test* — Airways.gg
+            Services: `${{ steps.services.outputs.list }}`
+            Message: `${{ github.event.commits[0].message }}`
+            Commit: `${{ github.sha }}`
+
+      - name: Notify Telegram (Failure)
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            ❌ *Test Failed* — Airways.gg
+            Services: `${{ steps.services.outputs.list }}`
+            Message: `${{ github.event.commits[0].message }}`
+            Commit: `${{ github.sha }}`
+
   # ────────────────────────────────────────────────────────────────────────────
   # Deploy to PRODUCTION  (push to production)
   # ────────────────────────────────────────────────────────────────────────────
   deploy-production:
-    needs: [ci, detect-changes]
+    needs: [detect-changes, build-and-push]
     if: github.ref == 'refs/heads/production' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: Compute changed services
+        id: services
+        run: |
+          SERVICES=""
+          [ "${{ needs.detect-changes.outputs.web }}"              = "true" ] && SERVICES="$SERVICES app"
+          [ "${{ needs.detect-changes.outputs.guernsey_scraper }}" = "true" ] && SERVICES="$SERVICES guernsey-scraper"
+          [ "${{ needs.detect-changes.outputs.fr24_scraper }}"     = "true" ] && SERVICES="$SERVICES fr24-scraper"
+          [ "${{ needs.detect-changes.outputs.adsb_service }}"     = "true" ] && SERVICES="$SERVICES adsb-service"
+          [ "${{ needs.detect-changes.outputs.position_service }}" = "true" ] && SERVICES="$SERVICES position-service"
+          [ "${{ needs.detect-changes.outputs.weather_service }}"  = "true" ] && SERVICES="$SERVICES weather-service"
+          [ "${{ needs.detect-changes.outputs.ml_service }}"       = "true" ] && SERVICES="$SERVICES ml-service"
+          echo "list=$(echo $SERVICES | xargs || echo 'none')" >> $GITHUB_OUTPUT
+
       - name: Deploy changed services to production
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -235,7 +395,6 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_SSH_PORT }}
-          passphrase: ${{ secrets.SERVER_SSH_PASSPHRASE }}
           envs: CHANGED_WEB,CHANGED_GUERNSEY_SCRAPER,CHANGED_FR24_SCRAPER,CHANGED_ADSB_SERVICE,CHANGED_POSITION_SERVICE,CHANGED_WEATHER_SERVICE,CHANGED_ML_SERVICE
           script: |
             set -e
@@ -245,30 +404,29 @@ jobs:
             git checkout production
             git pull origin production
 
-            COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+            COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env"
+            PREFIX="ghcr.io/lukejameson/airways.gg"
+            TAG="production"
 
             SERVICES=""
-            [ "$CHANGED_WEB"               = "true" ] && SERVICES="$SERVICES app"
-            [ "$CHANGED_GUERNSEY_SCRAPER"  = "true" ] && SERVICES="$SERVICES guernsey-scraper"
-            [ "$CHANGED_FR24_SCRAPER"      = "true" ] && SERVICES="$SERVICES fr24-scraper"
-            [ "$CHANGED_ADSB_SERVICE"      = "true" ] && SERVICES="$SERVICES adsb-service"
-            [ "$CHANGED_POSITION_SERVICE"  = "true" ] && SERVICES="$SERVICES position-service"
-            [ "$CHANGED_WEATHER_SERVICE"   = "true" ] && SERVICES="$SERVICES weather-service"
-            [ "$CHANGED_ML_SERVICE"        = "true" ] && SERVICES="$SERVICES ml-service"
+            [ "$CHANGED_WEB"               = "true" ] && docker pull $PREFIX/app:$TAG               && SERVICES="$SERVICES app"
+            [ "$CHANGED_GUERNSEY_SCRAPER"  = "true" ] && docker pull $PREFIX/guernsey-scraper:$TAG  && SERVICES="$SERVICES guernsey-live"
+            [ "$CHANGED_FR24_SCRAPER"      = "true" ] && docker pull $PREFIX/fr24-scraper:$TAG      && SERVICES="$SERVICES fr24-scraper"
+            [ "$CHANGED_ADSB_SERVICE"      = "true" ] && docker pull $PREFIX/adsb-service:$TAG      && SERVICES="$SERVICES adsb-service"
+            [ "$CHANGED_POSITION_SERVICE"  = "true" ] && docker pull $PREFIX/position-service:$TAG  && SERVICES="$SERVICES position-service"
+            [ "$CHANGED_WEATHER_SERVICE"   = "true" ] && docker pull $PREFIX/weather-service:$TAG   && SERVICES="$SERVICES weather-service"
+            [ "$CHANGED_ML_SERVICE"        = "true" ] && docker pull $PREFIX/ml-service:$TAG        && SERVICES="$SERVICES ml-service"
 
             if [ -z "$(echo $SERVICES | tr -d ' ')" ]; then
-              echo "No service changes detected — skipping rebuild."
+              echo "No service changes detected — skipping deploy."
             else
-              echo "Building: $SERVICES"
-              $COMPOSE build --no-cache $SERVICES
+              echo "Deploying: $SERVICES"
               $COMPOSE up -d --no-deps $SERVICES
             fi
 
-            echo "Cleaning up Docker resources..."
             docker image prune -af --filter "until=24h"
-            docker builder prune -af --filter "until=24h"
-            docker container prune -f
-            echo "Docker cleanup complete"
             docker system df
         env:
           CHANGED_WEB:              ${{ needs.detect-changes.outputs.web }}
@@ -278,3 +436,29 @@ jobs:
           CHANGED_POSITION_SERVICE: ${{ needs.detect-changes.outputs.position_service }}
           CHANGED_WEATHER_SERVICE:  ${{ needs.detect-changes.outputs.weather_service }}
           CHANGED_ML_SERVICE:       ${{ needs.detect-changes.outputs.ml_service }}
+
+      - name: Notify Telegram (Success)
+        if: success()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            🚀 *Production* — Airways.gg
+            Services: `${{ steps.services.outputs.list }}`
+            Message: `${{ github.event.commits[0].message }}`
+            Commit: `${{ github.sha }}`
+
+      - name: Notify Telegram (Failure)
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            🔥 *Production Failed* — Airways.gg
+            Services: `${{ steps.services.outputs.list }}`
+            Message: `${{ github.event.commits[0].message }}`
+            Commit: `${{ github.sha }}`

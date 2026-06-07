@@ -3,6 +3,7 @@ loadEnv({ serviceName: 'Weather', startDir: __dirname });
 
 import { fetchAllWeather, fetchWeatherForUpcomingFlights } from './fetcher';
 import { ensureAirportsSynced, startAirportSyncScheduler } from './airports';
+import { sendAlert } from '@airways/telegram';
 
 const INTERVAL_MS = parseInt(process.env.WEATHER_INTERVAL_MS || '900000'); // default 15 minutes (METAR updates hourly)
 const UPCOMING_CHECK_INTERVAL_MS = 2 * 60 * 1000; // Check for upcoming flights every 2 minutes
@@ -24,14 +25,18 @@ async function main() {
 
   // Schedule full weather refresh (baseline for all airports)
   setInterval(() => {
-    fetchAllWeather().catch(err => console.error('[Weather] Full refresh failed:', err));
+    fetchAllWeather().catch(err => {
+      console.error('[Weather] Full refresh failed:', err);
+      sendAlert('weather-service', 'warning', 'Full weather refresh failed', err).catch(() => {});
+    });
   }, INTERVAL_MS);
 
   // Schedule frequent checks for upcoming flights to refresh weather 15 min before departure/arrival
   setInterval(() => {
-    fetchWeatherForUpcomingFlights().catch(err =>
-      console.error('[Weather] Upcoming-flights refresh failed:', err),
-    );
+    fetchWeatherForUpcomingFlights().catch(err => {
+      console.error('[Weather] Upcoming-flights refresh failed:', err);
+      sendAlert('weather-service', 'warning', 'Upcoming-flights weather refresh failed', err).catch(() => {});
+    });
   }, UPCOMING_CHECK_INTERVAL_MS);
 }
 
@@ -42,5 +47,5 @@ process.on('uncaughtException', (err) => {
 
 main().catch(err => {
   console.error('[Weather] Fatal error:', err);
-  process.exit(1);
+  sendAlert('weather-service', 'critical', 'Fatal error', err).finally(() => process.exit(1));
 });

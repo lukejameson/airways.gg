@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import maplibregl from 'maplibre-gl';
+  import 'maplibre-gl/dist/maplibre-gl.css';
   import { airportName, getAirportCoords } from '$lib/airports';
 
   interface Props {
@@ -12,85 +14,147 @@
 
   let { lat, lon, heading, depAirport, arrAirport }: Props = $props();
 
-
-
   let mapEl: HTMLDivElement;
-  let mapInstance: import('leaflet').Map | undefined;
+  let mapInstance: maplibregl.Map | undefined;
+  let planeMarker: maplibregl.Marker | undefined;
 
-  onMount(async () => {
-    // Dynamic import — Leaflet can't run during SSR
-    const L = await import('leaflet');
-    await import('leaflet/dist/leaflet.css');
-
-    // No default icon needed — all markers use inline SVG divIcons (no CDN requests)
-
-    mapInstance = L.map(mapEl, { zoomControl: true, attributionControl: true });
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      maxZoom: 18,
-    }).addTo(mapInstance);
-
-    const depCoords = getAirportCoords(depAirport);
-    const arrCoords = getAirportCoords(arrAirport);
-    const aircraftCoords: [number, number] = [lat, lon];
-
-    if (depCoords && arrCoords) {
-      // Full planned route (dashed)
-      L.polyline([depCoords, arrCoords], {
-        color: '#94a3b8',
-        weight: 1.5,
-        dashArray: '6 4',
-        opacity: 0.6,
-      }).addTo(mapInstance);
-
-      // Flown portion (solid)
-      L.polyline([depCoords, aircraftCoords], {
-        color: '#3b82f6',
-        weight: 2.5,
-        opacity: 0.9,
-      }).addTo(mapInstance);
-
-      // Airport markers
-      const airportIcon = L.divIcon({
-        html: '<div style="width:8px;height:8px;background:#64748b;border-radius:50%;border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,.4)"></div>',
-        iconSize: [8, 8],
-        iconAnchor: [4, 4],
-        className: '',
-      });
-      L.marker(depCoords, { icon: airportIcon }).bindTooltip(`${airportName(depAirport)} (${depAirport})`, { permanent: false }).addTo(mapInstance);
-      L.marker(arrCoords, { icon: airportIcon }).bindTooltip(`${airportName(arrAirport)} (${arrAirport})`, { permanent: false }).addTo(mapInstance);
-    }
-
-    // Aircraft marker — rotated plane SVG
-    const planeSvg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"
-           style="transform:rotate(${heading}deg);filter:drop-shadow(0 2px 3px rgba(0,0,0,.35))">
-        <path d="M21 16v-2l-8-5V3.5A1.5 1.5 0 0 0 11.5 2 1.5 1.5 0 0 0 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
-              fill="#2563eb" stroke="white" stroke-width="0.5"/>
-      </svg>`;
-
-    const planeIcon = L.divIcon({
-      html: planeSvg,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14],
-      className: '',
+  onMount(() => {
+    mapInstance = new maplibregl.Map({
+      container: mapEl,
+      style: '/map-style.json',
+      attributionControl: true,
     });
 
-    L.marker(aircraftCoords, { icon: planeIcon })
-      .bindPopup(`<b>${airportName(depAirport)} (${depAirport}) → ${airportName(arrAirport)} (${arrAirport})</b><br>${lat!.toFixed(4)}, ${lon!.toFixed(4)}`)
-      .addTo(mapInstance);
+    mapInstance.on('load', () => {
+      if (!mapInstance) return;
 
-    // Fit map to show the whole route
-    const points: [number, number][] = [aircraftCoords];
-    if (depCoords)  points.push(depCoords);
-    if (arrCoords)  points.push(arrCoords);
-    mapInstance.fitBounds(L.latLngBounds(points), { padding: [40, 40] });
+      const depCoords = getAirportCoords(depAirport);
+      const arrCoords = getAirportCoords(arrAirport);
+      const aircraftCoords: [number, number] = [lon, lat];
+
+      // Build bounds for fitBounds
+      const points: [number, number][] = [aircraftCoords];
+      if (depCoords) points.push([depCoords[1], depCoords[0]]);
+      if (arrCoords) points.push([arrCoords[1], arrCoords[0]]);
+
+      if (depCoords && arrCoords) {
+        // Full planned route (dashed)
+        mapInstance.addSource('planned-route', {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [depCoords[1], depCoords[0]],
+                [arrCoords[1], arrCoords[0]],
+              ],
+            },
+          },
+        });
+        mapInstance.addLayer({
+          id: 'planned-route-line',
+          type: 'line',
+          source: 'planned-route',
+          paint: {
+            'line-color': '#94a3b8',
+            'line-width': 1.5,
+            'line-dasharray': [3, 2],
+            'line-opacity': 0.6,
+          },
+        });
+
+        // Flown portion (solid)
+        mapInstance.addSource('flown-route', {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [depCoords[1], depCoords[0]],
+                aircraftCoords,
+              ],
+            },
+          },
+        });
+        mapInstance.addLayer({
+          id: 'flown-route-line',
+          type: 'line',
+          source: 'flown-route',
+          paint: {
+            'line-color': '#3b82f6',
+            'line-width': 2.5,
+            'line-opacity': 0.9,
+          },
+        });
+
+        // Airport markers
+        const airportEl = (tooltip: string) => {
+          const el = document.createElement('div');
+          el.innerHTML = `<div style="width:8px;height:8px;background:#64748b;border-radius:50%;border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,.4)"></div>`;
+          return el;
+        };
+
+        new maplibregl.Marker({ element: airportEl(`${airportName(depAirport)} (${depAirport})`), anchor: 'center' })
+          .setLngLat([depCoords[1], depCoords[0]])
+          .setPopup(new maplibregl.Popup().setText(`${airportName(depAirport)} (${depAirport})`))
+          .addTo(mapInstance);
+
+        new maplibregl.Marker({ element: airportEl(`${airportName(arrAirport)} (${arrAirport})`), anchor: 'center' })
+          .setLngLat([arrCoords[1], arrCoords[0]])
+          .setPopup(new maplibregl.Popup().setText(`${airportName(arrAirport)} (${arrAirport})`))
+          .addTo(mapInstance);
+      }
+
+      // Aircraft marker — rotated plane SVG
+      const planeEl = document.createElement('div');
+      planeEl.innerHTML = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"
+             style="transform:rotate(${heading}deg);filter:drop-shadow(0 2px 3px rgba(0,0,0,.35));transition:transform 0.6s ease">
+          <path d="M21 16v-2l-8-5V3.5A1.5 1.5 0 0 0 11.5 2 1.5 1.5 0 0 0 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
+                fill="#2563eb" stroke="white" stroke-width="0.5"/>
+        </svg>`;
+
+      planeMarker = new maplibregl.Marker({ element: planeEl, anchor: 'center' })
+        .setLngLat(aircraftCoords)
+        .setPopup(
+          new maplibregl.Popup().setHTML(
+            `<b>${airportName(depAirport)} (${depAirport}) → ${airportName(arrAirport)} (${arrAirport})</b><br>${lat.toFixed(4)}, ${lon.toFixed(4)}`
+          )
+        )
+        .addTo(mapInstance);
+
+      // Fit map to show the whole route
+      if (points.length >= 2) {
+        const lngs = points.map(p => p[0]);
+        const lats = points.map(p => p[1]);
+        const bounds: [[number, number], [number, number]] = [
+          [Math.min(...lngs), Math.min(...lats)],
+          [Math.max(...lngs), Math.max(...lats)],
+        ];
+        mapInstance.fitBounds(bounds, { padding: 40 });
+      }
+    });
   });
 
   onDestroy(() => {
+    planeMarker?.remove();
     mapInstance?.remove();
   });
 </script>
 
 <div bind:this={mapEl} class="h-72 w-full rounded-lg overflow-hidden border border-border z-0"></div>
+
+<style>
+  :global(.maplibregl-popup-content) {
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    font-size: 0.875rem;
+  }
+  :global(.maplibregl-ctrl-attrib) {
+    font-size: 0.65rem;
+  }
+</style>

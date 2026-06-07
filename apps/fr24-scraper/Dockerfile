@@ -8,15 +8,20 @@ WORKDIR /app
 # Copy workspace manifests
 COPY package*.json ./
 COPY packages/database/package*.json ./packages/database/
+COPY packages/telegram/package*.json ./packages/telegram/
 COPY apps/fr24-scraper/package*.json ./apps/fr24-scraper/
 
 # Install dependencies - puppeteer-real-browser will download its patched Chrome
 RUN npm install
 
 COPY packages/database/ ./packages/database/
+COPY packages/telegram/ ./packages/telegram/
 COPY apps/fr24-scraper/ ./apps/fr24-scraper/
 
 WORKDIR /app/packages/database
+RUN npm run build
+
+WORKDIR /app/packages/telegram
 RUN npm run build
 
 WORKDIR /app/apps/fr24-scraper
@@ -62,14 +67,14 @@ RUN apt-get update && apt-get install -y \
     libxkbcommon0 \
     libglu1-mesa \
     --no-install-recommends \
-    && ln -snf /usr/share/zoneinfo/Europe/London /etc/localtime \
-    && echo "Europe/London" > /etc/timezone \
+    && ln -snf /usr/share/zoneinfo/UTC /etc/localtime \
+    && echo "UTC" > /etc/timezone \
     && locale-gen en_GB.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
     HOME=/home/scraper \
-    TZ=Europe/London \
+    TZ=UTC \
     LANG=en_GB.UTF-8 \
     LANGUAGE=en_GB:en
 
@@ -79,6 +84,7 @@ COPY --from=builder /app/apps/fr24-scraper/dist ./dist
 COPY --from=builder /app/apps/fr24-scraper/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/database ./packages/database
+COPY --from=builder /app/packages/telegram ./packages/telegram
 
 # Copy puppeteer's downloaded Chrome from builder's cache
 COPY --from=builder /root/.cache/puppeteer /root/.cache/puppeteer

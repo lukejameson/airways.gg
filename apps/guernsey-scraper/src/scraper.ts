@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { db, flights, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, routeFlightMinutes, locationToIata } from '@airways/database';
+import { db, flights, flightStatusHistory, flightTimes, scraperLogs, canUpgradeStatus, routeFlightMinutes, locationToIata, GY_TZ, localToUtc, guernseyTodayStr } from '@airways/database';
 import { eq, and, isNull, sql, count, or, isNotNull } from 'drizzle-orm';
 
 interface StatusUpdate {
@@ -17,6 +17,12 @@ interface ScrapedFlight {
   type: 'arrivals' | 'departures';
   statusUpdates: StatusUpdate[];
 }
+
+
+
+
+
+
 
 const BASE_URL = process.env.GUERNSEY_AIRPORT_URL || 'https://www.airport.gg';
 const API_URL = process.env.GUERNSEY_API_URL || 'https://www.airport.gg/arr-dep/json';
@@ -69,9 +75,7 @@ function mapApiEntriesToScrapedFlights(
     if (!timeParts) continue;
     const hh = parseInt(timeParts[1]);
     const mm = parseInt(timeParts[2]);
-
-    const scheduledTime = new Date(`${entry.flight_date}T00:00:00Z`);
-    scheduledTime.setUTCHours(hh, mm, 0, 0);
+    const scheduledTime = localToUtc(entry.flight_date, hh, mm);
 
     const location = entry.flight_locations.join(', ');
     const codes = entry.flight_numbers;
@@ -96,20 +100,11 @@ function mapApiEntriesToScrapedFlights(
       scheduledTime,
       flightDate: entry.flight_date,
       type,
-      statusUpdates,
+      statusUpdates: statusUpdates.map(u => correctOnTimeTimestamp(u, scheduledTime)),
     });
   }
   return results;
 }
-
-// Known typical flight times in minutes for routes from/to GCI.
-// Used to estimate scheduledDeparture/scheduledArrival when only one end is known.
-
-
-// Map Guernsey Airport location display names → IATA codes
-
-// Derive airline code from the primary flight code (first two non-numeric chars)
-// Skybus (SI) and Blue Islands AT6 series (AT) are codeshares under Aurigny (GR)
 function airlineCode(flightCode: string): string {
   const match = flightCode.match(/^([A-Z]{2})/);
   const code = match ? match[1] : 'XX';
@@ -149,7 +144,7 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
   const tableId = type === 'arrivals' ? '#table-arrivals' : '#table-departures';
 
   const results: ScrapedFlight[] = [];
-  const defaultFlightDate = date.toISOString().split('T')[0];
+  const defaultFlightDate = guernseyTodayStr(date);
 
   $(`${tableId} tbody.list tr[data-search="true"]`).each((_, row) => {
     try {
@@ -174,8 +169,7 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
         }
       }
 
-      const scheduledTime = new Date(rowDate);
-      scheduledTime.setHours(hh, mm, 0, 0);
+      const scheduledTime = localToUtc(flightDate, hh, mm);
 
       const location = $row.find('td.airport').text().trim();
 
@@ -202,9 +196,8 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
         const tsMatch = datetimeRaw.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
         if (tsMatch) {
           const [, d, mo, y, h, mi] = tsMatch;
-          const statusTimestamp = new Date(
-            parseInt(y), parseInt(mo) - 1, parseInt(d), parseInt(h), parseInt(mi), 0,
-          );
+          const dateStr = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+          const statusTimestamp = localToUtc(dateStr, parseInt(h), parseInt(mi));
           if (!isNaN(statusTimestamp.getTime())) {
             for (const flightCode of codes) {
               statusUpdates.push({ flightCode, flightDate, statusTimestamp, statusMessage: comment });
@@ -224,15 +217,13 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
         }
       });
 
-      results.push({ location, codes, scheduledTime, flightDate, type, statusUpdates });
+      results.push({ location, codes, scheduledTime, flightDate, type, statusUpdates: statusUpdates.map(u => correctOnTimeTimestamp(u, scheduledTime)) });
     } catch (err) {
       console.error('[Guernsey] Error parsing row:', err);
     }
   });
-
   return results;
 }
-
 /**
  * Extract hours and minutes from a time string.
  * Handles both "HH:MM" (e.g. "12:10") and "HHMM" (e.g. "1210") formats,
@@ -260,9 +251,8 @@ function parseHHMM(text: string): { hh: number; mm: number } | null {
 function parseTimeFromMessage(message: string, referenceDate: Date): Date | null {
   const parsed = parseHHMM(message);
   if (!parsed) return null;
-  const t = new Date(referenceDate);
-  t.setHours(parsed.hh, parsed.mm, 0, 0);
-  return t;
+  const refDateStr = referenceDate.toISOString().split('T')[0];
+  return localToUtc(refDateStr, parsed.hh, parsed.mm);
 }
 
 /**
@@ -279,14 +269,22 @@ function parseTimeFromMessage(message: string, referenceDate: Date): Date | null
 function deriveStatus(updates: StatusUpdate[], scheduledTime: Date): string | null {
   if (updates.length === 0) return null;
 
-  // Scan all updates for terminal/important statuses (latest wins)
+  // Scan all updates for terminal/important statuses (latest wins).
+  // Ignore Airborne/Landed messages posted more than 30 minutes before the
+  // scheduled time — they are stale data from a previous rotation on the board.
+  const preScheduleCutoff = scheduledTime.getTime() - 30 * 60_000;
   for (const u of [...updates].reverse()) {
     const msg = u.statusMessage.toLowerCase();
-    if (msg.includes('landed') || msg.includes('voyagereported')) return 'Landed';
-    if (msg.includes('airborne')) return 'Airborne';
-    // Preserve diversion details — the raw message carries the destination
-    if (msg.includes('diverted')) return u.statusMessage;
-    if (msg.includes('diverting')) return u.statusMessage;
+    const isPreSchedule = u.statusTimestamp.getTime() < preScheduleCutoff;
+    if (msg.includes('landed') || msg.includes('voyagereported')) {
+      if (!isPreSchedule) return 'Landed';
+    } else if (msg.includes('airborne')) {
+      if (!isPreSchedule) return 'Airborne';
+    } else if (msg.includes('diverted')) {
+      return u.statusMessage;
+    } else if (msg.includes('diverting')) {
+      return u.statusMessage;
+    }
   }
 
   // Now check the latest update for non-terminal statuses
@@ -344,9 +342,12 @@ function extractActualTime(updates: StatusUpdate[], keyword: string, referenceDa
     if (u.statusMessage.toLowerCase().includes(keyword.toLowerCase())) {
       const parsed = parseHHMM(u.statusMessage);
       if (parsed) {
-        const t = new Date(referenceDate);
-        t.setHours(parsed.hh, parsed.mm, 0, 0);
-        return t;
+        const refDateStr = referenceDate.toISOString().split('T')[0];
+        const extracted = localToUtc(refDateStr, parsed.hh, parsed.mm);
+        // Reject times more than 30 minutes before scheduled — stale data from a
+        // previous rotation that the airport board hasn't cleared yet.
+        if (extracted.getTime() < referenceDate.getTime() - 30 * 60_000) continue;
+        return extracted;
       }
     }
   }
@@ -377,11 +378,10 @@ function extractDelayMinutes(updates: StatusUpdate[], scheduledTime: Date): numb
         msg.includes('flight delayed to approx') || msg.includes('next info')) {
       const parsed = parseHHMM(u.statusMessage);
       if (parsed) {
-        const estimatedTime = new Date(scheduledTime);
-        estimatedTime.setHours(parsed.hh, parsed.mm, 0, 0);
+        const refDateStr = scheduledTime.toISOString().split('T')[0];
+        const estimatedTime = localToUtc(refDateStr, parsed.hh, parsed.mm);
         const diffMs = estimatedTime.getTime() - scheduledTime.getTime();
         const diffMins = Math.round(diffMs / 60_000);
-        // Within 5 minutes of scheduled is considered on-time (not delayed)
         if (diffMins <= 5) return 0;
         return diffMins;
       }
@@ -389,12 +389,6 @@ function extractDelayMinutes(updates: StatusUpdate[], scheduledTime: Date): numb
   }
   return null;
 }
-
-/**
- * Extract estimated time from "Delayed To HH:MM" or "Approx HH:MM" messages.
- * Returns the absolute estimated time for use in flightTimes (EstimatedBlockOff/On).
- * Returns the time even if it's earlier than scheduled (early arrival/departure).
- */
 function extractEstimatedTime(updates: StatusUpdate[], scheduledTime: Date): Date | null {
   for (const u of [...updates].reverse()) {
     const msg = u.statusMessage.toLowerCase();
@@ -403,9 +397,8 @@ function extractEstimatedTime(updates: StatusUpdate[], scheduledTime: Date): Dat
         msg.includes('flight delayed to approx') || msg.includes('next info')) {
       const parsed = parseHHMM(u.statusMessage);
       if (parsed) {
-        const estimated = new Date(scheduledTime);
-        estimated.setHours(parsed.hh, parsed.mm, 0, 0);
-        return estimated;
+        const refDateStr = scheduledTime.toISOString().split('T')[0];
+        return localToUtc(refDateStr, parsed.hh, parsed.mm);
       }
     }
   }
@@ -477,6 +470,8 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
   if (status)                 updateSet.status          = status;
   if (canceled)               updateSet.canceled        = canceled;
   if (delayMinutes !== null)  updateSet.delayMinutes    = delayMinutes;
+  if (scheduledDeparture)     updateSet.scheduledDeparture = scheduledDeparture;
+  if (scheduledArrival)       updateSet.scheduledArrival   = scheduledArrival;
 
   try {
     // First check if a flight already exists for this flight_number + flight_date.
@@ -515,7 +510,7 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
       }
     } else {
       // No existing record — insert a new one with guernsey unique_id
-      const uniqueId = `${primaryCode}_${scrapedFlight.flightDate}`;
+      const uniqueId = `${primaryCode}_${scrapedFlight.flightDate}_${departureAirport}_${arrivalAirport}`;
       const result = await db
         .insert(flights)
         .values({
@@ -540,9 +535,18 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
 
     // Write estimated time to flightTimes so the web app can display it.
     // Departures use EstimatedBlockOff (pushback time), arrivals use EstimatedBlockOn (landing time).
-    if (flightId !== null && estimatedTime !== null) {
+    // If the delay has resolved (no estimated time now), clear any stale estimate so the UI
+    // doesn't continue showing a delay that no longer exists.
+    if (flightId !== null) {
       const timeType = scrapedFlight.type === 'departures' ? 'EstimatedBlockOff' : 'EstimatedBlockOn';
-      await upsertFlightTime(flightId, timeType, estimatedTime);
+      const isTerminal = ['Airborne', 'Landed', 'Cancelled', 'Diverted'].some(s => status?.includes(s));
+      if (estimatedTime !== null) {
+        await upsertFlightTime(flightId, timeType, estimatedTime);
+      } else if (!isTerminal && !actualDeparture && !actualArrival) {
+        await db.delete(flightTimes).where(
+          and(eq(flightTimes.flightId, flightId), eq(flightTimes.timeType, timeType)),
+        ).catch(() => {});
+      }
     }
 
     return flightId;
@@ -569,6 +573,15 @@ function statusSingletonPrefix(msg: string): string | null {
 
 function normaliseStatusMessage(msg: string): string {
   return msg.replace(/\bNext Info\s+(\d{2})(\d{2})\b/gi, (_, h, m) => `Next Info ${h}:${m}`);
+}
+/**
+ * No-op — previously corrected "on time" status timestamps that were 1h ahead of
+ * scheduled time due to BST wall-clock storage. Now that all timestamps are stored
+ * in true UTC (migration 0014, TZ=UTC in Docker), this correction is no longer needed.
+ * Kept as a pass-through to avoid breaking call sites.
+ */
+function correctOnTimeTimestamp(update: StatusUpdate, _scheduledTime: Date): StatusUpdate {
+  return update;
 }
 async function saveStatusUpdates(updates: StatusUpdate[], flightId: number | null): Promise<number> {
   let saved = 0;
@@ -819,7 +832,6 @@ export async function scrapeDayFlights(date: Date): Promise<{ flights: number; u
         totalUpdates += await saveStatusUpdates(flight.statusUpdates, flightId);
       }
     }
-    return { flights: totalFlights, updates: totalUpdates };
   }
   const html = await fetchDayHtml(date);
   for (const type of ['arrivals', 'departures'] as const) {
@@ -998,7 +1010,7 @@ export async function runBackfill(
   onProgress?: (current: Date, total: number, completed: number) => void,
 ): Promise<void> {
   const startDate = new Date(startDateStr || '2019-01-01');
-  const endDate   = new Date(endDateStr   || new Date().toISOString().split('T')[0]);
+  const endDate   = new Date(endDateStr   || guernseyTodayStr());
 
   console.log(`[Guernsey] Starting historical backfill: ${startDate.toISOString().split('T')[0]} → ${endDate.toISOString().split('T')[0]}`);
 

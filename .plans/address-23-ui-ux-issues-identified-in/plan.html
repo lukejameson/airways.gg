@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan — airways.gg</title>
+<style>
+  :root { --bg: #f8f9fa; --card: #fff; --text: #1a1a2e; --muted: #6b7280;
+          --border: #e5e7eb; --cyan: #0891b2; --green: #16a34a; --blue: #2563eb;
+          --purple: #7c3aed; --amber: #d97706; --red: #dc2626; --radius: 10px; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg);
+         color: var(--text); max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem; }
+  header { margin-bottom: 2rem; }
+  h1 { font-size: 1.8rem; display: flex; align-items: center; gap: 0.5rem; }
+  .meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.25rem; }
+  .badge { display: inline-block; font-size: 0.7rem; font-weight: 600; padding: 2px 10px;
+           border-radius: 99px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .badge-pending { background: #f1f5f9; color: #64748b; }
+  .badge-active  { background: #dbeafe; color: #2563eb; }
+  .badge-done    { background: #dcfce7; color: #16a34a; }
+
+  .goal { background: #ecfeff; border-left: 4px solid var(--cyan); padding: 1rem 1.25rem;
+          border-radius: 0 var(--radius) var(--radius) 0; margin-bottom: 1.25rem;
+          font-size: 1.05rem; line-height: 1.55; }
+  .goal::before { content: "🎯 "; font-size: 1.15rem; }
+
+  .progress-wrap { margin-bottom: 1.5rem; }
+  .progress-label { display: flex; justify-content: space-between; font-size: 0.8rem;
+                    color: var(--muted); margin-bottom: 0.35rem; }
+  .progress-bar { height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--blue));
+                   border-radius: 99px; transition: width 0.4s ease; }
+
+  .info-box { border-radius: 0 var(--radius) var(--radius) 0; padding: 1rem 1.25rem;
+              margin-bottom: 1.25rem; font-size: 0.97rem; line-height: 1.55; }
+  .info-box h3 { font-size: 0.95rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
+  .whyhow-box { background: #eff6ff; border-left: 4px solid var(--blue); }
+  .whyhow-box h3 { color: var(--blue); }
+  .expected-box { background: #f0fdf4; border-left: 4px solid var(--green); }
+  .expected-box h3 { color: var(--green); }
+
+  .phase { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+           padding: 1.25rem 1.5rem; margin-bottom: 1rem; }
+  .phase h2 { font-size: 1.05rem; display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; }
+  .phase-icon { font-size: 1.1rem; line-height: 1; }
+  .task-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; font-size: 0.95rem; }
+  .task-row input[type="checkbox"] { accent-color: var(--cyan); width: 1rem; height: 1rem; flex-shrink: 0; }
+  .task-row.done label { text-decoration: line-through; color: var(--muted); }
+
+  .notes-box { background: #fffbeb; border: 1px solid #fcd34d; border-radius: var(--radius);
+               padding: 1rem 1.25rem; margin-top: 1.5rem; }
+  .notes-box h3 { font-size: 0.95rem; margin-bottom: 0.4rem; color: var(--amber); display: flex; align-items: center; gap: 0.4rem; }
+  .notes-box ul { list-style: disc; margin-left: 1.25rem; font-size: 0.9rem; color: #78350f; }
+  .discovered-box { background: #fef2f2; border: 1px solid #fca5a5; border-radius: var(--radius);
+                    padding: 1rem 1.25rem; margin-top: 1rem; }
+  .discovered-box h3 { font-size: 0.95rem; margin-bottom: 0.4rem; color: var(--red); display: flex; align-items: center; gap: 0.4rem; }
+  .discovered-box .task-row label { color: #991b1b; }
+  .empty-state { color: var(--muted); font-style: italic; font-size: 0.85rem; padding: 0.25rem 0; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <h1>&#x1F4CB; Plan — airways.gg</h1>
+  <!-- STATUS: pending -->
+  <p class="meta">Generated: 2026-06-02 &middot; Status: <span class="badge badge-pending">pending</span></p>
+</header>
+
+<!-- GOAL -->
+<div class="goal">Address 23 UI/UX issues identified in the airways.gg code review — 4 high, 12 medium, 7 low — covering dark mode, accessibility, stats page UX, search, navigation, and polish.</div>
+
+<!-- PROGRESS -->
+<div class="progress-wrap">
+  <div class="progress-label"><span>Progress</span><span>0 / 23</span></div>
+  <div class="progress-bar"><div class="progress-fill" style="width: 0%;"></div></div>
+</div>
+
+<!-- WHY & HOW -->
+<div class="info-box whyhow-box">
+  <h3><span class="section-icon">💡</span> Why &amp; How</h3>
+  <p>A top-down UI/UX audit of the airways.gg SvelteKit 5 web app found the site well-crafted but with concrete gaps: no dark mode, no reduced-motion support, an overwhelming stats page, missing search autocomplete, and various interaction polish issues. Each task targets a specific finding from code-review-report.md with clear, independently verifiable actions. Prioritized by severity — high items first, then medium, then low.</p>
+</div>
+
+<!-- EXPECTED -->
+<div class="info-box expected-box">
+  <h3><span class="section-icon">🎁</span> Expected Outcome</h3>
+  <p>The site gains dark mode with a theme toggle, respects prefers-reduced-motion, has a streamlined stats page with TOC and simplified route filter, adds search autocomplete, improves flight detail navigation with breadcrumbs and section jump links, adds aria-live regions, shows weather on mobile cards, adds chart loading skeletons, and addresses all remaining medium/low items. Total: ~23 actionable changes across 11 files.</p>
+</div>
+
+<!-- PHASES -->
+
+<!-- PHASE: 1 (status: pending) -->
+<div class="phase">
+  <h2><span class="phase-icon">⏳</span> Phase 1: Dark Mode &amp; Reduced Motion <span class="badge badge-pending">pending</span></h2>
+  <div class="task-row"><input type="checkbox" disabled><label>Add :root.dark CSS custom property block to app.css with inverted color values (navy/indigo-toned dark palette)</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add theme toggle button (sun/moon icon) to +layout.svelte header, persisting choice to localStorage</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add @media (prefers-reduced-motion: reduce) block to app.css disabling all animations/transitions</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add dark: Tailwind variants to remaining hardcoded color classes across all pages</label></div>
+</div>
+
+<!-- PHASE: 2 (status: pending) -->
+<div class="phase">
+  <h2><span class="phase-icon">⏳</span> Phase 2: Stats Page UX Overhaul <span class="badge badge-pending">pending</span></h2>
+  <div class="task-row"><input type="checkbox" disabled><label>Add sticky sidebar table of contents with anchor links to each stats section</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Collapse secondary sections (aircraft usage, visibility impact, wind impact, weather days) behind expandable toggles</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Replace two-tier route filter (top-10 pills + search input) with a single scrollable multi-select list with search at top</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Replace hidden custom date range toggle with a dedicated date range picker component</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Convert full-screen disclaimer modal to a dismissible banner (like roads.gg banner pattern)</label></div>
+</div>
+
+<!-- PHASE: 3 (status: pending) -->
+<div class="phase">
+  <h2><span class="phase-icon">⏳</span> Phase 3: Search Autocomplete &amp; Navigation <span class="badge badge-pending">pending</span></h2>
+  <div class="task-row"><input type="checkbox" disabled><label>Add debounced suggestion dropdown to home page inline search and /search page search input</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add visible breadcrumb trail (Home &gt; Flights &gt; GR602) to flight detail page</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add sticky mini-nav row with section jump links below flight detail header</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add Search link and active-state indicator (aria-current) to header navigation</label></div>
+</div>
+
+<!-- PHASE: 4 (status: pending) -->
+<div class="phase">
+  <h2><span class="phase-icon">⏳</span> Phase 4: Accessibility &amp; Dynamic Content <span class="badge badge-pending">pending</span></h2>
+  <div class="task-row"><input type="checkbox" disabled><label>Add aria-live="polite" regions to DelayCounter and flight board container</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add hidden accessible data tables alongside Chart.js charts on stats page</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add loading skeletons for Chart.js chart containers on stats page</label></div>
+</div>
+
+<!-- PHASE: 5 (status: pending) -->
+<div class="phase">
+  <h2><span class="phase-icon">⏳</span> Phase 5: Mobile &amp; Component Polish <span class="badge badge-pending">pending</span></h2>
+  <div class="task-row"><input type="checkbox" disabled><label>Show condensed one-line weather on mobile FlightCard instead of hiding entirely</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add spinner to "Loading map…" state in flight detail map expand section</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Improve share button fallback — show toast on desktop, URL on share failure</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add relative timestamps to recently-viewed flight chips</label></div>
+</div>
+
+<!-- PHASE: 6 (status: pending) -->
+<div class="phase">
+  <h2><span class="phase-icon">⏳</span> Phase 6: Low-Severity Cleanup <span class="badge badge-pending">pending</span></h2>
+  <div class="task-row"><input type="checkbox" disabled><label>Add @media print styles to app.css — hide chrome, show clean flight data tables</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Add favicon.ico link to app.html for legacy browser support</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Standardize flight detail section headers to consistent style</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Make error page "Go to flight board" primary CTA, hide "Go back" when no same-origin referrer</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Show threshold value prominently in stats "On-Time Rate" hero card</label></div>
+  <div class="task-row"><input type="checkbox" disabled><label>Make auto-advance banner more prominent (amber tone + "Switch to today" button)</label></div>
+</div>
+
+<!-- NOTES -->
+<div class="notes-box">
+  <h3><span class="section-icon">📝</span> Notes</h3>
+  <ul>
+    <li>Dark palette should use navy/indigo tones matching the aviation theme (--background: 222 47% 8%, etc.)</li>
+    <li>Theme toggle persists to localStorage; default follows prefers-color-scheme on first visit</li>
+    <li>All changes are additive — existing functionality must not regress</li>
+    <li>Build and tests must pass after each phase</li>
+    <li>See code-review-report.md for full context on each finding</li>
+  </ul>
+</div>
+
+<!-- DISCOVERED (hidden if empty) -->
+<!-- No discovered tasks yet -->
+
+</body>
+</html>

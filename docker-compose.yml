@@ -28,6 +28,48 @@ services:
     networks:
       - web
     restart: unless-stopped
+  notification-service:
+    build:
+      context: .
+      dockerfile: apps/notification-service/Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
+      - VAPID_SUBJECT=${VAPID_SUBJECT}
+      - NOTIFY_POLL_INTERVAL_MS=${NOTIFY_POLL_INTERVAL_MS:-15000}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - NODE_ENV=production
+    networks:
+      - web
+    restart: unless-stopped
+
+  fr24-scraper:
+    init: true
+    build:
+      context: .
+      dockerfile: apps/fr24-scraper/Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - SCRAPER_CUTOFF_HOUR=${SCRAPER_CUTOFF_HOUR:-23}
+      - SCRAPER_WAKE_OFFSET_MINS=${SCRAPER_WAKE_OFFSET_MINS:-30}
+      - SCRAPER_INTERVAL_HIGH_MINS=${SCRAPER_INTERVAL_HIGH_MINS:-2}
+      - SCRAPER_INTERVAL_MEDIUM_MINS=${SCRAPER_INTERVAL_MEDIUM_MINS:-5}
+      - SCRAPER_INTERVAL_LOW_MINS=${SCRAPER_INTERVAL_LOW_MINS:-10}
+      - SCRAPER_INTERVAL_IDLE_MINS=${SCRAPER_INTERVAL_IDLE_MINS:-15}
+      - SCRAPER_MAX_RETRIES=${SCRAPER_MAX_RETRIES:-3}
+      - PROXY_ENABLED=${PROXY_ENABLED:-false}
+      - PROXY_USERNAME=${PROXY_USERNAME}
+      - PROXY_PASSWORD=${PROXY_PASSWORD}
+      - PROXY_HOSTS=${PROXY_HOSTS}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - NODE_ENV=production
+    networks:
+      - web
+    restart: unless-stopped
+
   adsb-service:
     build:
       context: .
@@ -35,6 +77,8 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - ADSB_INTERVAL_MS=${ADSB_INTERVAL_MS:-60000}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web
@@ -56,6 +100,8 @@ services:
       - SCRAPER_INTERVAL_TOMORROW_MINS=${SCRAPER_INTERVAL_TOMORROW_MINS:-360}
       - GUERNSEY_AIRPORT_URL=${GUERNSEY_AIRPORT_URL:-https://www.airport.gg}
       - GUERNSEY_API_KEY=${GUERNSEY_API_KEY:?GUERNSEY_API_KEY is required}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web
@@ -86,6 +132,8 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - FR24_API_TOKEN=${FR24_API_TOKEN}
       - POSITION_INTERVAL_MS=${POSITION_INTERVAL_MS:-300000}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web
@@ -98,6 +146,8 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - OPENMETEO_API_URL=${OPENMETEO_API_URL:-https://api.open-meteo.com/v1/forecast}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web

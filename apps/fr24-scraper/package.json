@@ -11,8 +11,10 @@
   "dependencies": {
     "@airways/common": "*",
     "@airways/database": "*",
+    "@airways/telegram": "*",
     "dotenv": "^16.4.0",
     "drizzle-orm": "^0.45.1",
+    "luxon": "^3.4.0",
     "puppeteer-real-browser": "^1.4.4"
   },
   "devDependencies": {

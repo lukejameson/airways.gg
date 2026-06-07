@@ -5,6 +5,7 @@ import { db, flights } from '@airways/database';
 import { eq, and, sql, isNull, gte, lte, asc } from 'drizzle-orm';
 import { lookupByHex } from './lookup';
 import { AURIGNY_FLEET } from './fleet';
+import { sendAlert } from '@airways/telegram';
 
 const INTERVAL_MS = parseInt(process.env.ADSB_INTERVAL_MS ?? '60000', 10);
 
@@ -384,6 +385,7 @@ async function main(): Promise<void> {
       await pollRegistrations();
     } catch (err) {
       console.error('[ADSB] Poll error:', err instanceof Error ? err.message : err);
+      sendAlert('adsb-service', 'warning', 'Poll failed', err).catch(() => {});
     }
     setTimeout(poll, INTERVAL_MS);
   }
@@ -393,10 +395,10 @@ async function main(): Promise<void> {
 
 process.on('uncaughtException', (err) => {
   console.error('[ADSB] Uncaught exception:', err);
-  process.exit(1);
+  sendAlert('adsb-service', 'critical', 'Uncaught exception', err).finally(() => process.exit(1));
 });
 
 main().catch(err => {
   console.error('[ADSB] Fatal error:', err);
-  process.exit(1);
+  sendAlert('adsb-service', 'critical', 'Fatal error', err).finally(() => process.exit(1));
 });

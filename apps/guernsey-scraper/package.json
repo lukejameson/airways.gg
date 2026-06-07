@@ -11,9 +11,11 @@
   "dependencies": {
     "@airways/common": "*",
     "@airways/database": "*",
+    "@airways/telegram": "*",
     "cheerio": "^1.0.0",
     "dotenv": "^16.4.0",
-    "drizzle-orm": "^0.45.1"
+    "drizzle-orm": "^0.45.1",
+    "luxon": "^3.4.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

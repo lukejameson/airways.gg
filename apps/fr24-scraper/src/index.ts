@@ -1,8 +1,38 @@
 import { loadEnv, CircuitBreaker, createCircuitBreakerFromEnv, TERMINAL_STATUSES, isTerminalStatus, mins, guernseyHour, guernseyDateStr, guernseyTomorrowStr, nextGuernseyTime, type TimerState } from '@airways/common';
 loadEnv({ serviceName: 'FR24', startDir: __dirname });
 
-import { scrapeOnce } from './scraper';
-import { db, scraperLogs, flights, flightTimes } from '@airways/database';
+// Walk up from __dirname until we find the .env file
+function findEnvFile(startDir: string): string | null {
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    const candidate = resolve(dir, '.env');
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+const envPath = findEnvFile(__dirname);
+if (envPath) {
+  config({ path: envPath });
+} else {
+  console.warn('[FR24] Warning: .env file not found, relying on environment variables');
+}
+
+// Fail fast if the process timezone is not UTC — pg serialization of
+// Date objects depends on it for `timestamp without time zone` columns.
+if (new Date().getTimezoneOffset() !== 0) {
+  console.error(
+    `[FR24] FATAL: Process timezone offset is ${new Date().getTimezoneOffset()} minutes, expected 0 (UTC). Set TZ=UTC.`,
+  );
+  process.exit(1);
+}
+
+import { scrapeOnce, guernseyDateStr } from './scraper';
+import { db, scraperLogs, flights, flightTimes, guernseyHour, guernseyTomorrowStr, nextGuernseyTime } from '@airways/database';
+import { sendAlert } from '@airways/telegram';
 import { eq, and, not, inArray, desc, count, max, asc, isNull, sql } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
@@ -36,6 +66,44 @@ function clearAllTimers(): void {
     }
   });
 }
+
+function checkCircuitBreaker(): boolean {
+  if (circuitBreaker.isOpen) {
+    const now = Date.now();
+    if (circuitBreaker.lastFailureTime &&
+        now - circuitBreaker.lastFailureTime > CIRCUIT_BREAKER_RESET_MS) {
+      circuitBreaker.isOpen = false;
+      circuitBreaker.failures = 0;
+      console.log('[FR24] Circuit breaker reset, resuming operations');
+      return true;
+    }
+    console.log('[FR24] Circuit breaker is OPEN, skipping operation');
+    return false;
+  }
+  return true;
+}
+
+function recordFailure(): void {
+  circuitBreaker.failures++;
+  circuitBreaker.lastFailureTime = Date.now();
+  if (circuitBreaker.failures >= CIRCUIT_BREAKER_THRESHOLD) {
+    circuitBreaker.isOpen = true;
+    console.error(`[FR24] Circuit breaker OPENED after ${circuitBreaker.failures} failures`);
+    sendAlert('fr24-scraper', 'critical', `Circuit breaker opened after ${circuitBreaker.failures} consecutive failures — scraper is paused`).catch(() => {});
+  }
+}
+
+function recordSuccess(): void {
+  if (circuitBreaker.failures > 0) {
+    circuitBreaker.failures = Math.max(0, circuitBreaker.failures - 1);
+  }
+}
+
+
+
+
+
+
 
 // ---------------------------------------------------------------------------
 // DB helpers
@@ -509,11 +577,13 @@ async function scheduleNextScrape(): Promise<void> {
         await scheduleNextScrape();
       } catch (err) {
         console.error('[FR24] Error in wake timeout callback:', err);
+        sendAlert('fr24-scraper', 'warning', 'Wake timeout callback error', err).catch(() => {});
         timers.wakeTimeout = null;
         try {
           await scheduleNextScrape();
         } catch (err2) {
           console.error('[FR24] Fatal: Failed to reschedule after wake error:', err2);
+          sendAlert('fr24-scraper', 'critical', 'Failed to reschedule after wake error — scheduler may be stuck', err2).catch(() => {});
           timers.wakeTimeout = setTimeout(() => {
             timers.wakeTimeout = null;
             scheduleNextScrape().catch(e => console.error('[FR24] Fatal retry failed:', e));
@@ -551,7 +621,8 @@ async function scheduleNextScrape(): Promise<void> {
       circuitBreaker.recordSuccess();
     } catch (err) {
       console.error('[FR24] Error in scheduled scrape:', err);
-      circuitBreaker.recordFailure();
+      sendAlert('fr24-scraper', 'warning', 'Scheduled scrape error', err).catch(() => {});
+      recordFailure();
     }
     await scheduleNextScrape();
   }, totalMs);
@@ -615,11 +686,11 @@ process.on('SIGINT', () => {
 process.on('uncaughtException', (err) => {
   console.error('[FR24] Uncaught exception:', err);
   clearAllTimers();
-  process.exit(1);
+  sendAlert('fr24-scraper', 'critical', 'Uncaught exception', err).finally(() => process.exit(1));
 });
 
 main().catch(err => {
   console.error('[FR24] Fatal startup error:', err);
   clearAllTimers();
-  process.exit(1);
+  sendAlert('fr24-scraper', 'critical', 'Fatal startup error', err).finally(() => process.exit(1));
 });

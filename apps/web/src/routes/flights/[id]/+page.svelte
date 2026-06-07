@@ -3,18 +3,14 @@
   import { browser } from '$app/environment';
   import { invalidateAll } from '$app/navigation';
   import { page } from '$app/stores';
-  import { onDestroy } from 'svelte';
-  import { airportName, getAirportCoords } from '$lib/airports';
-  import { isDaytime } from '$lib/daylight';
-  import { isFlightCompleted } from '$lib/status';
-
-  // Component imports
-  import FlightHeader from './components/FlightHeader.svelte';
-  import FlightTimeline from './components/FlightTimeline.svelte';
-  import FlightMap from './components/FlightMap.svelte';
-  import WeatherDisplay from './components/WeatherDisplay.svelte';
-  import RotationHistory from './components/RotationHistory.svelte';
-  import DelayAnalysis from './components/DelayAnalysis.svelte';
+  import { airportName, getAirportCoords, getAirportsForNearestSearch } from '$lib/airports';
+  import Icon from '$lib/components/Icon.svelte';
+  import type { IconName } from '$lib/components/Icon.svelte';
+  import { getWeatherIconName, isDaytime } from '$lib/daylight';
+  import { formatGuernseyTime, formatGuernseyDateTime, formatGuernseyShortDate } from '$lib/time';
+  import { shortenStatus, statusHasDetail, extractDelayReason, isFlightCompleted } from '$lib/status';
+  import { getStatusTone, STATUS_TEXT_CLASSES, STATUS_DOT_CLASSES, STATUS_PILL_CLASSES } from '$lib/statusConfig';
+  import DelayCounter from '$lib/components/DelayCounter.svelte';
 
   let { data }: { data: PageData } = $props();
   const returnTab = $derived($page.url.searchParams.get('tab') ?? '');
@@ -71,7 +67,7 @@
   const seoTitle = $derived(`${flight.flightNumber}: ${airportName(flight.departureAirport)} → ${airportName(flight.arrivalAirport)} | airways.gg`);
   const seoDate = $derived(
     flight.scheduledDeparture
-      ? new Date(flight.scheduledDeparture).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+      ? new Date(flight.scheduledDeparture).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/London' })
       : ''
   );
   const seoDescription = $derived(
@@ -190,19 +186,78 @@
 
   // Format helpers
   function formatTime(date: string | Date | null | undefined): string {
-    if (!date) return '--:--';
-    return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    return formatGuernseyTime(date);
   }
-
   function formatDateTime(date: string | Date | null | undefined): string {
-    if (!date) return '—';
-    return new Date(date).toLocaleString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    return formatGuernseyDateTime(date);
+  }
+  function shortDate(date: string | Date | null | undefined): string {
+    return formatGuernseyShortDate(date);
+  }
+  const getStatusColor = (status: string | null | undefined, canceled?: boolean | null) =>
+    STATUS_TEXT_CLASSES[getStatusTone(status, canceled)];
+  const getStatusDotColor = (status: string | null | undefined, canceled?: boolean | null) =>
+    STATUS_DOT_CLASSES[getStatusTone(status, canceled)];
+
+  let shareSuccess = $state(false);
+
+  // Save to recently viewed
+  let refreshInterval: ReturnType<typeof setInterval> | null = null;
+  $effect(() => {
+    if (browser) {
+      refreshInterval = setInterval(() => { invalidateAll(); }, 60_000);
+    }
+    return () => {
+      if (refreshInterval) clearInterval(refreshInterval);
+    };
+  });
+
+  $effect(() => {
+    if (browser) {
+      const key = 'recentlyViewedFlights';
+      const existing = JSON.parse(localStorage.getItem(key) || '[]');
+      const flightInfo = {
+        id: flight.id,
+        flightNumber: flight.flightNumber,
+        departureAirport: flight.departureAirport,
+        arrivalAirport: flight.arrivalAirport,
+        scheduledDeparture: flight.scheduledDeparture,
+        viewedAt: new Date().toISOString(),
+      };
+      // Remove if already exists to move to front
+      const filtered = (existing as { id: number }[]).filter(f => f.id !== flight.id);
+      // Add to front, keep only last 5
+      const updated = [flightInfo, ...filtered].slice(0, 5);
+      const serialized = JSON.stringify(updated);
+      localStorage.setItem(key, serialized);
+      // Mirror to cookie so the server can render the section in SSR (prevents pop-in)
+      document.cookie = `rv=${encodeURIComponent(serialized)}; max-age=${30 * 24 * 60 * 60}; path=/; SameSite=Lax; Secure`;
+    }
+  });
+
+  async function shareFlight() {
+    const shareData = {
+      title: `${flight.flightNumber} — airways.gg`,
+      text: `Track ${flight.flightNumber} from ${airportName(flight.departureAirport)} to ${airportName(flight.arrivalAirport)}`,
+      url: window.location.href,
+    };
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+      } catch {
+        // User cancelled or share failed
+      }
+    } else {
+      // Fallback: copy to clipboard
+      try {
+        await navigator.clipboard.writeText(window.location.href);
+        shareSuccess = true;
+        setTimeout(() => shareSuccess = false, 2000);
+      } catch {
+        // Clipboard failed
+      }
+    }
   }
 </script>
 

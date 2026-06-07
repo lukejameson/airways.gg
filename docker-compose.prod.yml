@@ -3,6 +3,7 @@
 
 services:
   app:
+    image: ghcr.io/lukejameson/airways.gg/app:production
     build:
       context: .
       dockerfile: apps/web/Dockerfile
@@ -36,6 +37,7 @@ services:
     restart: unless-stopped
 
   notification-service:
+    image: ghcr.io/lukejameson/airways.gg/notification-service:production
     build:
       context: .
       dockerfile: apps/notification-service/Dockerfile
@@ -45,23 +47,56 @@ services:
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - VAPID_SUBJECT=${VAPID_SUBJECT}
       - NOTIFY_POLL_INTERVAL_MS=${NOTIFY_POLL_INTERVAL_MS:-15000}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web
     restart: always
+
+  fr24-scraper:
+    image: ghcr.io/lukejameson/airways.gg/fr24-scraper:production
+    init: true
+    build:
+      context: .
+      dockerfile: apps/fr24-scraper/Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - SCRAPER_CUTOFF_HOUR=${SCRAPER_CUTOFF_HOUR:-23}
+      - SCRAPER_WAKE_OFFSET_MINS=${SCRAPER_WAKE_OFFSET_MINS:-30}
+      - SCRAPER_INTERVAL_HIGH_MINS=${SCRAPER_INTERVAL_HIGH_MINS:-2}
+      - SCRAPER_INTERVAL_MEDIUM_MINS=${SCRAPER_INTERVAL_MEDIUM_MINS:-5}
+      - SCRAPER_INTERVAL_LOW_MINS=${SCRAPER_INTERVAL_LOW_MINS:-10}
+      - SCRAPER_INTERVAL_IDLE_MINS=${SCRAPER_INTERVAL_IDLE_MINS:-15}
+      - SCRAPER_MAX_RETRIES=${SCRAPER_MAX_RETRIES:-3}
+      - PROXY_ENABLED=${PROXY_ENABLED:-false}
+      - PROXY_USERNAME=${PROXY_USERNAME}
+      - PROXY_PASSWORD=${PROXY_PASSWORD}
+      - PROXY_HOSTS=${PROXY_HOSTS}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - NODE_ENV=production
+    networks:
+      - web
+    restart: always
+
   adsb-service:
+    image: ghcr.io/lukejameson/airways.gg/adsb-service:production
     build:
       context: .
       dockerfile: apps/adsb-service/Dockerfile
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - ADSB_INTERVAL_MS=${ADSB_INTERVAL_MS:-60000}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web
     restart: always
 
   guernsey-live:
+    image: ghcr.io/lukejameson/airways.gg/guernsey-scraper:production
     build:
       context: .
       dockerfile: apps/guernsey-scraper/Dockerfile
@@ -77,12 +112,15 @@ services:
       - SCRAPER_INTERVAL_TOMORROW_MINS=${SCRAPER_INTERVAL_TOMORROW_MINS:-360}
       - GUERNSEY_AIRPORT_URL=${GUERNSEY_AIRPORT_URL:-https://www.airport.gg}
       - GUERNSEY_API_KEY=${GUERNSEY_API_KEY:?GUERNSEY_API_KEY is required}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web
     restart: always
 
   guernsey-backfill:
+    image: ghcr.io/lukejameson/airways.gg/guernsey-scraper:production
     build:
       context: .
       dockerfile: apps/guernsey-scraper/Dockerfile
@@ -100,6 +138,7 @@ services:
       - backfill
 
   position-service:
+    image: ghcr.io/lukejameson/airways.gg/position-service:production
     build:
       context: .
       dockerfile: apps/position-service/Dockerfile
@@ -107,24 +146,30 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - FR24_API_TOKEN=${FR24_API_TOKEN}
       - POSITION_INTERVAL_MS=${POSITION_INTERVAL_MS:-300000}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web
     restart: always
 
   weather-service:
+    image: ghcr.io/lukejameson/airways.gg/weather-service:production
     build:
       context: .
       dockerfile: apps/weather-service/Dockerfile
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - OPENMETEO_API_URL=${OPENMETEO_API_URL:-https://api.open-meteo.com/v1/forecast}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - NODE_ENV=production
     networks:
       - web
     restart: always
 
   ml-service:
+    image: ghcr.io/lukejameson/airways.gg/ml-service:production
     build:
       context: apps/ml-service
       dockerfile: Dockerfile
