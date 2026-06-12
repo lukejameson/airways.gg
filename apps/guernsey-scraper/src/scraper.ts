@@ -219,7 +219,7 @@ function parseFlightHtml(html: string, date: Date, type: 'arrivals' | 'departure
         }
       });
 
-      results.push({ location, codes, scheduledTime, flightDate, type, statusUpdates: statusUpdates.map(u => correctOnTimeTimestamp(u, scheduledTime)) });
+      results.push({ location, codes, scheduledTime, flightDate, type, statusUpdates });
     } catch (err) {
       console.error('[Guernsey] Error parsing row:', err);
     }
