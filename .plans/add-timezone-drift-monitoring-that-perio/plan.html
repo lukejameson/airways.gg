@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan — airways.gg</title>
+<style>
+  :root { --bg: #f8f9fa; --card: #fff; --text: #1a1a2e; --muted: #6b7280;
+          --border: #e5e7eb; --cyan: #0891b2; --green: #16a34a; --blue: #2563eb;
+          --purple: #7c3aed; --amber: #d97706; --red: #dc2626; --radius: 10px; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg);
+         color: var(--text); max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem; }
+  header { margin-bottom: 2rem; }
+  h1 { font-size: 1.8rem; display: flex; align-items: center; gap: 0.5rem; }
+  .meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.25rem; }
+  .badge { display: inline-block; font-size: 0.7rem; font-weight: 600; padding: 2px 10px;
+           border-radius: 99px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .badge-pending { background: #f1f5f9; color: #64748b; }
+  .badge-active  { background: #dbeafe; color: #2563eb; }
+  .badge-done    { background: #dcfce7; color: #16a34a; }
+
+  .goal { background: #ecfeff; border-left: 4px solid var(--cyan); padding: 1rem 1.25rem;
+          border-radius: 0 var(--radius) var(--radius) 0; margin-bottom: 1.25rem;
+          font-size: 1.05rem; line-height: 1.55; }
+  .goal::before { content: "🎯 "; font-size: 1.15rem; }
+
+  .info-box { border-radius: 0 var(--radius) var(--radius) 0; padding: 1rem 1.25rem;
+              margin-bottom: 1.25rem; font-size: 0.97rem; line-height: 1.55; }
+  .info-box h3 { font-size: 0.95rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
+  .whyhow-box { background: #eff6ff; border-left: 4px solid var(--blue); }
+  .whyhow-box h3 { color: var(--blue); }
+  .expected-box { background: #f0fdf4; border-left: 4px solid var(--green); }
+  .expected-box h3 { color: var(--green); }
+
+  .phase { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+           padding: 1.25rem 1.5rem; margin-bottom: 1rem; }
+  .phase h2 { font-size: 1.05rem; display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.75rem; }
+  .phase-icon { font-size: 1.1rem; line-height: 1; }
+  .task-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; font-size: 0.95rem; }
+  .task-row input[type="checkbox"] { accent-color: var(--cyan); width: 1rem; height: 1rem; flex-shrink: 0; }
+  .task-row.done label { text-decoration: line-through; color: var(--muted); }
+
+  .notes-box { background: #fffbeb; border: 1px solid #fcd34d; border-radius: var(--radius);
+               padding: 1rem 1.25rem; margin-top: 1.5rem; }
+  .notes-box h3 { font-size: 0.95rem; margin-bottom: 0.4rem; color: var(--amber); display: flex; align-items: center; gap: 0.4rem; }
+  .notes-box ul { list-style: disc; margin-left: 1.25rem; font-size: 0.9rem; color: #78350f; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>&#x1F4CB; Plan — airways.gg</h1>
+  <!-- STATUS: active -->
+  <p class="meta">Generated: 2026-06-04 &middot; Status: <span class="badge badge-active">complete</span></p>
+</header>
+
+<div class="goal">Add timezone drift monitoring that periodically checks localToUtc offset correctness and alerts via Telegram if the offset ever drifts.</div>
+
+<div class="info-box whyhow-box">
+  <h3><span class="section-icon">💡</span> Why &amp; How</h3>
+  <p>The timezone fix replaced Luxon with native Intl, but there's no guard to detect if Intl's Europe/London resolution ever breaks again (e.g., after a Node.js upgrade, ICU data change, or container image change). Adding a periodic check in the guernsey scraper live loop with a Telegram alert will catch any future regression within minutes.</p>
+</div>
+
+<div class="info-box expected-box">
+  <h3><span class="section-icon">🎁</span> Expected Outcome</h3>
+  <p>When the scraper is running during BST, it verifies every 30 minutes that localToUtc produces the correct UTC offset. If the offset is wrong (0 instead of 1 during BST, or vice versa in GMT), a Telegram alert fires with the detected vs expected offset values.</p>
+</div>
+
+<!-- PHASE: 1 (status: done) -->
+<div class="phase">
+  <h2><span class="phase-icon">✅</span> Phase 1: Add checkTimezoneOffset <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add <code>checkTimezoneOffset()</code> to <code>packages/database/time.ts</code></label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Export from <code>@airways/database</code> index.ts</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Write unit tests in <code>time.test.ts</code></label></div>
+</div>
+
+<!-- PHASE: 2 (status: done) -->
+<div class="phase">
+  <h2><span class="phase-icon">✅</span> Phase 2: Integrate into scraper live loop <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Import <code>checkTimezoneOffset</code> + <code>sendAlert</code> in live.ts</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add 30-min interval check with Telegram alert on failure</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Scheduled in <code>runLiveMode</code> after prefetch slots</label></div>
+</div>
+
+<!-- PHASE: 3 (status: done) -->
+<div class="phase">
+  <h2><span class="phase-icon">✅</span> Phase 3: Frontend diagnostic endpoint <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add <code>/api/health/timezone</code> endpoint in web app</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Reports BST and GMT offset correctness as JSON</label></div>
+</div>
+
+<!-- PHASE: 4 (status: done) -->
+<div class="phase">
+  <h2><span class="phase-icon">✅</span> Phase 4: Build &amp; verify <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>42 tests pass</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Database package builds</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Full TypeScript compilation succeeds</label></div>
+</div>
+
+<div class="notes-box">
+  <h3><span class="section-icon">📝</span> Notes</h3>
+  <ul>
+    <li><code>checkTimezoneOffset</code> should test both BST (June 15) and GMT (Jan 15) dates</li>
+    <li>Telegram debounce in <code>sendAlert</code> is 5 minutes, resets after 30 min</li>
+    <li>Send WARNING if offset is wrong, CRITICAL if 0 during BST months (June-August)</li>
+    <li>FR24 scraper is currently dead — only integrate into guernsey-live</li>
+  </ul>
+</div>
+
+</body>
+</html>

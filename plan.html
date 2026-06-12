@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Plan — airways.gg</title>
+<title>Plan — airways.gg Debug API</title>
 <style>
   :root { --bg: #f8f9fa; --card: #fff; --text: #1a1a2e; --muted: #6b7280;
           --border: #e5e7eb; --cyan: #0891b2; --green: #16a34a; --blue: #2563eb;
@@ -25,6 +25,13 @@
           font-size: 1.05rem; line-height: 1.55; }
   .goal::before { content: "🎯 "; font-size: 1.15rem; }
 
+  .progress-wrap { margin-bottom: 1.5rem; }
+  .progress-label { display: flex; justify-content: space-between; font-size: 0.8rem;
+                    color: var(--muted); margin-bottom: 0.35rem; }
+  .progress-bar { height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--blue));
+                   border-radius: 99px; transition: width 0.4s ease; }
+
   .info-box { border-radius: 0 var(--radius) var(--radius) 0; padding: 1rem 1.25rem;
               margin-bottom: 1.25rem; font-size: 0.97rem; line-height: 1.55; }
   .info-box h3 { font-size: 0.95rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
@@ -45,68 +52,109 @@
                padding: 1rem 1.25rem; margin-top: 1.5rem; }
   .notes-box h3 { font-size: 0.95rem; margin-bottom: 0.4rem; color: var(--amber); display: flex; align-items: center; gap: 0.4rem; }
   .notes-box ul { list-style: disc; margin-left: 1.25rem; font-size: 0.9rem; color: #78350f; }
+  .discovered-box { background: #fef2f2; border: 1px solid #fca5a5; border-radius: var(--radius);
+                    padding: 1rem 1.25rem; margin-top: 1rem; }
+  .discovered-box h3 { font-size: 0.95rem; margin-bottom: 0.4rem; color: var(--red); display: flex; align-items: center; gap: 0.4rem; }
+  .discovered-box .task-row label { color: #991b1b; }
+  .empty-state { color: var(--muted); font-style: italic; font-size: 0.85rem; padding: 0.25rem 0; }
 </style>
 </head>
 <body>
 
+<!-- HEADER -->
 <header>
-  <h1>&#x1F4CB; Plan — airways.gg</h1>
+  <h1>&#x1F4CB; Plan — airways.gg Debug API</h1>
   <!-- STATUS: active -->
-  <p class="meta">Generated: 2026-06-04 &middot; Status: <span class="badge badge-active">complete</span></p>
+  <p class="meta">Generated: 2026-06-07 &middot; Status: <span class="badge badge-done">complete</span></p>
 </header>
 
-<div class="goal">Add timezone drift monitoring that periodically checks localToUtc offset correctness and alerts via Telegram if the offset ever drifts.</div>
+<!-- GOAL -->
+<div class="goal">Build a secure /api/debug/* endpoint group with Bearer token auth, exposing all 12 data tables with filtering/sorting/pagination, mirrored UI data, and a guarded raw SQL endpoint for agent-driven debugging.</div>
 
-<div class="info-box whyhow-box">
-  <h3><span class="section-icon">💡</span> Why &amp; How</h3>
-  <p>The timezone fix replaced Luxon with native Intl, but there's no guard to detect if Intl's Europe/London resolution ever breaks again (e.g., after a Node.js upgrade, ICU data change, or container image change). Adding a periodic check in the guernsey scraper live loop with a Telegram alert will catch any future regression within minutes.</p>
+<!-- PROGRESS -->
+<div class="progress-wrap">
+  <div class="progress-label"><span>Progress</span><span>25 / 25</span></div>
+  <div class="progress-bar"><div class="progress-fill" style="width: 100%;"></div></div>
 </div>
 
+<!-- WHY & HOW -->
+<div class="info-box whyhow-box">
+  <h3><span class="section-icon">💡</span> Why &amp; How</h3>
+  <p>airways.gg has no programmatic API — all data flows through SvelteKit load functions. When an agent needs to debug a data issue (wrong flight status, missing weather, scraper gap), there is no way to query the database except a direct Postgres connection. The debug API adds a Bearer-token-gated /api/debug/* route group with structured table endpoints, UI-parity mirrors that reuse existing query functions, and a SELECT-only raw SQL escape hatch. Auth is a ~10-line addition to hooks.server.ts checking a DEBUG_API_TOKEN env var against the Authorization header. Users and sessions tables are excluded to avoid exposing password hashes and session tokens.</p>
+</div>
+
+<!-- EXPECTED -->
 <div class="info-box expected-box">
   <h3><span class="section-icon">🎁</span> Expected Outcome</h3>
-  <p>When the scraper is running during BST, it verifies every 30 minutes that localToUtc produces the correct UTC offset. If the offset is wrong (0 instead of 1 during BST, or vice versa in GMT), a Telegram alert fires with the detected vs expected offset values.</p>
+  <p>An agent can GET /api/debug/flights?date=2026-06-07&amp;status=delayed&amp;limit=50 to query flights, GET /api/debug/ui/homepage to get the exact data the homepage renders, GET /api/debug/ui/stats?range=30 for stats dashboard data, and POST /api/debug/sql with {"sql": "SELECT ..."} for ad-hoc queries. All endpoints return JSON with row counts and query timing. All are gated behind Authorization: Bearer &lt;DEBUG_API_TOKEN&gt;. Raw SQL is SELECT-only.</p>
 </div>
 
 <!-- PHASE: 1 (status: done) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 1: Add checkTimezoneOffset <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Add <code>checkTimezoneOffset()</code> to <code>packages/database/time.ts</code></label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Export from <code>@airways/database</code> index.ts</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Write unit tests in <code>time.test.ts</code></label></div>
+  <h2><span class="phase-icon">✅</span> Phase 1: Auth &amp; Shared Helpers <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add DEBUG_API_TOKEN to .env.example</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add Bearer token validation in hooks.server.ts for /api/debug/* prefix</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create shared debug helpers (response formatter with metadata, query param parser)</label></div>
 </div>
 
 <!-- PHASE: 2 (status: done) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 2: Integrate into scraper live loop <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Import <code>checkTimezoneOffset</code> + <code>sendAlert</code> in live.ts</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Add 30-min interval check with Telegram alert on failure</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Scheduled in <code>runLiveMode</code> after prefetch slots</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 2: Table Endpoints <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/flights/+server.ts (date, status, airport, flight number filters + sort + pagination)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/weather/+server.ts (airport code, time range filters)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/historical-weather/+server.ts (airport code, time range filters)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/positions/+server.ts (flight ID, time range filters)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/scrapers/+server.ts (service, status, time range filters)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/status-history/+server.ts (flight code, date, source filters)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/airports/+server.ts (IATA/ICAO search)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/daylight/+server.ts (airport code, date filters)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/flight-times/+server.ts (flight ID filter)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/flight-notes/+server.ts (flight ID filter)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/push-subs/+server.ts (flight ID, date filters)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/notification-watermark/+server.ts (latest state)</label></div>
 </div>
 
 <!-- PHASE: 3 (status: done) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 3: Frontend diagnostic endpoint <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Add <code>/api/health/timezone</code> endpoint in web app</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Reports BST and GMT offset correctness as JSON</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 3: UI Mirror Endpoints <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/ui/homepage/+server.ts (mirrors +page.server.ts load logic)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/ui/flight/[id]/+server.ts (mirrors flights/[id]/+page.server.ts load logic)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/ui/search/+server.ts (mirrors search/+page.server.ts load logic)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create /api/debug/ui/stats/+server.ts (reuses stats/lib/queries.ts functions directly)</label></div>
 </div>
 
 <!-- PHASE: 4 (status: done) -->
 <div class="phase">
-  <h2><span class="phase-icon">✅</span> Phase 4: Build &amp; verify <span class="badge badge-done">done</span></h2>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>42 tests pass</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Database package builds</label></div>
-  <div class="task-row done"><input type="checkbox" checked disabled><label>Full TypeScript compilation succeeds</label></div>
+  <h2><span class="phase-icon">✅</span> Phase 4: Raw SQL Endpoint <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Create POST /api/debug/sql/+server.ts with SELECT/EXPLAIN/SHOW/DESCRIBE guard</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Add query logging to stdout with timestamp and truncated SQL</label></div>
 </div>
 
+<!-- PHASE: 5 (status: done) -->
+<div class="phase">
+  <h2><span class="phase-icon">✅</span> Phase 5: Tests &amp; Verification <span class="badge badge-done">done</span></h2>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Write tests for token auth (valid token, invalid token, missing token, wrong path)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Write tests for a table endpoint (flights — filtering, sorting, pagination, limit cap)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Write tests for raw SQL guard (SELECT allowed, INSERT/DROP/UPDATE rejected)</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Run full test suite and verify all existing tests still pass</label></div>
+  <div class="task-row done"><input type="checkbox" checked disabled><label>Manual curl smoke test against dev server</label></div>
+</div>
+
+<!-- NOTES -->
 <div class="notes-box">
   <h3><span class="section-icon">📝</span> Notes</h3>
   <ul>
-    <li><code>checkTimezoneOffset</code> should test both BST (June 15) and GMT (Jan 15) dates</li>
-    <li>Telegram debounce in <code>sendAlert</code> is 5 minutes, resets after 30 min</li>
-    <li>Send WARNING if offset is wrong, CRITICAL if 0 during BST months (June-August)</li>
-    <li>FR24 scraper is currently dead — only integrate into guernsey-live</li>
+    <li>users and sessions tables are excluded from debug API (password_hash, session tokens)</li>
+    <li>Table endpoints default limit=100, capped at 1000</li>
+    <li>Raw SQL endpoint capped at 30s query timeout</li>
+    <li>Response format: { rows, count, queryMs } for all endpoints</li>
+    <li>Stats mirror imports query functions from routes/stats/lib/queries.ts — no duplication</li>
+    <li>Token from $env/dynamic/private (never exposed to client)</li>
+    <li>hooks.server.ts check scoped to pathname.startsWith('/api/debug/')</li>
   </ul>
 </div>
+
+<!-- No discovered tasks yet -->
 
 </body>
 </html>

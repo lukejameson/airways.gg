@@ -9,6 +9,7 @@ export {
   flightNotes,
   flightStatusHistory,
   weatherData,
+  historicalWeather,
   airportDaylight,
   scraperLogs,
   aircraftPositions,

@@ -1,74 +1,119 @@
 # todo.yaml — single source of truth for LLM
-# Updated: 2026-06-04T07:50:00Z
+# Updated: 2026-06-07T08:31:00Z
 
 goal: >
-  Add timezone drift monitoring that periodically checks localToUtc offset
-  correctness and alerts via Telegram if the offset ever drifts.
+  Build a secure /api/debug/* endpoint group with Bearer token auth, exposing
+  all 14 database tables with filtering/sorting/pagination, mirrored UI data,
+  and a guarded raw SQL endpoint for agent-driven debugging.
 
 why_how: >
-  The timezone fix replaced Luxon with native Intl, but there's no guard to
-  detect if Intl's Europe/London resolution ever breaks again (e.g., after
-  a Node.js upgrade, ICU data change, or container image change). Adding a
-  periodic check in the guernsey scraper live loop with a Telegram alert
-  will catch any future regression within minutes.
+  airways.gg has no programmatic API — all data flows through SvelteKit load
+  functions. When an agent needs to debug a data issue (wrong flight status,
+  missing weather, scraper gap), there is no way to query the database except
+  a direct Postgres connection. The debug API adds a Bearer-token-gated
+  /api/debug/* route group with structured table endpoints, UI-parity mirrors
+  that reuse existing query functions, and a SELECT-only raw SQL escape hatch.
+  Auth is a ~10-line addition to hooks.server.ts checking a DEBUG_API_TOKEN
+  env var against the Authorization header. Users and sessions tables are
+  excluded to avoid exposing password hashes and session tokens.
 
 expected: >
-  When the scraper is running during BST, it verifies every 30 minutes that
-  localToUtc produces the correct UTC offset. If the offset is wrong (0
-  instead of 1 during BST, or vice versa in GMT), a Telegram alert fires
-  with the detected vs expected offset values. Users won't need to manually
-  spot broken times.
+  An agent can:
+  - GET /api/debug/flights?date=2026-06-07&status=delayed&limit=50 to query flights
+  - GET /api/debug/ui/homepage?date=2026-06-07 to get the exact data the homepage renders
+  - GET /api/debug/ui/stats?range=30 to get the stats dashboard data
+  - POST /api/debug/sql with {"sql": "SELECT ..."} for ad-hoc queries
+  All endpoints return JSON with row counts and query timing. All are gated
+  behind Authorization: Bearer <DEBUG_API_TOKEN>. Raw SQL is SELECT-only.
 
-status: complete
 
 tasks:
   - phase: 1
-    name: Add checkTimezoneOffset
+    name: Auth & Shared Helpers
     status: done
     items:
       - done: true
-        action: Add checkTimezoneOffset() function to packages/database/time.ts that tests localToUtc for a known BST and GMT date
+        action: Add DEBUG_API_TOKEN to .env.example
       - done: true
-        action: Export checkTimezoneOffset from @airways/database index.ts
+        action: Add Bearer token validation in hooks.server.ts for /api/debug/* prefix
       - done: true
-        action: Write unit tests for checkTimezoneOffset in time.test.ts
+        action: Create shared debug helpers (response formatter with metadata, query param parser)
 
   - phase: 2
-    name: Integrate into scraper live loop
+    name: Table Endpoints
     status: done
     items:
       - done: true
-        action: Import checkTimezoneOffset and sendAlert in guernsey scraper's live.ts
+        action: Create /api/debug/flights/+server.ts (date, status, airport, flight number filters + sort + pagination)
       - done: true
-        action: Add a 30-minute interval check that runs checkTimezoneOffset and alerts on failure
+        action: Create /api/debug/weather/+server.ts (airport code, time range filters)
       - done: true
-        action: Ensure the check runs after prefetch slots to catch overnight drift
+        action: Create /api/debug/historical-weather/+server.ts (airport code, time range filters)
+      - done: true
+        action: Create /api/debug/positions/+server.ts (flight ID, time range filters)
+      - done: true
+        action: Create /api/debug/scrapers/+server.ts (service, status, time range filters)
+      - done: true
+        action: Create /api/debug/status-history/+server.ts (flight code, date, source filters)
+      - done: true
+        action: Create /api/debug/airports/+server.ts (IATA/ICAO search)
+      - done: true
+        action: Create /api/debug/daylight/+server.ts (airport code, date filters)
+      - done: true
+        action: Create /api/debug/flight-times/+server.ts (flight ID filter)
+      - done: true
+        action: Create /api/debug/flight-notes/+server.ts (flight ID filter)
+      - done: true
+        action: Create /api/debug/push-subs/+server.ts (flight ID, date filters)
+      - done: true
+        action: Create /api/debug/notification-watermark/+server.ts (latest state)
 
   - phase: 3
-    name: Add frontend-level diagnostic
+    name: UI Mirror Endpoints
     status: done
     items:
       - done: true
-        action: Add a hidden /api/health/timezone endpoint in the web app that reports formatGuernseyTime correctness
+        action: Create /api/debug/ui/homepage/+server.ts (mirrors +page.server.ts load logic)
       - done: true
-        action: Have the scraper hit this endpoint periodically as a secondary check (end-to-end)
+        action: Create /api/debug/ui/flight/[id]/+server.ts (mirrors flights/[id]/+page.server.ts load logic)
+      - done: true
+        action: Create /api/debug/ui/search/+server.ts (mirrors search/+page.server.ts load logic)
+      - done: true
+        action: Create /api/debug/ui/stats/+server.ts (reuses stats/lib/queries.ts functions directly)
 
   - phase: 4
-    name: Build & verify
+    name: Raw SQL Endpoint
     status: done
     items:
       - done: true
-        action: Run full test suite
+        action: Create POST /api/debug/sql/+server.ts with SELECT/EXPLAIN/SHOW/DESCRIBE guard
       - done: true
-        action: Rebuild and deploy affected containers
+        action: Add query logging to stdout with timestamp and truncated SQL
+
+  - phase: 5
+    name: Tests & Verification
+    status: done
+    items:
       - done: true
-        action: Verify Telegram alert fires correctly by temporarily injecting a wrong offset
+        action: Write tests for token auth (valid token, invalid token, missing token, wrong path)
+      - done: true
+        action: Write tests for a table endpoint (flights — filtering, sorting, pagination, limit cap)
+      - done: true
+        action: Write tests for raw SQL guard (SELECT allowed, INSERT/DROP/UPDATE rejected)
+      - done: true
+        action: Run full test suite and verify all existing tests still pass
+      - done: true
+        action: Manual curl smoke test against dev server
+
+status: complete
 
 notes:
-  - checkTimezoneOffset should test both BST (e.g., June 15) and GMT (e.g., January 15) dates
-  - The check should use the CURRENT month to determine whether BST or GMT is expected
-  - Telegram debounce in sendAlert is 5 minutes, so the 30-min check interval is safe
-  - The fr24-scraper is currently dead (navigation timeout), so only integrate into guernsey-live
-  - Send a WARNING level alert if offset is wrong, CRITICAL if it's 0 during BST months
+  - users and sessions tables are excluded from debug API (password_hash, session tokens)
+  - Table endpoints default limit=100, capped at 1000
+  - Raw SQL endpoint capped at 30s query timeout
+  - Response format: { rows, count, queryMs } for all endpoints
+  - Stats mirror imports query functions from routes/stats/lib/queries.ts — no duplication
+  - Token from $env/dynamic/private (never exposed to client)
+  - hooks.server.ts check scoped to pathname.startsWith('/api/debug/')
 
 discovered: []

@@ -1,6 +1,17 @@
+import { env } from '$env/dynamic/private';
+import { json } from '@sveltejs/kit';
 import type { Handle, HandleServerError } from '@sveltejs/kit';
+import { validateDebugToken } from '$lib/server/debug-helpers';
 
 export const handle: Handle = async ({ event, resolve }) => {
+  // Debug API auth — gate /api/debug/* behind Bearer token
+  if (event.url.pathname.startsWith('/api/debug/')) {
+    const auth = event.request.headers.get('authorization');
+    if (!validateDebugToken(auth, env.DEBUG_API_TOKEN)) {
+      return json({ error: 'Unauthorized' }, { status: 401 });
+    }
+  }
+
   const response = await resolve(event);
   if (
     event.request.method === 'GET' &&
