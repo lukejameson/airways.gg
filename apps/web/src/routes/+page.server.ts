@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { db, flights, weatherData, scraperLogs, airportDaylight, flightTimes, guernseyTodayStr, guernseyTomorrowStr, isTerminalStatus } from '$lib/server/db';
-import { and, gte, lte, inArray, or, eq, desc, asc, count, not, sql } from 'drizzle-orm';
+import { and, gte, lte, inArray, or, eq, desc, asc, count, sql } from 'drizzle-orm';
 
 /** Add N days to a date string (YYYY-MM-DD) */
 function addDaysToDateStr(dateStr: string, days: number): string {

@@ -1,119 +1,71 @@
 # todo.yaml — single source of truth for LLM
-# Updated: 2026-06-07T08:31:00Z
+# Updated: 2026-06-12T15:25:00Z
 
 goal: >
-  Build a secure /api/debug/* endpoint group with Bearer token auth, exposing
-  all 14 database tables with filtering/sorting/pagination, mirrored UI data,
-  and a guarded raw SQL endpoint for agent-driven debugging.
+  Fix three data-quality bugs in the guernsey-scraper that cause cancelled
+  flights to show impossible delay values, flights to be left orphaned with
+  null status, and Landed flights to be missing actual arrival times.
 
 why_how: >
-  airways.gg has no programmatic API — all data flows through SvelteKit load
-  functions. When an agent needs to debug a data issue (wrong flight status,
-  missing weather, scraper gap), there is no way to query the database except
-  a direct Postgres connection. The debug API adds a Bearer-token-gated
-  /api/debug/* route group with structured table endpoints, UI-parity mirrors
-  that reuse existing query functions, and a SELECT-only raw SQL escape hatch.
-  Auth is a ~10-line addition to hooks.server.ts checking a DEBUG_API_TOKEN
-  env var against the Authorization header. Users and sessions tables are
-  excluded to avoid exposing password hashes and session tokens.
+  The guernsey-scraper processes airport.gg API data and inserts/updates
+  flight records. Three distinct data issues were found in production:
+  (1) Cancelled flights like GR200 show delay_minutes=285 — cancelled flights
+  should always have null delays. (2) Several flights (GR400, GR401, GR642,
+  GR643, GR406) have no status, no actual times, and aren't marked cancelled,
+  leaving them as orphaned null records. (3) GR680 shows status "Landed" but
+  has no actual_arrival time because the airport posted "Landed" without a
+  timestamp in the message. The fixes are all in a single file
+  (apps/guernsey-scraper/src/scraper.ts) within the upsertFlight function.
 
 expected: >
-  An agent can:
-  - GET /api/debug/flights?date=2026-06-07&status=delayed&limit=50 to query flights
-  - GET /api/debug/ui/homepage?date=2026-06-07 to get the exact data the homepage renders
-  - GET /api/debug/ui/stats?range=30 to get the stats dashboard data
-  - POST /api/debug/sql with {"sql": "SELECT ..."} for ad-hoc queries
-  All endpoints return JSON with row counts and query timing. All are gated
-  behind Authorization: Bearer <DEBUG_API_TOKEN>. Raw SQL is SELECT-only.
-
-
-tasks:
-  - phase: 1
-    name: Auth & Shared Helpers
-    status: done
-    items:
-      - done: true
-        action: Add DEBUG_API_TOKEN to .env.example
-      - done: true
-        action: Add Bearer token validation in hooks.server.ts for /api/debug/* prefix
-      - done: true
-        action: Create shared debug helpers (response formatter with metadata, query param parser)
-
-  - phase: 2
-    name: Table Endpoints
-    status: done
-    items:
-      - done: true
-        action: Create /api/debug/flights/+server.ts (date, status, airport, flight number filters + sort + pagination)
-      - done: true
-        action: Create /api/debug/weather/+server.ts (airport code, time range filters)
-      - done: true
-        action: Create /api/debug/historical-weather/+server.ts (airport code, time range filters)
-      - done: true
-        action: Create /api/debug/positions/+server.ts (flight ID, time range filters)
-      - done: true
-        action: Create /api/debug/scrapers/+server.ts (service, status, time range filters)
-      - done: true
-        action: Create /api/debug/status-history/+server.ts (flight code, date, source filters)
-      - done: true
-        action: Create /api/debug/airports/+server.ts (IATA/ICAO search)
-      - done: true
-        action: Create /api/debug/daylight/+server.ts (airport code, date filters)
-      - done: true
-        action: Create /api/debug/flight-times/+server.ts (flight ID filter)
-      - done: true
-        action: Create /api/debug/flight-notes/+server.ts (flight ID filter)
-      - done: true
-        action: Create /api/debug/push-subs/+server.ts (flight ID, date filters)
-      - done: true
-        action: Create /api/debug/notification-watermark/+server.ts (latest state)
-
-  - phase: 3
-    name: UI Mirror Endpoints
-    status: done
-    items:
-      - done: true
-        action: Create /api/debug/ui/homepage/+server.ts (mirrors +page.server.ts load logic)
-      - done: true
-        action: Create /api/debug/ui/flight/[id]/+server.ts (mirrors flights/[id]/+page.server.ts load logic)
-      - done: true
-        action: Create /api/debug/ui/search/+server.ts (mirrors search/+page.server.ts load logic)
-      - done: true
-        action: Create /api/debug/ui/stats/+server.ts (reuses stats/lib/queries.ts functions directly)
-
-  - phase: 4
-    name: Raw SQL Endpoint
-    status: done
-    items:
-      - done: true
-        action: Create POST /api/debug/sql/+server.ts with SELECT/EXPLAIN/SHOW/DESCRIBE guard
-      - done: true
-        action: Add query logging to stdout with timestamp and truncated SQL
-
-  - phase: 5
-    name: Tests & Verification
-    status: done
-    items:
-      - done: true
-        action: Write tests for token auth (valid token, invalid token, missing token, wrong path)
-      - done: true
-        action: Write tests for a table endpoint (flights — filtering, sorting, pagination, limit cap)
-      - done: true
-        action: Write tests for raw SQL guard (SELECT allowed, INSERT/DROP/UPDATE rejected)
-      - done: true
-        action: Run full test suite and verify all existing tests still pass
-      - done: true
-        action: Manual curl smoke test against dev server
+  After the fixes:
+  - Cancelled flights have delay_minutes = null regardless of what
+    extractDelayMinutes returns.
+  - Flights past their scheduled time with no status updates after the day
+    goes terminal are detectably stale (at minimum, they won't prevent the
+    scraper from sleeping when all other flights are done).
+  - Landed flights with status "Landed" but no time in the status message
+    fall back to the status update's timestamp for actual_arrival (or
+    actual_departure for departures), rather than leaving it null.
+  - The existing dedup fix (departure_airport in match query) remains in place.
 
 status: complete
 
+tasks:
+  - phase: 1
+    name: Null delay for cancelled flights
+    status: done
+    items:
+      - done: true
+        action: In upsertFlight, after extractCanceled sets the canceled flag, clear delayMinutes to null when canceled is true (before writing updateSet)
+      - done: true
+        action: Verify GR200, GR202, BA1345 would produce null delays with the fix
+
+  - phase: 2
+    name: Fallback actual time from status timestamp
+    status: done
+    items:
+      - done: true
+        action: Add fallback in extractActualTime: when the keyword is found in a status message but no HH:MM time is parsable, use the status update's own timestamp as the actual time
+      - done: true
+        action: Verify GR680 (Landed without time) would get an actual_arrival with the fix
+
+  - phase: 3
+    name: Tests & verification
+    status: done
+    items:
+      - done: true
+        action: Run TypeScript compilation check on guernsey-scraper
+      - done: true
+        action: Write unit tests for extractCanceled + delay clearing, extractActualTime fallback
+      - done: true
+        action: 11 unit tests pass in scraper.test.ts
+
 notes:
-  - users and sessions tables are excluded from debug API (password_hash, session tokens)
-  - Table endpoints default limit=100, capped at 1000
-  - Raw SQL endpoint capped at 30s query timeout
-  - Response format: { rows, count, queryMs } for all endpoints
-  - Stats mirror imports query functions from routes/stats/lib/queries.ts — no duplication
-  - Token from $env/dynamic/private (never exposed to client)
-  - hooks.server.ts check scoped to pathname.startsWith('/api/debug/')
+  - All changes in apps/guernsey-scraper/src/scraper.ts
+  - New test file: apps/guernsey-scraper/src/scraper.test.ts (11 tests)
+  - Orphaned flights (GR400/GR401/GR642/GR643/GR406) tracked as follow-up
+  - The same-day opposing-rotation collision fix (departure_airport in match)
+    was already applied in the previous session.
 
 discovered: []

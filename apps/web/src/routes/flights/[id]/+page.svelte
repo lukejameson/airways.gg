@@ -11,6 +11,12 @@
   import { shortenStatus, statusHasDetail, extractDelayReason, isFlightCompleted } from '$lib/status';
   import { getStatusTone, STATUS_TEXT_CLASSES, STATUS_DOT_CLASSES, STATUS_PILL_CLASSES } from '$lib/statusConfig';
   import DelayCounter from '$lib/components/DelayCounter.svelte';
+  import FlightHeader from './components/FlightHeader.svelte';
+  import DelayAnalysis from './components/DelayAnalysis.svelte';
+  import FlightTimeline from './components/FlightTimeline.svelte';
+  import FlightMap from './components/FlightMap.svelte';
+  import RotationHistory from './components/RotationHistory.svelte';
+  import WeatherDisplay from './components/WeatherDisplay.svelte';
 
   let { data }: { data: PageData } = $props();
   const returnTab = $derived($page.url.searchParams.get('tab') ?? '');
@@ -197,33 +203,7 @@
   const getStatusDotColor = (status: string | null | undefined, canceled?: boolean | null) =>
     STATUS_DOT_CLASSES[getStatusTone(status, canceled)];
 
-  // shareSuccess declared above (line 117)
-  // refreshInterval declared above (line 79)
 
-  $effect(() => {
-    if (browser) {
-      const key = 'recentlyViewedFlights';
-      const existing = JSON.parse(localStorage.getItem(key) || '[]');
-      const flightInfo = {
-        id: flight.id,
-        flightNumber: flight.flightNumber,
-        departureAirport: flight.departureAirport,
-        arrivalAirport: flight.arrivalAirport,
-        scheduledDeparture: flight.scheduledDeparture,
-        viewedAt: new Date().toISOString(),
-      };
-      // Remove if already exists to move to front
-      const filtered = (existing as { id: number }[]).filter(f => f.id !== flight.id);
-      // Add to front, keep only last 5
-      const updated = [flightInfo, ...filtered].slice(0, 5);
-      const serialized = JSON.stringify(updated);
-      localStorage.setItem(key, serialized);
-      // Mirror to cookie so the server can render the section in SSR (prevents pop-in)
-      document.cookie = `rv=${encodeURIComponent(serialized)}; max-age=${30 * 24 * 60 * 60}; path=/; SameSite=Lax; Secure`;
-    }
-  });
-
-  // shareFlight declared above (line 118)
 </script>
 
 <svelte:head>

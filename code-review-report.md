@@ -1,210 +1,258 @@
 # Code Review Report
 
-**Target:** airways.gg — Debug API (new files only)
-**Languages:** TypeScript
-**Date:** 2026-06-07
+**Target:** airways.gg monorepo
+**Languages:** TypeScript (89 files), Svelte (26 files), Python (1 file)
+**Date:** 2026-06-12
 
 ## Executive Summary
 
-- Total files scanned: 20 (3 modified, 17 new)
-- Total issues found: 11
-  - Critical: 2
-  - High: 3
-  - Medium: 3
-  - Low: 3
+- Total source files: ~211
+- Issues found: 17
+  - Critical: 2 (both fixed)
+  - High: 5 (all fixed)
+  - Medium: 4
+  - Low: 6
 
 ## Findings
 
-### 🚨 SQL Guard Bypass — Missing `COPY` and `DO` from Dangerous Keywords
+### 🔴 Critical
 
-**Severity:** critical
-**Files:** `apps/web/src/lib/server/debug-helpers.ts:80`, `apps/web/src/routes/api/debug/sql/+server.ts`
+#### Missing component imports — Flight detail page broken
+
+**Severity:** critical (FIXED)
+**Files:** `apps/web/src/routes/flights/[id]/+page.svelte`
 **Confidence:** high
 
-The `validateSqlQuery` function blocks INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE/CREATE but misses two PostgreSQL statements that can execute writes: `COPY` (can write arbitrary server files) and `DO` (can execute arbitrary PL/pgSQL including INSERT/UPDATE/DELETE). A query like `DO $$ BEGIN DELETE FROM flights; END $$` would pass the guard because `DO` is not in the blocked list and `DELETE` is inside a string literal that `toUpperCase()` won't properly handle.
+6 components used in the template but `FlightHeader`, `DelayAnalysis`, `FlightTimeline`, `FlightMap`, `RotationHistory`, and `WeatherDisplay` were never imported. `FlightHeader` caused the runtime error `ReferenceError: FlightHeader is not defined`. The other 5 would have triggered similar errors once the page scrolled to their sections.
 
-**Remediation:** Add `COPY` and `DO` to `DANGEROUS_KEYWORDS`. Additionally, the keyword check should strip PostgreSQL string literals (`$$...$$` and `'...'`) before scanning, or use a SQL-aware tokenizer.
+**Remediation:** Added all 6 imports from `./components/`. Also removed a duplicate `$effect` block for `recentlyViewedFlights` (identical logic ran twice on every page visit).
 
 ---
 
-### 🚨 Connection-Pool Statement Timeout Bug
+#### `isTerminalStatus` not imported — auto-advance always fires
 
-**Severity:** critical
-**Files:** `apps/web/src/routes/api/debug/sql/+server.ts:41`
+**Severity:** critical (FIXED)
+**Files:** `apps/web/src/routes/+page.server.ts:37`, `apps/web/src/lib/server/db.ts`
 **Confidence:** high
 
-`SET LOCAL statement_timeout = '30s'` runs in an auto-commit (implicit) transaction and only affects that single transaction. The subsequent `db.execute(sql.raw(query))` call opens a *new* implicit transaction where the timeout is no longer in effect. The 30s timeout never applies to the actual user query.
+`getActiveFlightsForDate()` called `isTerminalStatus(f.status)` which was a `ReferenceError` at runtime (never imported). The `try/catch` swallowed the error and returned `[]`, causing the auto-advance logic to always conclude "all flights completed" and show tomorrow's schedule. Every page load with flights today + tomorrow would incorrectly advance.
 
-**Remediation:** Either wrap both in an explicit transaction block (`BEGIN; SET LOCAL ...; SELECT ...; COMMIT;`) or use `SET SESSION statement_timeout = '30s'` followed by `RESET statement_timeout` after the query, with error handling to ensure the reset happens. The session approach is more reliable but must handle the reset even on failure.
+**Remediation:** Added `isTerminalStatus` to re-exports in `$lib/server/db.ts` and to the import destructure in `+page.server.ts`.
 
 ---
 
-### 🟠 Duplicate `ALLOWED_COMMANDS` Constant
+### 🟠 High
 
-**Severity:** high
-**Files:** `apps/web/src/routes/api/debug/sql/+server.ts:7-12`
+#### `Completed` missing from terminal status map
+
+**Severity:** high (FIXED)
+**Files:** `packages/database/statusPriority.ts`
 **Confidence:** high
 
-The `ALLOWED_COMMANDS` constant is declared in both `debug-helpers.ts` (used by `validateSqlQuery`) and redundantly in the SQL endpoint file. The endpoint never references its own copy — it calls `validateSqlQuery` instead. ESLint flags it as an unused variable. If someone edits the endpoint's copy instead of the canonical one in `debug-helpers.ts`, the changes would have no effect, creating a false sense of security.
+The `STATUS_PRIORITY` map had `Landed:50`, `Cancelled:50`, `Diverted:50` but not `Completed`. A flight with status "Completed" would get priority 0 (default), meaning `isTerminalStatus` returned `false` — it was treated as still active. This would prevent auto-advance even when all flights are genuinely completed with that status.
 
-**Remediation:** Remove the duplicate `ALLOWED_COMMANDS` block from `sql/+server.ts:7-12`.
+**Remediation:** Added `Completed: 50` to the priority map.
 
 ---
 
-### 🟠 Unused Import — `isTerminalStatus`
+#### `db` and `sql` used but never imported in stats page
 
-**Severity:** high
-**Files:** `apps/web/src/routes/api/debug/ui/homepage/+server.ts:5`
+**Severity:** high (FIXED)
+**Files:** `apps/web/src/routes/stats/+page.server.ts:53-54`
 **Confidence:** high
 
-`isTerminalStatus` is imported from `@airways/database` but never called in the homepage mirror endpoint. This is dead code and breaks the eslint `no-unused-vars` rule.
+Three raw SQL queries for filter options run at the top of the stats load function using `db.execute(sql`...`)` but neither `db` nor `sql` were imported. Would throw `ReferenceError` at runtime, breaking the stats page.
 
-**Remediation:** Remove the import on line 5.
+**Remediation:** Added `import { db } from '$lib/server/db'` and `import { sql } from 'drizzle-orm'`.
 
 ---
 
-### 🟠 Duplicate Pattern Across All Table Endpoints
+#### Guernsey scraper had divergent terminal status list
 
-**Severity:** high
-**Files:** `apps/web/src/routes/api/debug/weather/+server.ts`, `historical-weather/+server.ts`, `positions/+server.ts`, `scrapers/+server.ts`, `status-history/+server.ts`, `flight-notes/+server.ts`, `flight-times/+server.ts`, `notification-watermark/+server.ts`, `push-subs/+server.ts`, `daylight/+server.ts`, `airports/+server.ts`
+**Severity:** high (FIXED)
+**Files:** `apps/guernsey-scraper/src/live.ts:38`
 **Confidence:** high
 
-Eleven table endpoints share nearly identical structure:
-```ts
-const t0 = performance.now();
-try {
-  const { limit, offset } = parsePagination(url.searchParams);
-  const conditions = [];
-  // filter params...
-  const rows = conditions.length > 0
-    ? await db.select().from(table).where(and(...conditions)).orderBy(...).limit(limit).offset(offset)
-    : await db.select().from(table).orderBy(...).limit(limit).offset(offset);
-  return debugResponse(rows, performance.now() - t0);
-} catch (err) {
-  console.error('[debug/table]', err);
-  return debugError('Query failed', 500);
-}
-```
+Had a hardcoded `TERMINAL_STATUSES = ['Landed', 'Cancelled', 'Completed']` — missing `Diverted`. Both `@airways/common` and `@airways/database` include `Diverted` in their terminal statuses. Flights diverted from GCI would never be filtered out of the scraper's active set, causing unnecessary polling.
 
-The `rows` assignment has a ternary that is actually unnecessary — `and()` with zero arguments in Drizzle is a no-op/no-filter. Any change to the error handling, response format, or timing must be replicated across all 11 files.
-
-**Remediation:** Create a `debugTableEndpoint` factory in `debug-helpers.ts` that accepts table, sort column, and optional filter builder callbacks. Each endpoint becomes a 5-line wrapper. Example:
-```ts
-export function createTableEndpoint(
-  table: PgTable,
-  sortCol: PgColumn,
-  buildConditions?: (params: URLSearchParams) => SQL[]
-): RequestHandler {
-  // shared logic
-}
-```
+**Remediation:** Replaced local array with `import { TERMINAL_STATUSES } from '@airways/common'`. Removed the local constant.
 
 ---
 
-### 🟡 Deep Relative Import Path
+#### Client-side hardcoded terminal status checks
+
+**Severity:** high (FIXED)
+**Files:** `apps/web/src/lib/components/FlightCard.svelte:105`, `apps/web/src/routes/flights/[id]/+page.svelte:143,160`
+**Confidence:** high
+
+Both components manually checked `status.includes('landed') || status.includes('completed')` and similar patterns instead of using the shared `isTerminalStatus` or `isFlightCompleted` functions. These hardcoded patterns drift from the canonical terminal status definitions.
+
+**Remediation:** Replaced with `isFlightCompleted(flight)` (already imported in both files).
+
+---
+
+### 🟡 Medium
+
+#### `fr24-scraper` imports `isTerminalStatus` from two different packages
 
 **Severity:** medium
-**Files:** `apps/web/src/routes/api/debug/ui/stats/+server.ts:23-24`
-**Confidence:** medium
+**Files:** `apps/fr24-scraper/src/scraper.ts:4`, `apps/fr24-scraper/src/index.ts:1`
+**Confidence:** high
 
-The stats mirror imports from `../../../stats/lib/queries` and `../../../stats/lib/types`. These triply-nested relative imports are fragile — if the stats directory moves, both the stats page and the debug endpoint break. SvelteKit supports `$lib` aliases but these files live under `routes/stats/`, not `lib/`, so `$lib` can't resolve them.
+`scraper.ts` imports `isTerminalStatus` from `@airways/database` (priority-based) while `index.ts` imports `isTerminalStatus` (and `TERMINAL_STATUSES`) from `@airways/common` (exact-match). These two implementations have subtly different behavior — e.g. the common version handles `diverted` prefix matching while the database version only matches exact "Diverted". Both are used in the same scraper process.
 
-**Remediation:** Move the shared query functions to `$lib/server/stats-queries.ts` so both the stats page and the debug endpoint can import from `$lib/server/stats-queries`. This avoids the deep relative path and makes the dependency explicit.
+**Remediation:** Consolidate to a single import source. The common version is more robust for status matching since it handles prefixes.
 
 ---
 
-### 🟡 Error Responses Missing Content-Type on 401
+#### Only one `+error.svelte` at root level
 
 **Severity:** medium
-**Files:** `apps/web/src/hooks.server.ts:15`
-**Confidence:** medium
+**Files:** `apps/web/src/routes/+error.svelte`
+**Confidence:** high
 
-The 401 response from the auth check in `hooks.server.ts` uses SvelteKit's `json()` helper, which includes `Content-Type: application/json`. This is actually correct — `json()` sets the header. No issue here.
+No per-route error boundaries exist. All errors fall through to the root `+error.svelte`. Routes like `/flights/[id]` and `/stats` would benefit from contextual error pages that include navigation back to relevant sections.
 
-Wait, let me re-verify. SvelteKit's `json()` — does it set Content-Type? Yes, SvelteKit's `json()` helper does set `Content-Type: application/json`. So this is fine.
-
-Let me replace this finding.
+**Remediation:** Add `+error.svelte` to `/flights/[id]/` and `/stats/` with contextual messages and navigation.
 
 ---
 
-### 🟡 Incorrect `sortColumns` Record Type
+#### `aurigny-mobile-scraper` — no source code
 
 **Severity:** medium
-**Files:** `apps/web/src/routes/api/debug/flights/+server.ts:72`
-**Confidence:** medium
+**Files:** `apps/aurigny-mobile-scraper/`
+**Confidence:** high
 
-The `sortColumns` type annotation is `Record<string, typeof flights.scheduledDeparture>` but the object contains columns of multiple types (dates, integers, timestamps). TypeScript won't error here because all column types reference the same underlying Drizzle column class, but the annotation is misleading — it implies all values are `scheduledDeparture` typed columns.
+The directory contains only a `dist/` folder — no `src/`, no `package.json`, no `Dockerfile`. This service has no source code in version control. If the compiled output becomes stale, there's no way to rebuild it.
 
-**Remediation:** Remove the explicit type annotation and let TypeScript infer the union type, or use `Record<string, PgColumn>`.
+**Remediation:** Commit source code or remove the directory if the service is deprecated.
 
 ---
 
-### 🟡 Stats Mirror Executes 21 Queries in Parallel
+#### `weather-backfill` — only Dockerfile, no service code
 
 **Severity:** medium
-**Files:** `apps/web/src/routes/api/debug/ui/stats/+server.ts:79-101`
-**Confidence:** medium
+**Files:** `apps/weather-backfill/Dockerfile`
+**Confidence:** high
 
-The stats mirror fires all 21 stats query functions simultaneously via `Promise.all`. While this mirrors the existing stats page behavior, it means a single uncached stats request opens up to 21 concurrent database queries. The pool has max 5 connections, which means some queries queue. This isn't new (the stats page does the same), but the debug API adds a second path that can trigger this heavy query pattern. No rate limiting exists on the debug API.
+Only a Dockerfile exists for this service — no source code at all. The Docker image would have nothing to run.
 
-**Remediation:** Acceptable for now since it mirrors existing behavior, but consider adding a note or limiting this endpoint to sequential queries to reduce pool pressure.
+**Remediation:** Either add the backfill service implementation or remove the directory.
 
 ---
 
-### 🔷 Test Coverage Gap — SQL Injection via String Literals
+### 🟢 Low
+
+#### Unused `not` import in homepage server
+
+**Severity:** low (FIXED)
+**Files:** `apps/web/src/routes/+page.server.ts:3`
+**Confidence:** high
+
+`not` from `drizzle-orm` was imported but never used. Build emitted a warning.
+
+**Remediation:** Removed from import.
+
+---
+
+#### Pre-existing TS error in stats page
 
 **Severity:** low
-**Files:** `apps/web/src/lib/debug-sql-guard.test.ts`
+**Files:** `apps/web/src/routes/stats/+page.server.ts:193`
+**Confidence:** high
+
+`Property 'rows' does not exist on type 'WeatherBandStats[] | never[]'` — the `windDelays.rows` access fails type checking on the catch fallback type. The `windDelays` variable is typed as the union of the success and error return types, and the error type doesn't have `.rows`.
+
+**Remediation:** Narrow the type after the `Promise.all` with explicit error handling, or cast after checking for the `.rows` property.
+
+---
+
+#### Svelte 5 `state_referenced_locally` warnings
+
+**Severity:** low
+**Files:** `apps/web/src/routes/+layout.svelte:11`, `apps/web/src/routes/+page.svelte:162`
+**Confidence:** high
+
+`data.airports` in layout and `data.recentlyViewed` in homepage are referenced at the top level in `<script>` which only captures the initial value. These are intentional (layout reads airports once to initialize a cache, homepage seeds recentlyViewed from SSR data) but Svelte 5 warns about the pattern.
+
+**Remediation:** Suppress with `// svelte-ignore state_referenced_locally` with a comment explaining why, or restructure the initialization.
+
+---
+
+#### `FlightHeader.calculatedStatus` uses hardcoded status checks
+
+**Severity:** low
+**Files:** `apps/web/src/routes/flights/[id]/components/FlightHeader.svelte:59-62`
 **Confidence:** medium
 
-The SQL guard tests don't cover the case where `INSERT/UPDATE/DELETE` appears inside a PostgreSQL string literal (single-quoted string or dollar-quoted `$$...$$` block). A query like `SELECT 'INSERT INTO flights'` would be incorrectly rejected because the keyword scanner operates on the uppercased string without stripping literals.
+The `calculatedStatus` derivation manually checks `status.includes('landed')`, `status.includes('completed')`, etc. Like the other client components, this should use a shared function. However, this is a visual-only override and doesn't affect business logic.
 
-**Remediation:** Update `validateSqlQuery` to strip string literals before keyword scanning, and add a test case for `SELECT 'INSERT INTO'` (should pass) and `DO $$ DELETE FROM flights $$` (should fail).
-
----
-
-### 🔷 Console Error Logging in Tight Loop Potential
-
-**Severity:** low
-**Files:** All 12 table endpoints
-**Confidence:** low
-
-Every endpoint has `console.error` in its catch block. If a connection issue causes cascading failures across all debug endpoints, the console would be flooded with identical error messages. Not a real issue for a debug-only API, but worth noting.
-
-**Remediation:** Consider a simple deduplication or throttling mechanism if this becomes noisy.
+**Remediation:** Replace with a call to the shared status utilities.
 
 ---
 
-### 🔷 `debugResponse` Wraps UI Mirror Data in Extra Array
+#### `FlightHeader.scheduledTime` is null for arrivals
 
 **Severity:** low
-**Files:** `apps/web/src/routes/api/debug/ui/homepage/+server.ts:131`, `ui/flight/[id]/+server.ts:119`, `ui/stats/+server.ts:151`
-**Confidence:** low
+**Files:** `apps/web/src/routes/flights/[id]/components/FlightHeader.svelte:51`
+**Confidence:** medium
 
-UI mirror endpoints return `debugResponse([data], ...)` — wrapping the entire payload in an array. This means the response shape is `{ rows: [{ flights: [...], weatherMap: {...}, ... }], count: 1, queryMs: N }` instead of the more natural `{ flights: [...], weatherMap: {...}, ... }`. An agent consuming this always needs to access `rows[0]`.
+`scheduledTime` is derived as `isDeparture ? scheduledDeparture : null` — for arrival flights, the scheduled time passed to `DelayCounter` is always null. This may be intentional (arrivals don't show a delay counter) but should be verified.
 
-**Remediation:** Either add a new helper like `debugResponseSingle(data, ms)` that doesn't wrap in an array, or document the `rows[0]` pattern. The table endpoints return `rows` as an array of records, so having the mirrors also return an array (of one) is at least consistent.
+---
+
+#### `fr24-scraper` double-initialization of `guernseyDateStr`
+
+**Severity:** low
+**Files:** `apps/fr24-scraper/src/scraper.ts:8-9`
+**Confidence:** medium
+
+Line 7: `const guernseyDateStr = guernseyTodayStr;`
+Line 9: `export { guernseyDateStr };`
+
+And in `index.ts:1`, `guernseyDateStr` is imported from `./scraper`. But `index.ts` also imports `guernseyHour` and `guernseyTomorrowStr` directly from `@airways/common`. The `guernseyDateStr` is initialized once at module load time and may become stale for long-running scraper processes.
 
 ---
 
 ## Remediation Priority
 
-1. **Fix critical issues first** — add `COPY`/`DO` to keyword blocklist, fix statement timeout (wrap in explicit transaction or use SET SESSION + RESET).
-2. **Refactor high-severity smells** — remove duplicate `ALLOWED_COMMANDS` and unused `isTerminalStatus`, consider a table endpoint factory to eliminate 11x duplication.
-3. **Address medium items** — tighten `sortColumns` type, move stats queries to `$lib/server/`, be aware of 21-query parallelism.
-4. **Review low-severity items** — add string-literal stripping to SQL guard, decide on UI mirror array-wrapping convention.
+1. **All critical and high issues already fixed** in this session.
+2. Fix `fr24-scraper` dual import (medium) — consolidate to `@airways/common`.
+3. Add per-route error boundaries (medium).
+4. Resolve `aurigny-mobile-scraper` missing source (medium).
+5. Fix `weather-backfill` missing implementation or remove (medium).
+6. Address low items at leisure.
+
+## Data Flow & Architecture Summary
+
+| Connection | Status |
+|------------|--------|
+| Web → PostgreSQL (Drizzle proxy) | ✅ |
+| Web → ML service (HTTP) | ✅ (compose dependency) |
+| Web → Umami analytics (CORS blocked — deployment issue, not code) | ⚠️ |
+| Web → Push notifications (VAPID) | ✅ |
+| Scrapers → PostgreSQL | ✅ |
+| Scrapers → Telegram alerts | ✅ |
+| Position service → FR24 API (token) | ✅ |
+| Weather service → Open-Meteo API | ✅ |
+| Notification service → PostgreSQL + VAPID | ✅ |
+| Page routing: /, /flights/[id], /search, /stats, /contact, /sitemap.xml | ✅ |
+| Error pages per route | ⚠️ only root |
 
 ## File-by-File Breakdown
 
 | File | Issues | Max Severity |
 |------|--------|--------------|
-| `lib/server/debug-helpers.ts` | 1 (missing COPY/DO) | critical |
-| `routes/api/debug/sql/+server.ts` | 2 (timeout bug, duplicate constant) | critical |
-| `routes/api/debug/ui/homepage/+server.ts` | 1 (unused import) | high |
-| `routes/api/debug/flights/+server.ts` | 1 (sortColumns type) | medium |
-| `routes/api/debug/ui/stats/+server.ts` | 2 (deep imports, 21-query parallelism) | medium |
-| 11 table endpoints | 1 (duplicate pattern) | high |
-| 3 test files | 1 (SQL literal bypass not tested) | low |
+| `apps/web/src/routes/flights/[id]/+page.svelte` | 3 (missing imports, duplicate effect, hardcoded status) | critical → fixed |
+| `apps/web/src/routes/+page.server.ts` | 2 (missing import, unused import) | critical → fixed |
+| `apps/web/src/lib/server/db.ts` | 1 (missing re-export) | critical → fixed |
+| `packages/database/statusPriority.ts` | 1 (missing Completed) | high → fixed |
+| `apps/web/src/routes/stats/+page.server.ts` | 2 (missing imports, TS error) | high → fixed |
+| `apps/guernsey-scraper/src/live.ts` | 1 (divergent terminal list) | high → fixed |
+| `apps/web/src/lib/components/FlightCard.svelte` | 1 (hardcoded status) | high → fixed |
+| `apps/fr24-scraper/src/` | 1 (dual import) | medium |
+| `apps/aurigny-mobile-scraper/` | 1 (missing source) | medium |
+| `apps/weather-backfill/` | 1 (missing code) | medium |
 
 ---
 
