@@ -500,7 +500,8 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
   if (effectiveActualArrival) updateSet.actualArrival   = effectiveActualArrival;
   if (status)                 updateSet.status          = status;
   if (canceled)               updateSet.canceled        = canceled;
-  if (effectiveDelayMinutes !== null)  updateSet.delayMinutes    = effectiveDelayMinutes;
+  if (canceled)               updateSet.delayMinutes    = null;
+  else if (effectiveDelayMinutes !== null) updateSet.delayMinutes = effectiveDelayMinutes;
   if (scheduledDeparture)     updateSet.scheduledDeparture = scheduledDeparture;
   if (scheduledArrival)       updateSet.scheduledArrival   = scheduledArrival;
 
