@@ -536,6 +536,19 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
       if (status && !isDelayedCorrection && !canUpgradeStatus(existing[0].status, status)) {
         delete updateSet.status;
       }
+      // If the DB says the flight is terminal (Landed/Diverted) but the
+      // current scrape says it's still in progress (Delayed/Scheduled/etc),
+      // the DB data is stale — force-clear it so the airport's live data wins.
+      const isExistingTerminal = existing[0].status === 'Landed'
+        || existing[0].status?.startsWith('Diverted');
+      const isNewNonTerminal = status && status !== 'Landed'
+        && status !== 'Cancelled' && !status.startsWith('Diverted');
+      if (isExistingTerminal && isNewNonTerminal) {
+        updateSet.status = status;
+        updateSet.actualDeparture = null;
+        updateSet.actualArrival = null;
+        updateSet.delayMinutes = effectiveDelayMinutes;
+      }
       if (isDelayedCorrection && effectiveDelayMinutes === 0) {
         updateSet.delayMinutes = 0;
       }
