@@ -2,6 +2,14 @@ import { db, flights, flightTimes, scraperLogs, guernseyHour, guernseyTodayStr a
 import { eq, and, not, inArray, asc, count, desc, max, sql } from 'drizzle-orm';
 import { scrapeDayFlights } from './scraper';
 import { sendAlert } from '@airways/telegram';
+import { createCircuitBreakerFromEnv } from '@airways/common';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Convert minutes to milliseconds */
+const mins = (m: number) => m * 60_000;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -43,7 +51,7 @@ const timers: TimerState = {
   tzCheckTimeout: null,
 };
 
-const circuitBreaker = createCircuitBreakerFromEnv('Guernsey', 5, 60000);
+const circuitBreaker = createCircuitBreakerFromEnv('Guernsey', CIRCUIT_BREAKER_THRESHOLD, CIRCUIT_BREAKER_RESET_MS);
 
 let lastTomorrowScrapeAt: Date | null = null;
 let scheduledWakeAtMs: number | null = null;
