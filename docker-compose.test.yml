@@ -22,6 +22,7 @@ services:
       - PUBLIC_FORMSPREE_URL=${PUBLIC_FORMSPREE_URL}
       - PUBLIC_UMAMI_WEBSITE_ID=${PUBLIC_UMAMI_WEBSITE_ID}
       - PUBLIC_UMAMI_URL=${PUBLIC_UMAMI_URL}
+      - DEBUG_API_TOKEN=${DEBUG_API_TOKEN}
     labels:
       - 'traefik.enable=true'
       - 'traefik.http.routers.airwaysgg-test.rule=Host(`${DOMAIN}`)'
