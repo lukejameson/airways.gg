@@ -1,25 +1,16 @@
-import { loadEnv, CircuitBreaker, createCircuitBreakerFromEnv, TERMINAL_STATUSES, isTerminalStatus, mins, guernseyHour, guernseyDateStr, guernseyTomorrowStr, nextGuernseyTime, type TimerState } from '@airways/common';
+import { loadEnv, CircuitBreaker, createCircuitBreakerFromEnv, TERMINAL_STATUSES, isTerminalStatus, mins, guernseyHour, guernseyTomorrowStr, nextGuernseyTime, type TimerState } from '@airways/common';
+import { scrapeOnce, guernseyDateStr } from './scraper';
+import { db, scraperLogs, flights, flightTimes } from '@airways/database';
+import { sendAlert } from '@airways/telegram';
+import { eq, and, not, inArray, desc, count, max, asc, isNull, sql } from 'drizzle-orm';
+import { resolve, dirname } from 'path';
+import { existsSync } from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 loadEnv({ serviceName: 'FR24', startDir: __dirname });
-
-// Walk up from __dirname until we find the .env file
-function findEnvFile(startDir: string): string | null {
-  let dir = startDir;
-  for (let i = 0; i < 10; i++) {
-    const candidate = resolve(dir, '.env');
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
-
-const envPath = findEnvFile(__dirname);
-if (envPath) {
-  config({ path: envPath });
-} else {
-  console.warn('[FR24] Warning: .env file not found, relying on environment variables');
-}
 
 // Fail fast if the process timezone is not UTC — pg serialization of
 // Date objects depends on it for `timestamp without time zone` columns.
@@ -29,12 +20,6 @@ if (new Date().getTimezoneOffset() !== 0) {
   );
   process.exit(1);
 }
-
-import { scrapeOnce, guernseyDateStr } from './scraper';
-import { db, scraperLogs, flights, flightTimes, guernseyHour, guernseyTomorrowStr, nextGuernseyTime } from '@airways/database';
-import { sendAlert } from '@airways/telegram';
-import { eq, and, not, inArray, desc, count, max, asc, isNull, sql } from 'drizzle-orm';
-
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -68,35 +53,15 @@ function clearAllTimers(): void {
 }
 
 function checkCircuitBreaker(): boolean {
-  if (circuitBreaker.isOpen) {
-    const now = Date.now();
-    if (circuitBreaker.lastFailureTime &&
-        now - circuitBreaker.lastFailureTime > CIRCUIT_BREAKER_RESET_MS) {
-      circuitBreaker.isOpen = false;
-      circuitBreaker.failures = 0;
-      console.log('[FR24] Circuit breaker reset, resuming operations');
-      return true;
-    }
-    console.log('[FR24] Circuit breaker is OPEN, skipping operation');
-    return false;
-  }
-  return true;
+  return circuitBreaker.check();
 }
 
 function recordFailure(): void {
-  circuitBreaker.failures++;
-  circuitBreaker.lastFailureTime = Date.now();
-  if (circuitBreaker.failures >= CIRCUIT_BREAKER_THRESHOLD) {
-    circuitBreaker.isOpen = true;
-    console.error(`[FR24] Circuit breaker OPENED after ${circuitBreaker.failures} failures`);
-    sendAlert('fr24-scraper', 'critical', `Circuit breaker opened after ${circuitBreaker.failures} consecutive failures — scraper is paused`).catch(() => {});
-  }
+  circuitBreaker.recordFailure();
 }
 
 function recordSuccess(): void {
-  if (circuitBreaker.failures > 0) {
-    circuitBreaker.failures = Math.max(0, circuitBreaker.failures - 1);
-  }
+  circuitBreaker.recordSuccess();
 }
 
 
