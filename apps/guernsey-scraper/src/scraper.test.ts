@@ -69,10 +69,25 @@ function extractActualTime(
 }
 
 function computeEffectiveDelay(
-  delayMinutes: number | null,
+  actualDeparture: Date | null,
+  actualArrival: Date | null,
+  scheduledDeparture: Date,
+  scheduledArrival: Date,
   canceled: boolean,
 ): number | null {
-  return canceled ? null : delayMinutes;
+  if (canceled) return null;
+
+  // Sanitize impossible times
+  const sanitizedDep = (actualDeparture && actualDeparture.getTime() > scheduledArrival.getTime())
+    ? null : actualDeparture;
+  const sanitizedArr = (actualArrival && actualArrival.getTime() < scheduledDeparture.getTime())
+    ? null : actualArrival;
+
+  return sanitizedDep
+    ? Math.round((sanitizedDep.getTime() - scheduledDeparture.getTime()) / 60_000)
+    : sanitizedArr
+      ? Math.round((sanitizedArr.getTime() - scheduledArrival.getTime()) / 60_000)
+      : null;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
@@ -99,15 +114,34 @@ describe('extractCanceled + effective delay', () => {
     expect(extractCanceled(updates)).toBe(false);
   });
 
-  it('effectiveDelayMinutes is null when canceled, regardless of delay value', () => {
-    expect(computeEffectiveDelay(285, true)).toBeNull();
-    expect(computeEffectiveDelay(300, true)).toBeNull();
-    expect(computeEffectiveDelay(0, true)).toBeNull();
+  it('effectiveDelayMinutes is null when canceled, regardless of actual times', () => {
+    const sDep = new Date('2026-06-12T12:00:00Z');
+    const sArr = new Date('2026-06-12T13:00:00Z');
+    const actDep = new Date('2026-06-12T12:30:00Z');
+    expect(computeEffectiveDelay(actDep, null, sDep, sArr, true)).toBeNull();
+    expect(computeEffectiveDelay(null, null, sDep, sArr, true)).toBeNull();
   });
 
-  it('effectiveDelayMinutes passes through when not canceled', () => {
-    expect(computeEffectiveDelay(22, false)).toBe(22);
-    expect(computeEffectiveDelay(null, false)).toBeNull();
+  it('computes delay from actual_departure', () => {
+    const sDep = new Date('2026-06-12T12:00:00Z');
+    const sArr = new Date('2026-06-12T13:00:00Z');
+    const actDep = new Date('2026-06-12T12:22:00Z');
+    expect(computeEffectiveDelay(actDep, null, sDep, sArr, false)).toBe(22);
+  });
+
+  it('rejects arrival before scheduled departure (impossible)', () => {
+    // Arrival at 12:30 but departure scheduled at 13:00 — impossible
+    const sDep = new Date('2026-06-12T13:00:00Z');
+    const sArr = new Date('2026-06-12T14:00:00Z');
+    const actArr = new Date('2026-06-12T12:30:00Z');
+    expect(computeEffectiveDelay(null, actArr, sDep, sArr, false)).toBeNull();
+  });
+
+  it('rejects departure after scheduled arrival (impossible)', () => {
+    const sDep = new Date('2026-06-12T12:00:00Z');
+    const sArr = new Date('2026-06-12T12:30:00Z');
+    const actDep = new Date('2026-06-12T13:00:00Z');
+    expect(computeEffectiveDelay(actDep, null, sDep, sArr, false)).toBeNull();
   });
 });
 

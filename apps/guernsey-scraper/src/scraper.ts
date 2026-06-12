@@ -468,6 +468,16 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
   const actualArrival = scrapedFlight.type === 'arrivals'
     ? extractActualTime(scrapedFlight.statusUpdates, 'Landed', scheduledArrival)
     : null;
+
+  // Reject actual times that are impossible — an arrival before the
+  // scheduled departure means stale/cross-contaminated data (e.g. the
+  // morning rotation's status bleeding into the afternoon rotation).
+  // Similarly, a departure after the scheduled arrival is impossible.
+  const sanitizedActualDeparture = (actualDeparture && actualDeparture.getTime() > scheduledArrival.getTime())
+    ? null : actualDeparture;
+  const sanitizedActualArrival = (actualArrival && actualArrival.getTime() < scheduledDeparture.getTime())
+    ? null : actualArrival;
+
   const status = deriveStatus(scrapedFlight.statusUpdates, scrapedFlight.scheduledTime);
   const canceled = extractCanceled(scrapedFlight.statusUpdates);
   const delayBaseTime = scrapedFlight.type === 'departures' ? scheduledDeparture : scheduledArrival;
@@ -477,10 +487,10 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
   // produces absurd values (e.g. 285 min for a flight that never operated).
   // Short-circuit: don't bother computing delayMinutes for cancelled flights.
   const effectiveDelayMinutes = canceled ? null : (
-    actualDeparture
-      ? Math.round((actualDeparture.getTime() - scheduledDeparture.getTime()) / 60_000)
-      : actualArrival
-        ? Math.round((actualArrival.getTime() - scheduledArrival.getTime()) / 60_000)
+    sanitizedActualDeparture
+      ? Math.round((sanitizedActualDeparture.getTime() - scheduledDeparture.getTime()) / 60_000)
+      : sanitizedActualArrival
+        ? Math.round((sanitizedActualArrival.getTime() - scheduledArrival.getTime()) / 60_000)
         : extractDelayMinutes(scrapedFlight.statusUpdates, delayBaseTime)
   );
 
@@ -489,14 +499,14 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
   const isDiverted = status?.toLowerCase().startsWith('divert');
   const effectiveActualArrival = (isDiverted && scrapedFlight.type === 'arrivals')
     ? null
-    : actualArrival;
+    : sanitizedActualArrival;
 
   // Build the update set — only include fields that have data to avoid
   // overwriting richer data from other scrapers with nulls.
   const updateSet: Record<string, unknown> = {
     updatedAt: new Date(),
   };
-  if (actualDeparture)        updateSet.actualDeparture = actualDeparture;
+  if (sanitizedActualDeparture) updateSet.actualDeparture = sanitizedActualDeparture;
   if (effectiveActualArrival) updateSet.actualArrival   = effectiveActualArrival;
   if (status)                 updateSet.status          = status;
   if (canceled)               updateSet.canceled        = canceled;
@@ -551,7 +561,7 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
           arrivalAirport,
           scheduledDeparture,
           scheduledArrival,
-          actualDeparture:  actualDeparture ?? undefined,
+          actualDeparture:  sanitizedActualDeparture ?? undefined,
           actualArrival:    effectiveActualArrival ?? undefined,
           status:           status ?? undefined,
           canceled,
@@ -572,7 +582,7 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
       const isTerminal = status === 'Airborne' || status === 'Landed' || status === 'Cancelled' || status?.startsWith('Diverted');
       if (estimatedTime !== null) {
         await upsertFlightTime(flightId, timeType, estimatedTime);
-      } else if (!isTerminal && !actualDeparture && !actualArrival) {
+      } else if (!isTerminal && !sanitizedActualDeparture && !sanitizedActualArrival) {
         await db.delete(flightTimes).where(
           and(eq(flightTimes.flightId, flightId), eq(flightTimes.timeType, timeType)),
         ).catch(() => {});
