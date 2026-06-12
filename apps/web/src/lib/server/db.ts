@@ -2,7 +2,7 @@
 // Vite resolves @airways/database via alias in vite.config.ts → packages/database/index.ts.
 // pg and drizzle-orm are marked as ssr.external so they're never bundled.
 
-export { db, getDb, guernseyTodayStr, guernseyTomorrowStr } from '@airways/database';
+export { db, getDb, guernseyTodayStr, guernseyTomorrowStr, isTerminalStatus } from '@airways/database';
 export {
   flights,
   flightTimes,

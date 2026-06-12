@@ -6,6 +6,7 @@ const STATUS_PRIORITY: Record<string, number> = {
   Taxiing: 35,
   Airborne: 40,
   Landed: 50,
+  Completed: 50,
   Cancelled: 50,
   Diverted: 50,
 };

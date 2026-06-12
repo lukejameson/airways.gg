@@ -1,8 +1,8 @@
-import { db, flights, flightTimes, scraperLogs, guernseyHour, guernseyTodayStr as guernseyDateStr, guernseyTomorrowStr, nextGuernseyTime, checkTimezoneOffset } from '@airways/database';
+import { db, flights, flightTimes, scraperLogs, guernseyHour, guernseyTodayStr as guernseyDateStr, guernseyTomorrowStr, nextGuernseyTime, checkTimezoneOffset, isTerminalStatus } from '@airways/database';
 import { eq, and, not, inArray, asc, count, desc, max, sql } from 'drizzle-orm';
 import { scrapeDayFlights } from './scraper';
 import { sendAlert } from '@airways/telegram';
-import { createCircuitBreakerFromEnv } from '@airways/common';
+import { createCircuitBreakerFromEnv, TERMINAL_STATUSES } from '@airways/common';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -35,7 +35,6 @@ const CIRCUIT_BREAKER_THRESHOLD = parseInt(process.env.SCRAPER_CIRCUIT_BREAKER_T
 /** Circuit breaker: reset timeout (ms) */
 const CIRCUIT_BREAKER_RESET_MS  = parseInt(process.env.SCRAPER_CIRCUIT_BREAKER_RESET_MS  || '60000', 10);
 
-const TERMINAL_STATUSES = ['Landed', 'Cancelled', 'Completed'];
 const TZ_CHECK_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 interface TimerState {
   scrapeTimeout: ReturnType<typeof setTimeout> | null;

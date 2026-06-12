@@ -7,6 +7,7 @@
   import { getStatusTone, STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from '$lib/statusConfig';
   import DelayCounter from './DelayCounter.svelte';
   import { formatGuernseyTime } from '$lib/time';
+  import { isTerminalStatus } from '@airways/common';
 
   type Flight = typeof flights.$inferSelect & {
     estimatedDeparture?: string | null;
@@ -102,7 +103,7 @@
     if (!estimatedTime || actualTime) return false;
     const status = flight.status?.toLowerCase() ?? '';
     // If flight has landed, diverted, or cancelled, estimated time is still valid
-    if (status.includes('landed') || status.includes('completed') || status.includes('cancel') || status.includes('diverted')) return false;
+    if (isTerminalStatus(flight.status)) return false;
     // Check if estimated time has passed
     return new Date(estimatedTime).getTime() < Date.now();
   });

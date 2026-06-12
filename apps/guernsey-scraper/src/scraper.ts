@@ -474,9 +474,9 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
   if (scheduledArrival)       updateSet.scheduledArrival   = scheduledArrival;
 
   try {
-    // First check if a flight already exists for this flight_number + flight_date.
-    // This catches records created by other scrapers (e.g. numeric unique_ids from fr24)
-    // and avoids creating duplicates.
+    // First check if a flight already exists for this flight_number + flight_date + departure.
+    // Including departure_airport disambiguates same-day opposing rotations
+    // (e.g. GR644 GCI→BRS 12:45 departure vs GR644 BRS→GCI 17:00 arrival).
     const existing = await db
       .select({ id: flights.id, status: flights.status })
       .from(flights)
@@ -484,6 +484,7 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
         and(
           eq(flights.flightNumber, primaryCode),
           eq(flights.flightDate, scrapedFlight.flightDate),
+          eq(flights.departureAirport, departureAirport),
         ),
       )
       .limit(1);

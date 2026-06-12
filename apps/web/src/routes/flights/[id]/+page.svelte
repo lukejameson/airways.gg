@@ -11,6 +11,7 @@
   import { shortenStatus, statusHasDetail, extractDelayReason, isFlightCompleted } from '$lib/status';
   import { getStatusTone, STATUS_TEXT_CLASSES, STATUS_DOT_CLASSES, STATUS_PILL_CLASSES } from '$lib/statusConfig';
   import DelayCounter from '$lib/components/DelayCounter.svelte';
+  import { isTerminalStatus } from '@airways/common';
 
   let { data }: { data: PageData } = $props();
   const returnTab = $derived($page.url.searchParams.get('tab') ?? '');
@@ -139,8 +140,7 @@
     const currentFlightDep = new Date(flight.scheduledDeparture).getTime();
 
     const landedBefore = rotationFlights.filter(f => {
-      const status = f.status?.toLowerCase() || '';
-      const isLanded = status.includes('landed') || status.includes('completed');
+      const isLanded = isTerminalStatus(f.status);
       const depTime = new Date(f.scheduledDeparture).getTime();
       return isLanded && depTime < currentFlightDep;
     });
@@ -155,8 +155,7 @@
   }
 
   function getInferredLocationFromRotation(): { airport: string; source: string } | null {
-    const status = flight.status?.toLowerCase() || '';
-    if (status.includes('landed') || status.includes('completed')) {
+    if (isTerminalStatus(flight.status)) {
       return { airport: flight.arrivalAirport, source: 'rotation' };
     }
 
