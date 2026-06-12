@@ -8,6 +8,7 @@ WORKDIR /app
 # Copy workspace manifests
 COPY package*.json ./
 COPY packages/database/package*.json ./packages/database/
+COPY packages/common/package*.json ./packages/common/
 COPY packages/telegram/package*.json ./packages/telegram/
 COPY apps/fr24-scraper/package*.json ./apps/fr24-scraper/
 
@@ -15,10 +16,14 @@ COPY apps/fr24-scraper/package*.json ./apps/fr24-scraper/
 RUN npm install
 
 COPY packages/database/ ./packages/database/
+COPY packages/common/ ./packages/common/
 COPY packages/telegram/ ./packages/telegram/
 COPY apps/fr24-scraper/ ./apps/fr24-scraper/
 
 WORKDIR /app/packages/database
+RUN npm run build
+
+WORKDIR /app/packages/common
 RUN npm run build
 
 WORKDIR /app/packages/telegram
@@ -84,6 +89,7 @@ COPY --from=builder /app/apps/fr24-scraper/dist ./dist
 COPY --from=builder /app/apps/fr24-scraper/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/database ./packages/database
+COPY --from=builder /app/packages/common ./packages/common
 COPY --from=builder /app/packages/telegram ./packages/telegram
 
 # Copy puppeteer's downloaded Chrome from builder's cache

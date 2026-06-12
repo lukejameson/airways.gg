@@ -38,3 +38,14 @@ export function formatGuernseyShortDate(date: string | Date | null | undefined):
     timeZone: GY_TZ,
   });
 }
+
+/** Format a date as "DD Mon YYYY" (e.g., "07 Jun 2026") — stats page date display. */
+export function formatDate(date: string | Date | null | undefined): string {
+  if (!date) return '';
+  return new Date(date).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: GY_TZ,
+  });
+}

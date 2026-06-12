@@ -6,6 +6,7 @@ WORKDIR /app
 # Copy root workspace manifests
 COPY package*.json ./
 COPY packages/database/package*.json ./packages/database/
+COPY packages/common/package*.json ./packages/common/
 COPY packages/telegram/package*.json ./packages/telegram/
 COPY apps/notification-service/package*.json ./apps/notification-service/
 
@@ -14,10 +15,14 @@ RUN npm install
 
 # Copy source
 COPY packages/database/ ./packages/database/
+COPY packages/common/ ./packages/common/
 COPY packages/telegram/ ./packages/telegram/
 COPY apps/notification-service/ ./apps/notification-service/
 
 WORKDIR /app/packages/database
+RUN npm run build
+
+WORKDIR /app/packages/common
 RUN npm run build
 
 WORKDIR /app/packages/telegram
@@ -39,6 +44,7 @@ COPY --from=builder /app/apps/notification-service/dist ./dist
 COPY --from=builder /app/apps/notification-service/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/database ./packages/database
+COPY --from=builder /app/packages/common ./packages/common
 COPY --from=builder /app/packages/telegram ./packages/telegram
 
 ENV NODE_ENV=production \

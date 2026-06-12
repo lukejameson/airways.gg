@@ -8,6 +8,7 @@ WORKDIR /app
 # Copy root workspace manifests
 COPY package*.json ./
 COPY packages/database/package*.json ./packages/database/
+COPY packages/common/package*.json ./packages/common/
 COPY apps/web/package*.json ./apps/web/
 
 # Install all workspace dependencies
@@ -15,10 +16,14 @@ RUN npm install
 
 # Copy source
 COPY packages/database/ ./packages/database/
+COPY packages/common/ ./packages/common/
 COPY apps/web/ ./apps/web/
 
 # Build the shared database package first so its dist/ exists for Vite
 WORKDIR /app/packages/database
+RUN npm run build
+
+WORKDIR /app/packages/common
 RUN npm run build
 
 # Build the web app
@@ -43,6 +48,7 @@ COPY --from=builder /app/node_modules ./node_modules
 # migrations/ + migrate.js are required for the startup migration runner.
 # We copy the whole package (post-prune) so all built artefacts are present.
 COPY --from=builder /app/packages/database ./packages/database
+COPY --from=builder /app/packages/common ./packages/common
 
 EXPOSE 3000
 RUN apk add --no-cache tzdata

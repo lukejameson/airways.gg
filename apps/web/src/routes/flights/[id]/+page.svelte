@@ -199,18 +199,8 @@
   const getStatusDotColor = (status: string | null | undefined, canceled?: boolean | null) =>
     STATUS_DOT_CLASSES[getStatusTone(status, canceled)];
 
-  let shareSuccess = $state(false);
-
-  // Save to recently viewed
-  let refreshInterval: ReturnType<typeof setInterval> | null = null;
-  $effect(() => {
-    if (browser) {
-      refreshInterval = setInterval(() => { invalidateAll(); }, 60_000);
-    }
-    return () => {
-      if (refreshInterval) clearInterval(refreshInterval);
-    };
-  });
+  // shareSuccess declared above (line 117)
+  // refreshInterval declared above (line 79)
 
   $effect(() => {
     if (browser) {
@@ -235,30 +225,7 @@
     }
   });
 
-  async function shareFlight() {
-    const shareData = {
-      title: `${flight.flightNumber} — airways.gg`,
-      text: `Track ${flight.flightNumber} from ${airportName(flight.departureAirport)} to ${airportName(flight.arrivalAirport)}`,
-      url: window.location.href,
-    };
-
-    if (navigator.share) {
-      try {
-        await navigator.share(shareData);
-      } catch {
-        // User cancelled or share failed
-      }
-    } else {
-      // Fallback: copy to clipboard
-      try {
-        await navigator.clipboard.writeText(window.location.href);
-        shareSuccess = true;
-        setTimeout(() => shareSuccess = false, 2000);
-      } catch {
-        // Clipboard failed
-      }
-    }
-  }
+  // shareFlight declared above (line 118)
 </script>
 
 <svelte:head>
