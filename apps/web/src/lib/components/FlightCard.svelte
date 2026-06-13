@@ -224,13 +224,15 @@
 
       <!-- Status & Delay - fixed width on mobile to prevent jumping -->
       <div class="flex items-center gap-2 shrink-0 ml-auto">
-        <DelayCounter
-          scheduledTime={scheduledTime}
-          estimatedTime={estimatedTime}
-          actualTime={actualTime}
-          isCompleted={isCompleted}
-          class="text-sm"
-        />
+        {#if !flight.canceled}
+          <DelayCounter
+            scheduledTime={scheduledTime}
+            estimatedTime={estimatedTime}
+            actualTime={actualTime}
+            isCompleted={isCompleted}
+            class="text-sm"
+          />
+        {/if}
         {#if !isCompleted && formattedEarly}
           <span class="text-sm font-bold text-green-600">{formattedEarly}</span>
         {/if}
