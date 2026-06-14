@@ -154,6 +154,30 @@ services:
       - web
     restart: always
 
+  health-monitor:
+    image: ghcr.io/lukejameson/airways.gg/health-monitor:production
+    build:
+      context: .
+      dockerfile: apps/health-monitor/Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - NODE_ENV=production
+      - STALE_GUERNSEY_MINS=${STALE_GUERNSEY_MINS:-30}
+      - STALE_FR24_MINS=${STALE_FR24_MINS:-30}
+      - STALE_POSITION_MINS=${STALE_POSITION_MINS:-15}
+      - STALE_WEATHER_MINS=${STALE_WEATHER_MINS:-45}
+      - STALE_ADSB_MINS=${STALE_ADSB_MINS:-30}
+      - STALE_NOTIFICATION_MINS=${STALE_NOTIFICATION_MINS:-5}
+      - WEATHER_GAP_THRESHOLD_MINS=${WEATHER_GAP_THRESHOLD_MINS:-120}
+      - POSITION_GAP_THRESHOLD_MINS=${POSITION_GAP_THRESHOLD_MINS:-60}
+      - STALE_WEATHER_THRESHOLD_MINS=${STALE_WEATHER_THRESHOLD_MINS:-180}
+    networks:
+      - web
+    restart: always
+
   weather-service:
     image: ghcr.io/lukejameson/airways.gg/weather-service:production
     build:

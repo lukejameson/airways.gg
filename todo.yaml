@@ -1,71 +1,84 @@
 # todo.yaml — single source of truth for LLM
-# Updated: 2026-06-12T15:25:00Z
+# Updated: 2026-06-13T17:30:00Z
+# Context: research-brief.md — Flight Detail Page Time Display Bugs
 
 goal: >
-  Fix three data-quality bugs in the guernsey-scraper that cause cancelled
-  flights to show impossible delay values, flights to be left orphaned with
-  null status, and Landed flights to be missing actual arrival times.
+  Fix three bugs causing incorrect and inconsistent departure times on the
+  flight detail page: a timezone omission in FlightTimeline display, missing
+  estimated-time rendering in Flight Details, and the guernsey-scraper
+  mis-extracting check-in opening times as the estimated departure.
 
 why_how: >
-  The guernsey-scraper processes airport.gg API data and inserts/updates
-  flight records. Three distinct data issues were found in production:
-  (1) Cancelled flights like GR200 show delay_minutes=285 — cancelled flights
-  should always have null delays. (2) Several flights (GR400, GR401, GR642,
-  GR643, GR406) have no status, no actual times, and aren't marked cancelled,
-  leaving them as orphaned null records. (3) GR680 shows status "Landed" but
-  has no actual_arrival time because the airport posted "Landed" without a
-  timestamp in the message. The fixes are all in a single file
-  (apps/guernsey-scraper/src/scraper.ts) within the upsertFlight function.
+  Flight GR308 (id=42485) displays 16:45 in some page sections and 15:45 in
+  others, when the correct ETD should be 18:30. Three distinct bugs cause this:
+  (1) FlightTimeline.svelte's local formatTime uses toLocaleTimeString without
+  timeZone: 'Europe/London', showing raw UTC values during BST. (2) The Flight
+  Details section in +page.svelte always shows flight.scheduledDeparture even
+  when flight_times has a better EstimatedBlockOff. (3) The guernsey-scraper's
+  extractEstimatedTime picks the first HH:MM from "Check In Open 16:00 Closes
+  19:00" instead of the actual ETD "18:30" from an older "New ETD" message.
+  All fixes are localized and low-risk. Using research-brief.md as context.
 
 expected: >
-  After the fixes:
-  - Cancelled flights have delay_minutes = null regardless of what
-    extractDelayMinutes returns.
-  - Flights past their scheduled time with no status updates after the day
-    goes terminal are detectably stale (at minimum, they won't prevent the
-    scraper from sleeping when all other flights are done).
-  - Landed flights with status "Landed" but no time in the status message
-    fall back to the status update's timestamp for actual_arrival (or
-    actual_departure for departures), rather than leaving it null.
-  - The existing dedup fix (departure_airport in match query) remains in place.
+  - FlightTimeline and Flight Details both display Guernsey local time
+    consistently across the entire page (BST in summer, GMT in winter).
+  - When an EstimatedBlockOff or EstimatedBlockOn exists in flight_times,
+    the Flight Details section shows that estimate instead of the scheduled
+    time.
+  - The guernsey-scraper no longer writes check-in open/close times as the
+    estimated departure; it prefers "New ETD" and "Delayed To" times.
+  - Flight GR308 re-scrapes correctly and shows ETD 18:30 instead of 16:45.
 
 status: complete
 
 tasks:
   - phase: 1
-    name: Null delay for cancelled flights
+    name: Fix FlightTimeline timezone
     status: done
     items:
       - done: true
-        action: In upsertFlight, after extractCanceled sets the canceled flag, clear delayMinutes to null when canceled is true (before writing updateSet)
+        action: Add timeZone: 'Europe/London' to the toLocaleTimeString call in FlightTimeline.svelte formatTime
       - done: true
-        action: Verify GR200, GR202, BA1345 would produce null delays with the fix
+        action: Import GY_TZ from $lib/time and use it for consistency with formatGuernseyTime
 
   - phase: 2
-    name: Fallback actual time from status timestamp
+    name: Fix Flight Details estimated time
     status: done
     items:
       - done: true
-        action: Add fallback in extractActualTime: when the keyword is found in a status message but no HH:MM time is parsable, use the status update's own timestamp as the actual time
+        action: In +page.svelte Flight Details section, use estimatedDeparture ?? flight.scheduledDeparture instead of flight.scheduledDeparture for the departure row
       - done: true
-        action: Verify GR680 (Landed without time) would get an actual_arrival with the fix
+        action: Same for arrival: use estimatedArrival ?? flight.scheduledArrival
+      - done: true
+        action: Add a subtle label like "(estimated)" next to the time when showing an estimate instead of the published schedule
 
   - phase: 3
-    name: Tests & verification
+    name: Fix guernsey-scraper ETD extraction
     status: done
     items:
       - done: true
-        action: Run TypeScript compilation check on guernsey-scraper
+        action: In extractEstimatedTime, when a message matches the delay pattern but contains multiple times, prefer times after "New ETD", "Delayed To", or "Approx" keywords over times near "Check In" or "Closes"
       - done: true
-        action: Write unit tests for extractCanceled + delay clearing, extractActualTime fallback
+        action: Add a targeted regex or priority scheme: if the message contains "Check In" AND an older message has "New ETD" or "Delayed To", prefer the older message's extracted time
       - done: true
-        action: 11 unit tests pass in scraper.test.ts
+        action: Add unit tests for extractEstimatedTime with the exact GR308 status message sequence as fixtures
+
+  - phase: 4
+    name: Tests & verification
+    status: in_progress
+    items:
+      - done: false
+        action: Run TypeScript compilation check on web app and guernsey-scraper
+      - done: false
+        action: Run existing test suites (guernsey-scraper tests, web vitest)
+      - done: false
+        action: Verify with airways-cli that GR308's flight_times corrects on next guernsey-scraper cycle
 
 notes:
-  - All changes in apps/guernsey-scraper/src/scraper.ts
-  - New test file: apps/guernsey-scraper/src/scraper.test.ts (11 tests)
-  - Orphaned flights (GR400/GR401/GR642/GR643/GR406) tracked as follow-up
-  - The same-day opposing-rotation collision fix (departure_airport in match)
-    was already applied in the previous session.
+  - Display fixes: apps/web/src/routes/flights/[id]/components/FlightTimeline.svelte and apps/web/src/routes/flights/[id]/+page.svelte
+  - Scraper fix: apps/guernsey-scraper/src/scraper.ts (extractEstimatedTime function)
+  - Shared time utility: apps/web/src/lib/time.ts (GY_TZ already exported)
+  - No migration needed — user chose forward-fix only; stale flight_times rows self-correct on next scrape
+  - The user chose "Replace scheduled" for Flight Details display (not show both)
 
 discovered: []

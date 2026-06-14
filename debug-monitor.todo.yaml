@@ -1,0 +1,154 @@
+# todo.yaml — single source of truth for LLM
+# Updated: 2026-06-14T00:00:00Z
+# Context: debug-monitor.research-brief.md — Health Monitor Service
+
+goal: >
+  Build a 24/7 health monitoring service (apps/health-monitor) that runs
+  SQL-based integrity checks against the airways.gg database every hour,
+  passes results through DeepSeek V4 Flash every 2 hours for cross-signal
+  correlation, and sends structured Telegram summaries when issues are found.
+
+why_how: >
+  Six services (guernsey, fr24, adsb, position, weather, notification) each
+  alert on their own failures but no service correlates across them. A
+  shared-infrastructure outage would produce 3+ unconnected alerts. This
+  service uses two-tier checking: Tier 1 runs 14+ parameterized SQL checks
+  every hour (scraper health, flight data integrity, notification pipeline,
+  weather/position gaps). Tier 2 feeds check results + sample rows to
+  DeepSeek V4 Flash every 2 hours with a prompt tuned to spot multi-signal
+  patterns ("3 scrapers + weather + position all failed within 10min →
+  possible network outage"). Findings aggregate into one structured Telegram
+  message per cycle — silent when healthy. All queries are read-only and use
+  indexed columns. DB-only (no web app HTTP checks). LLM runs strictly on
+  the 2-hour schedule, never triggered early. Same TELEGRAM_CHAT_ID as other
+  services. Periodic "all clear" heartbeat to Telegram for self-monitoring.
+
+expected: >
+  - apps/health-monitor/ service following the same pattern as all existing
+    services (loadEnv → main → setInterval loop → sendAlert)
+  - Tier 1: 14+ SQL health checks across 4 categories running every hour
+  - Tier 2: DeepSeek V4 Flash analysis every 2 hours with cross-signal
+    correlation prompt
+  - Structured Telegram summary per cycle (silent when all checks pass),
+    plus a periodic heartbeat to confirm the monitor itself is alive
+  - Dockerized alongside other services in docker-compose
+  - Unit tests for each check function and LLM prompt formatting
+
+status: complete
+
+tasks:
+  - phase: 1
+    name: Scaffold service
+    status: done
+    items:
+      - done: true
+        action: Create apps/health-monitor/package.json following guernsey-scraper pattern (deps: @airways/common, @airways/database, @airways/telegram)
+      - done: true
+        action: Create apps/health-monitor/tsconfig.json following guernsey-scraper pattern
+      - done: true
+        action: Create apps/health-monitor/Dockerfile following guernsey-scraper Dockerfile pattern
+
+  - phase: 2
+    name: Scraper health checks
+    status: done
+    items:
+      - done: true
+        action: Implement check: last scraper_log per service — staleness (> 2× expected interval = fail)
+      - done: true
+        action: Implement check: failure rate per service in last 6 hours (> 3 failures = fail)
+      - done: true
+        action: Implement check: consecutive failures per service (≥ 3 in a row = fail)
+      - done: true
+        action: Implement check: zero records scraped but status=success (any = fail)
+
+  - phase: 3
+    name: Flight data integrity checks
+    status: done
+    items:
+      - done: true
+        action: Implement check: flights with null status for today's date (any = fail)
+      - done: true
+        action: Implement check: flights with negative delay_minutes (any = fail)
+      - done: true
+        action: Implement check: non-terminal flights with updated_at older than 6 hours (any = fail)
+      - done: true
+        action: Implement check: orphaned flight_times (no matching flight_id) (any = fail)
+      - done: true
+        action: Implement check: today's flight count vs 7-day rolling average (< 50% of avg = fail)
+
+  - phase: 4
+    name: Notification pipeline checks
+    status: done
+    items:
+      - done: true
+        action: Implement check: notification_watermark lag (max flight_status_history.id - last_processed_id > 100 = fail)
+      - done: true
+        action: Implement check: dead push subscriptions — never notified and created > 24h ago (any = fail)
+
+  - phase: 5
+    name: Weather and position gap checks
+    status: done
+    items:
+      - done: true
+        action: Implement check: weather_data gap per airport — max gap between consecutive timestamps > 2 hours (fail)
+      - done: true
+        action: Implement check: aircraft_positions gap — max gap between consecutive timestamps > 1 hour (fail)
+      - done: true
+        action: Implement check: stale weather — newest entry per airport older than 3 hours (fail)
+
+  - phase: 6
+    name: LLM integration (Tier 2)
+    status: done
+    items:
+      - done: true
+        action: Create src/llm.ts — formats check results as structured JSON prompt, calls DeepSeek V4 Flash API, parses correlated_issues response
+      - done: true
+        action: Define system prompt instructing LLM to cross-reference checks and detect multi-signal patterns with confidence levels
+      - done: true
+        action: Handle API errors gracefully — log failure, skip LLM tier for this cycle, still send static check results to Telegram
+
+  - phase: 7
+    name: Scheduler and Telegram reporting
+    status: done
+    items:
+      - done: true
+        action: Create src/index.ts — loadEnv, main() with setInterval for Tier 1 (every 60 min), Tier 2 gate (hour % 2 === 0)
+      - done: true
+        action: Build structured Telegram summary — Markdown message with sections per category, emoji indicators (✅/⚠️/🔴), LLM findings at top
+      - done: true
+        action: Implement silent-when-healthy — only send Telegram message if any check failed or LLM found correlations
+      - done: true
+        action: Implement periodic heartbeat — send "all clear" summary to Telegram every 6 hours even when healthy
+      - done: true
+        action: Add uncaughtException handler with sendAlert('health-monitor', 'critical', ...)
+
+  - phase: 8
+    name: Docker and deployment config
+    status: done
+    items:
+      - done: true
+        action: Add health-monitor service to docker-compose.prod.yml with DATABASE_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DEEPSEEK_API_KEY
+      - done: true
+        action: Add health-monitor to root package.json workspaces list and dev scripts
+
+  - phase: 9
+    name: Tests
+    status: done
+    items:
+      - done: true
+        action: Write unit tests for each check function with mock DB results (src/checks.test.ts)
+      - done: true
+        action: Write tests for LLM prompt formatting — verify correct JSON structure, token estimate within bounds
+      - done: true
+        action: Write tests for Telegram summary builder — verify Markdown output for pass/warn/fail scenarios
+
+notes:
+  - All DB queries must be read-only (SELECT only, no mutations)
+  - Use INTERVALS from @airways/common/config.ts for scraper staleness thresholds
+  - LLM check strictly on schedule (every 2 hours) — never triggered early by Tier 1 failures
+  - Same TELEGRAM_CHAT_ID as other services — all alerts in one place
+  - Periodic heartbeat every 6 hours to confirm monitor is alive
+  - Token usage should be logged per LLM call for cost tracking
+  - Check result type: { name: string, passed: boolean, value: string, threshold: string, samples?: Record<string, unknown>[] }[]
+
+discovered: []

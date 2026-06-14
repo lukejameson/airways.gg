@@ -329,14 +329,28 @@
             <dd class="font-medium font-mono">{flight.aircraftRegistration}</dd>
           </div>
         {/if}
-        <div class="flex justify-between">
-          <dt class="text-muted-foreground">Scheduled departure</dt>
-          <dd class="font-medium">{formatTime(flight.scheduledDeparture)}</dd>
-        </div>
-        <div class="flex justify-between">
-          <dt class="text-muted-foreground">Scheduled arrival</dt>
-          <dd class="font-medium">{formatTime(flight.scheduledArrival)}</dd>
-        </div>
+        {#if estimatedDeparture}
+          <div class="flex justify-between">
+            <dt class="text-muted-foreground">Estimated departure</dt>
+            <dd class="font-medium text-yellow-600">{formatTime(estimatedDeparture)}</dd>
+          </div>
+        {:else}
+          <div class="flex justify-between">
+            <dt class="text-muted-foreground">Scheduled departure</dt>
+            <dd class="font-medium">{formatTime(flight.scheduledDeparture)}</dd>
+          </div>
+        {/if}
+        {#if estimatedArrival}
+          <div class="flex justify-between">
+            <dt class="text-muted-foreground">Estimated arrival</dt>
+            <dd class="font-medium text-yellow-600">{formatTime(estimatedArrival)}</dd>
+          </div>
+        {:else}
+          <div class="flex justify-between">
+            <dt class="text-muted-foreground">Scheduled arrival</dt>
+            <dd class="font-medium">{formatTime(flight.scheduledArrival)}</dd>
+          </div>
+        {/if}
         {#if flight.actualDeparture}
           <div class="flex justify-between">
             <dt class="text-muted-foreground">Actual departure</dt>

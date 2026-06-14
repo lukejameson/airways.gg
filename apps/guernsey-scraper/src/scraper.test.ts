@@ -211,3 +211,99 @@ describe('extractActualTime fallback', () => {
     expect(extractActualTime([], 'Landed', ref)).toBeNull();
   });
 });
+
+// ── parseEtdTime helper (mirrored from scraper.ts) ────────────────────
+
+function parseEtdTime(msg: string): { hh: number; mm: number } | null {
+  const lower = msg.toLowerCase();
+  for (const keyword of ['new etd', 'delayed until', 'delayed to', 'flight delayed to approx',
+    'boarding expected', 'next info', 'expected at']) {
+    const idx = lower.indexOf(keyword);
+    if (idx !== -1) {
+      const after = msg.slice(idx + keyword.length);
+      const parsed = parseHHMM(after);
+      if (parsed) return parsed;
+    }
+  }
+  if (lower.startsWith('approx')) {
+    return parseHHMM(msg);
+  }
+  return parseHHMM(msg);
+}
+
+describe('parseEtdTime', () => {
+  it('prefers time after "New ETD" over check-in time', () => {
+    const result = parseEtdTime('Flight Delayed. Check in opens 16:00 New ETD 18:30');
+    expect(result).not.toBeNull();
+    expect(result!.hh).toBe(18);
+    expect(result!.mm).toBe(30);
+  });
+
+  it('prefers time after "New ETD" with HHMM format (no colon)', () => {
+    const result = parseEtdTime('Flight Delayed. Check in opens 1600 New ETD 1830');
+    expect(result).not.toBeNull();
+    expect(result!.hh).toBe(18);
+    expect(result!.mm).toBe(30);
+  });
+
+  it('extracts time after "Delayed To"', () => {
+    const result = parseEtdTime('Delayed To 14:15');
+    expect(result).not.toBeNull();
+    expect(result!.hh).toBe(14);
+    expect(result!.mm).toBe(15);
+  });
+
+  it('extracts time after "Delayed Until"', () => {
+    const result = parseEtdTime('Flight Delayed Until 19:00');
+    expect(result).not.toBeNull();
+    expect(result!.hh).toBe(19);
+    expect(result!.mm).toBe(0);
+  });
+
+  it('extracts time after "Approx" at start of message', () => {
+    const result = parseEtdTime('Approx 09:30');
+    expect(result).not.toBeNull();
+    expect(result!.hh).toBe(9);
+    expect(result!.mm).toBe(30);
+  });
+
+  it('extracts time after "Expected at"', () => {
+    const result = parseEtdTime('Expected at 17:45');
+    expect(result).not.toBeNull();
+    expect(result!.hh).toBe(17);
+    expect(result!.mm).toBe(45);
+  });
+
+  it('extracts time after "Next Info"', () => {
+    const result = parseEtdTime('Next Info 20:00');
+    expect(result).not.toBeNull();
+    expect(result!.hh).toBe(20);
+    expect(result!.mm).toBe(0);
+  });
+
+  it('falls back to first time when no ETD keyword is present', () => {
+    const result = parseEtdTime('Delayed 12:30');
+    expect(result).not.toBeNull();
+    expect(result!.hh).toBe(12);
+    expect(result!.mm).toBe(30);
+  });
+
+  it('returns null when no time is present', () => {
+    const result = parseEtdTime('Flight Delayed - Check In Open');
+    expect(result).toBeNull();
+  });
+
+  it('handles "Boarding Expected" keyword', () => {
+    const result = parseEtdTime('Boarding Expected 19:15');
+    expect(result).not.toBeNull();
+    expect(result!.hh).toBe(19);
+    expect(result!.mm).toBe(15);
+  });
+
+  it('handles "Flight Delayed To Approx" keyword', () => {
+    const result = parseEtdTime('Flight Delayed To Approx 18:30');
+    expect(result).not.toBeNull();
+    expect(result!.hh).toBe(18);
+    expect(result!.mm).toBe(30);
+  });
+});

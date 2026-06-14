@@ -116,10 +116,19 @@
 
   const isCompleted = $derived(isFlightCompleted(flight));
 
-  // Calculate delay from available data (display time takes precedence over stored delayMinutes)
+  // Calculate delay from available data.
+  // Prefer displayTime vs scheduledTime difference, but if delayMinutes is
+  // available and the time-based calculation is wildly different (likely a
+  // timezone bug in the scraper), trust the stored delayMinutes instead.
   const calculatedDelayMinutes = $derived.by(() => {
     if (displayTime && scheduledTime) {
-      return Math.round((new Date(displayTime).getTime() - new Date(scheduledTime).getTime()) / 60000);
+      const computed = Math.round((new Date(displayTime).getTime() - new Date(scheduledTime).getTime()) / 60000);
+      // If we have a stored delay and the computed value differs by more than
+      // 45 minutes (typical BST-offset bug produces ~60 min drift), trust the DB.
+      if (flight.delayMinutes != null && Math.abs(computed - flight.delayMinutes) > 45) {
+        return flight.delayMinutes;
+      }
+      return computed;
     }
     return delayMinutes;
   });

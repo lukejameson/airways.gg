@@ -1,0 +1,71 @@
+# todo.yaml — single source of truth for LLM
+# Updated: 2026-06-12T15:25:00Z
+
+goal: >
+  Fix three data-quality bugs in the guernsey-scraper that cause cancelled
+  flights to show impossible delay values, flights to be left orphaned with
+  null status, and Landed flights to be missing actual arrival times.
+
+why_how: >
+  The guernsey-scraper processes airport.gg API data and inserts/updates
+  flight records. Three distinct data issues were found in production:
+  (1) Cancelled flights like GR200 show delay_minutes=285 — cancelled flights
+  should always have null delays. (2) Several flights (GR400, GR401, GR642,
+  GR643, GR406) have no status, no actual times, and aren't marked cancelled,
+  leaving them as orphaned null records. (3) GR680 shows status "Landed" but
+  has no actual_arrival time because the airport posted "Landed" without a
+  timestamp in the message. The fixes are all in a single file
+  (apps/guernsey-scraper/src/scraper.ts) within the upsertFlight function.
+
+expected: >
+  After the fixes:
+  - Cancelled flights have delay_minutes = null regardless of what
+    extractDelayMinutes returns.
+  - Flights past their scheduled time with no status updates after the day
+    goes terminal are detectably stale (at minimum, they won't prevent the
+    scraper from sleeping when all other flights are done).
+  - Landed flights with status "Landed" but no time in the status message
+    fall back to the status update's timestamp for actual_arrival (or
+    actual_departure for departures), rather than leaving it null.
+  - The existing dedup fix (departure_airport in match query) remains in place.
+
+status: complete
+
+tasks:
+  - phase: 1
+    name: Null delay for cancelled flights
+    status: done
+    items:
+      - done: true
+        action: In upsertFlight, after extractCanceled sets the canceled flag, clear delayMinutes to null when canceled is true (before writing updateSet)
+      - done: true
+        action: Verify GR200, GR202, BA1345 would produce null delays with the fix
+
+  - phase: 2
+    name: Fallback actual time from status timestamp
+    status: done
+    items:
+      - done: true
+        action: Add fallback in extractActualTime: when the keyword is found in a status message but no HH:MM time is parsable, use the status update's own timestamp as the actual time
+      - done: true
+        action: Verify GR680 (Landed without time) would get an actual_arrival with the fix
+
+  - phase: 3
+    name: Tests & verification
+    status: done
+    items:
+      - done: true
+        action: Run TypeScript compilation check on guernsey-scraper
+      - done: true
+        action: Write unit tests for extractCanceled + delay clearing, extractActualTime fallback
+      - done: true
+        action: 11 unit tests pass in scraper.test.ts
+
+notes:
+  - All changes in apps/guernsey-scraper/src/scraper.ts
+  - New test file: apps/guernsey-scraper/src/scraper.test.ts (11 tests)
+  - Orphaned flights (GR400/GR401/GR642/GR643/GR406) tracked as follow-up
+  - The same-day opposing-rotation collision fix (departure_airport in match)
+    was already applied in the previous session.
+
+discovered: []

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { airportName } from '$lib/airports';
+  import { GY_TZ } from '$lib/time';
   import DelayCounter from '$lib/components/DelayCounter.svelte';
 
   interface Props {
@@ -42,7 +43,7 @@
 
   function formatTime(date: string | Date | null | undefined): string {
     if (!date) return '--:--';
-    return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    return new Date(date).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: GY_TZ });
   }
 </script>
 

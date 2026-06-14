@@ -247,6 +247,40 @@ function parseHHMM(text: string): { hh: number; mm: number } | null {
 }
 
 /**
+ * Extract the most relevant ETD from a delay-bearing status message.
+ *
+ * Messages like "Flight Delayed. Check in opens 16:00 New ETD 18:30" contain
+ * multiple times — the check-in opening time and the actual ETD. parseHHMM
+ * would naively return 16:00 (first match). This function prefers times after
+ * ETD-specific keywords ("new etd", "delayed to", etc.) over the first time
+ * in the message.
+ */
+function parseEtdTime(msg: string): { hh: number; mm: number } | null {
+  const lower = msg.toLowerCase();
+
+  // ETD-specific keywords — extract time from the portion AFTER the keyword.
+  // Order matters: check "new etd" before "delayed" because a message like
+  // "Flight Delayed. Check in opens 16:00 New ETD 18:30" matches both.
+  for (const keyword of ['new etd', 'delayed until', 'delayed to', 'flight delayed to approx',
+    'boarding expected', 'next info', 'expected at']) {
+    const idx = lower.indexOf(keyword);
+    if (idx !== -1) {
+      const after = msg.slice(idx + keyword.length);
+      const parsed = parseHHMM(after);
+      if (parsed) return parsed;
+    }
+  }
+
+  // "Approx" at the start of the message — time is right after it.
+  if (lower.startsWith('approx')) {
+    return parseHHMM(msg);
+  }
+
+  // Fallback: extract the first time in the message (legacy behavior).
+  return parseHHMM(msg);
+}
+
+/**
  * Parse an HH:MM or HHMM time from a status message and return it as a Date
  * on the same day as the reference date, or null if no time found.
  */
@@ -394,7 +428,7 @@ function extractDelayMinutes(updates: StatusUpdate[], scheduledTime: Date): numb
     if (msg.includes('delayed to') || msg.startsWith('approx') || msg.includes('new etd') ||
         msg.includes('expected at') || msg.includes('delayed until') || msg.includes('boarding expected') ||
         msg.includes('flight delayed to approx') || msg.includes('next info')) {
-      const parsed = parseHHMM(updates[i].statusMessage);
+      const parsed = parseEtdTime(updates[i].statusMessage);
       if (parsed) {
         const refDateStr = scheduledTime.toISOString().split('T')[0];
         const estimatedTime = localToUtc(refDateStr, parsed.hh, parsed.mm);
@@ -413,7 +447,7 @@ function extractEstimatedTime(updates: StatusUpdate[], scheduledTime: Date): Dat
     if (msg.includes('delayed to') || msg.startsWith('approx') || msg.includes('new etd') ||
         msg.includes('expected at') || msg.includes('delayed until') || msg.includes('boarding expected') ||
         msg.includes('flight delayed to approx') || msg.includes('next info')) {
-      const parsed = parseHHMM(updates[i].statusMessage);
+      const parsed = parseEtdTime(updates[i].statusMessage);
       if (parsed) {
         const refDateStr = scheduledTime.toISOString().split('T')[0];
         return localToUtc(refDateStr, parsed.hh, parsed.mm);
@@ -470,10 +504,13 @@ async function upsertFlight(scrapedFlight: ScrapedFlight): Promise<number | null
     : null;
 
   // Reject actual times that are impossible — an arrival before the
+  // Reject actual times that are impossible — an arrival before the
   // scheduled departure means stale/cross-contaminated data (e.g. the
   // morning rotation's status bleeding into the afternoon rotation).
-  // Similarly, a departure after the scheduled arrival is impossible.
-  const sanitizedActualDeparture = (actualDeparture && actualDeparture.getTime() > scheduledArrival.getTime())
+  // For departures after the scheduled arrival: allow up to MAX_REALISTIC_DELAY
+  // (6 hours) — a delayed flight CAN depart after its scheduled arrival time.
+  const sanitizedActualDeparture = (actualDeparture
+    && actualDeparture.getTime() > scheduledArrival.getTime() + MAX_REALISTIC_DELAY_MINUTES * 60_000)
     ? null : actualDeparture;
   const sanitizedActualArrival = (actualArrival && actualArrival.getTime() < scheduledDeparture.getTime())
     ? null : actualArrival;
